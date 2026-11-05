@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key>
+  <string>Local Studio</string>
+  <key>CFBundleDisplayName</key>
+  <string>Local Studio</string>
+  <key>CFBundleIdentifier</key>
+  <string>org.local.studio.t3.native</string>
+  <key>CFBundleExecutable</key>
+  <string>local-studio-gpui</string>
+  <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleVersion</key>
+  <string>0.0.0</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.0.0</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>13.0</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.developer-tools</string>
+  <key>NSHighResolutionCapable</key>
+  <true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key>
+  <true/>
+  <key>NSRequiresAquaSystemAppearance</key>
+  <false/>
+  <key>NSQuitAlwaysKeepsWindows</key>
+  <false/>
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <key>NSAllowsArbitraryLoads</key>
+    <true/>
+  </dict>
+  <key>NSScreenCaptureUsageDescription</key>
+  <string>Local Studio captures the active window when you use the window capture shortcut.</string>
+  <key>NSCameraUsageDescription</key>
+  <string>This app needs access to the camera</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>This app needs access to the microphone</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>This app needs access to audio capture</string>
+  <key>NSBluetoothAlwaysUsageDescription</key>
+  <string>This app needs access to Bluetooth</string>
+  <key>NSBluetoothPeripheralUsageDescription</key>
+  <string>This app needs access to Bluetooth</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>Local Studio</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>local-studio</string>
+        <string>t3code</string>
+      </array>
+    </dict>
+  </array>
+</dict>
+</plist>

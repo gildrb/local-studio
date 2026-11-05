@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Local Studio
+GenericName=Coding agent workspace
+Comment=Desktop GUI for coding agents
+Exec=local-studio-gpui %U
+Icon=dev.sybil.LocalStudio
+Terminal=false
+Categories=Development;
+StartupWMClass=dev.sybil.LocalStudio
+MimeType=x-scheme-handler/local-studio;x-scheme-handler/t3code;

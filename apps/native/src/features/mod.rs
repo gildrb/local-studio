@@ -1,0 +1,17 @@
+pub mod browser;
+pub mod chat;
+pub mod command_palette;
+pub mod device;
+pub mod drafts_host;
+pub mod local;
+pub mod onboarding;
+pub mod pull_requests;
+pub mod right_panel;
+pub mod settings;
+pub mod sidebar;
+pub mod snap_shot;
+pub mod snap_shot_overlay;
+pub mod ssh_password_dialog;
+pub mod terminal;
+pub mod theme_editor;
+pub mod usage;

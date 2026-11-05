@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="853.333" height="80" viewBox="0 0 1024 96" preserveAspectRatio="xMinYMin slice" fill="none">
+      <defs>
+        <linearGradient
+          id="paperId"
+          x1="60"
+          y1="0"
+          x2="220"
+          y2="96"
+          gradientUnits="userSpaceOnUse"
+          spreadMethod="reflect"
+        >
+          <stop stop-color="#1538d0" />
+          <stop offset="0.5" stop-color="#347ff8" />
+          <stop offset="1" stop-color="#67c2ff" />
+        </linearGradient>
+        <radialGradient
+          id="glowId"
+          cx="0"
+          cy="0"
+          r="1"
+          gradientTransform="translate(216 14) rotate(137) scale(120 84)"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stop-color="#d4f6ff" stop-opacity="0.4" />
+          <stop
+            offset="0.52"
+            stop-color="#65c8ff"
+            stop-opacity="0.16"
+          />
+          <stop offset="1" stop-color="#1538d0" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient
+          id="celesteGlowId"
+          cx="0"
+          cy="0"
+          r="1"
+          gradientTransform="translate(474 44) rotate(166) scale(156 92)"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stop-color="#d2ffff" stop-opacity="0.34" />
+          <stop
+            offset="0.5"
+            stop-color="#48dcf5"
+            stop-opacity="0.18"
+          />
+          <stop offset="1" stop-color="#1538d0" stop-opacity="0" />
+        </radialGradient>
+        <radialGradient
+          id="violetGlowId"
+          cx="0"
+          cy="0"
+          r="1"
+          gradientTransform="translate(704 18) rotate(145) scale(132 88)"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop stop-color="#d9d8ff" stop-opacity="0.3" />
+          <stop
+            offset="0.52"
+            stop-color="#7c8bff"
+            stop-opacity="0.14"
+          />
+          <stop offset="1" stop-color="#1538d0" stop-opacity="0" />
+        </radialGradient>
+        <pattern id="minorGridId" width="8" height="8" patternUnits="userSpaceOnUse">
+          <path
+            d="M8 0H0V8"
+            stroke="#eaf6ff"
+            stroke-opacity="0.14"
+            stroke-width="0.5"
+          />
+        </pattern>
+        <pattern id="majorGridId" width="32" height="32" patternUnits="userSpaceOnUse">
+          <path
+            d="M32 0H0V32"
+            stroke="#eaf6ff"
+            stroke-opacity="0.26"
+            stroke-width="0.6"
+          />
+        </pattern>
+        <pattern id="rulerId" width="32" height="6" patternUnits="userSpaceOnUse">
+          <path
+            d="M4 0V2.5M12 0V2.5M20 0V4M28 0V2.5"
+            stroke="#ddf7ff"
+            stroke-opacity="0.5"
+            stroke-width="0.5"
+          />
+        </pattern>
+        <pattern id="glowsId" width="768" height="96" patternUnits="userSpaceOnUse">
+          <rect width="768" height="96" fill="url(#glowId)" />
+          <rect width="768" height="96" fill="url(#celesteGlowId)" />
+          <rect width="768" height="96" fill="url(#violetGlowId)" />
+        </pattern>
+        <pattern id="annotationsId" width="768" height="96" patternUnits="userSpaceOnUse">
+          <g
+            stroke="#ddf7ff"
+            stroke-linecap="round"
+            stroke-opacity="0.6"
+            stroke-width="0.7"
+          >
+            <path d="M180 64H264" stroke-dasharray="5 4" />
+            <path d="M180 61V67M264 61V67" />
+            <path d="M276 10V44" stroke-dasharray="4 4" stroke-opacity="0.5" />
+            <path d="M273 10H279M273 44H279" stroke-opacity="0.5" />
+            <path d="M348 30H428" stroke-dasharray="3.5 5" stroke-opacity="0.5" />
+            <path d="M348 27V33M428 27V33" stroke-opacity="0.5" />
+            <path d="M512 48V80" stroke-dasharray="5 3" stroke-opacity="0.45" />
+            <path d="M509 48H515M509 80H515" stroke-opacity="0.45" />
+            <path d="M590 70H724" stroke-dasharray="7 4" stroke-opacity="0.55" />
+            <path d="M590 67V73M724 67V73" stroke-opacity="0.55" />
+          </g>
+
+          <g
+            stroke="#ddf7ff"
+            stroke-linecap="round"
+            stroke-opacity="0.55"
+            stroke-width="0.6"
+          >
+            <g>
+              <path d="M34 60L38 64M38 60L34 64" />
+            </g>
+            <g>
+              <path d="M228 26H234M231 23V29" />
+            </g>
+            <g>
+              <path d="M143 51H149M146 48V54" />
+            </g>
+            <g>
+              <path d="M316 16L322 22M322 16L316 22" />
+            </g>
+            <g>
+              <path d="M468 70H476M472 66V74" />
+            </g>
+            <g>
+              <path d="M558 28L564 34M564 28L558 34" />
+            </g>
+            <g>
+              <path d="M742 44H750M746 40V48" />
+            </g>
+          </g>
+
+          <g stroke="#ddf7ff" stroke-opacity="0.35" stroke-width="0.6">
+            <circle cx="196" cy="38" r="13" stroke-dasharray="3.5 4" />
+            <path d="M196 33V43M191 38H201" stroke-opacity="0.6" stroke-width="0.4" />
+            <circle cx="414" cy="64" r="10" stroke-dasharray="2.5 3.5" />
+            <path d="M414 60V68M410 64H418" stroke-opacity="0.6" stroke-width="0.4" />
+            <circle cx="648" cy="32" r="15" stroke-dasharray="4 5" />
+            <path d="M648 26V38M642 32H654" stroke-opacity="0.6" stroke-width="0.4" />
+          </g>
+        </pattern>
+      <linearGradient id="stage-fade" x1="0" y1="0" x2="0" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fafafa" stop-opacity="0"/><stop offset="0.28" stop-color="#fafafa" stop-opacity="0"/><stop offset="0.4" stop-color="#fafafa" stop-opacity="0.1"/><stop offset="0.52" stop-color="#fafafa" stop-opacity="0.3"/><stop offset="0.64" stop-color="#fafafa" stop-opacity="0.58"/><stop offset="0.75" stop-color="#fafafa" stop-opacity="0.82"/><stop offset="0.85" stop-color="#fafafa" stop-opacity="0.96"/><stop offset="0.93" stop-color="#fafafa" stop-opacity="1"/></linearGradient><linearGradient id="stage-mask-gradient" x1="0" y1="0" x2="0" y2="96" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset="0.55" stop-color="#fff"/><stop offset="0.92" stop-color="#fff" stop-opacity="0"/></linearGradient><mask id="stage-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="1024" height="96"><rect width="1024" height="96" fill="url(#stage-mask-gradient)"/></mask></defs><g mask="url(#stage-mask)">
+
+      <rect width="100%" height="96" fill="url(#paperId)" />
+      <rect width="100%" height="96" fill="url(#glowsId)" />
+      <rect width="100%" height="96" fill="url(#minorGridId)" />
+      <rect width="100%" height="96" fill="url(#majorGridId)" />
+      <rect width="100%" height="6" fill="url(#rulerId)" />
+      <rect width="100%" height="96" fill="url(#annotationsId)" />
+    <rect width="1024" height="96" fill="url(#stage-fade)"/></g></svg>
