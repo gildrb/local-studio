@@ -6,6 +6,7 @@ import { prepareVideoFirstFrame } from "../../lib/videoFirstFrame";
 import { Button } from "../ui/button";
 import { OpenMediaLink } from "./OpenMediaLink";
 import { MediaActions, type MediaActionSource } from "./MediaActions";
+import { canRetryVideo, videoUnavailableLabel } from "./mediaVideoPlayer.logic";
 
 interface MediaVideoPlayerProps {
   readonly src: string | null;
@@ -146,10 +147,10 @@ export function MediaVideoPlayer({
         >
           <span className="inline-flex items-center gap-1.5">
             <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
-            Video unavailable{label ? ` · ${label}` : ""}
+            {videoUnavailableLabel(label)}
           </span>
           <span className="flex flex-wrap items-center justify-center gap-2">
-            {latestSrc !== null || onRetry ? (
+            {canRetryVideo(latestSrc, onRetry !== undefined) ? (
               <Button
                 size="sm"
                 variant="secondary"

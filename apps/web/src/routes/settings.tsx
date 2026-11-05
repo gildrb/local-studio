@@ -16,29 +16,31 @@ import {
 } from "../components/settings/SettingsScopeContext";
 import { useEnvironments } from "../state/environments";
 import { SettingsScopeNotice } from "../components/settings/SettingsScopeNotice";
-import { SETTINGS_DEVICE_ONLY_PATHS } from "../components/settings/SettingsScopeSentence";
 import { SettingsPageContainer } from "../components/settings/settingsLayout";
 import {
   retainSettingsScope,
   validateSettingsRouteSearch,
 } from "../components/settings/settingsScopeNavigation";
 import {
-  getSettingsSearchTargetScope,
-  getThreadAutoSettlementSearchAvailability,
-  isSettingsSearchScopeAvailable,
-} from "../components/settings/settingsSearch";
+  buildSettingsHeaderModel,
+  isSettingsSingleEnvironmentPath,
+  resolveSettingsRouteRedirect,
+  resolveSettingsScopeBoundary,
+  resolveSettingsScopeNavigationSearch,
+  toSettingsScopeBoundaryScope,
+} from "../components/settings/SettingsRouteLayout.logic";
 
 function RestoreDeviceDefaultsButton({ onRestored }: { onRestored: () => void }) {
-  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+  const { model, restoreDefaults } = useSettingsRestore(onRestored);
   return (
     <Button
       size="xs"
       variant="ghost"
-      disabled={changedSettingLabels.length === 0}
+      disabled={!model.canRestore}
       onClick={() => void restoreDefaults()}
     >
       <RotateCcwIcon className="mx-1 size-3.5" />
-      Restore device defaults
+      {model.actionLabel}
     </Button>
   );
 }
@@ -47,67 +49,35 @@ function SettingsScopeBoundary({ pathname, children }: { pathname: string; child
   const { scope, connectedEnvironments } = useSettingsScope();
   const { environments } = useEnvironments();
   const hash = useLocation({ select: (location) => location.hash });
-  const searchTarget = getSettingsSearchTargetScope(hash);
-  const autoSettlementAvailability = searchTarget?.requiresThreadAutoSettlement
-    ? getThreadAutoSettlementSearchAvailability(environments, scope)
-    : null;
-  if (
-    scope.kind !== "unavailable" &&
-    searchTarget &&
-    autoSettlementAvailability &&
-    !autoSettlementAvailability.isTargetAvailable
-  ) {
-    return (
-      <SettingsScopeNotice
-        target="environment"
-        targetId={hash}
-        eligibleEnvironmentIds={autoSettlementAvailability.eligibleEnvironmentIds}
-      >
-        {autoSettlementAvailability.eligibleEnvironmentIds.length > 0
-          ? `${searchTarget.title} requires a supporting environment. Choose one to continue.`
-          : `${searchTarget.title} requires a supporting environment. Connect or update an environment to continue.`}
-      </SettingsScopeNotice>
-    );
+  const decision = resolveSettingsScopeBoundary({
+    pathname,
+    hash,
+    scope: toSettingsScopeBoundaryScope(scope),
+    connectedEnvironmentCount: connectedEnvironments.length,
+    environments,
+  });
+  switch (decision.kind) {
+    case "notice":
+      return (
+        <SettingsScopeNotice
+          target={decision.target}
+          targetId={decision.targetId}
+          {...(decision.eligibleEnvironmentIds === null
+            ? {}
+            : { eligibleEnvironmentIds: decision.eligibleEnvironmentIds })}
+        >
+          {decision.message}
+        </SettingsScopeNotice>
+      );
+    case "message":
+      return (
+        <SettingsPageContainer>
+          <p className="text-sm text-muted-foreground">{decision.message}</p>
+        </SettingsPageContainer>
+      );
+    case "content":
+      return children;
   }
-  if (
-    scope.kind !== "unavailable" &&
-    searchTarget &&
-    !isSettingsSearchScopeAvailable(searchTarget.scope, scope.kind)
-  ) {
-    const target =
-      searchTarget.scope === "environment" ||
-      searchTarget.scope === "project" ||
-      searchTarget.scope === "checkout"
-        ? searchTarget.scope
-        : "all";
-    return (
-      <SettingsScopeNotice target={target} targetId={hash}>
-        {`${searchTarget.title} is not available for the selected target. Choose its owning scope to continue.`}
-      </SettingsScopeNotice>
-    );
-  }
-  // Device-local pages ignore the scope entirely; the project page follows
-  // remembered members while a grouping change replaces its URL key.
-  if (SETTINGS_DEVICE_ONLY_PATHS.has(pathname) || pathname === "/settings/projects") {
-    return children;
-  }
-  // Keep the scope sentence on screen so the selection can be changed back.
-  if (scope.kind === "unavailable")
-    return (
-      <SettingsPageContainer>
-        <p className="text-sm text-muted-foreground">{scope.message}</p>
-      </SettingsPageContainer>
-    );
-  if (scope.kind === "environment" && connectedEnvironments.length === 0) {
-    return (
-      <SettingsPageContainer>
-        <p className="text-sm text-muted-foreground">
-          Reconnect {scope.label} to change its settings.
-        </p>
-      </SettingsPageContainer>
-    );
-  }
-  return children;
 }
 
 function SettingsContentLayout() {
@@ -116,6 +86,7 @@ function SettingsContentLayout() {
   useEscapeToGoBack(navigateToMainApp);
   const { search } = useSettingsScope();
   const [restoreSignal, setRestoreSignal] = useState(0);
+  const header = buildSettingsHeaderModel(location.pathname);
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none isolate">
@@ -123,7 +94,7 @@ function SettingsContentLayout() {
         <WorkspacePageHeader electron={isElectron}>
           <div className="flex w-full items-center gap-3">
             <SettingsBreadcrumb pathname={location.pathname} />
-            {location.pathname === "/settings/general" ? (
+            {header.showRestoreDeviceDefaults ? (
               <div className="ms-auto flex shrink-0 items-center">
                 <RestoreDeviceDefaultsButton
                   onRestored={() => setRestoreSignal((value) => value + 1)}
@@ -153,17 +124,13 @@ function SettingsRouteLayout() {
   return (
     <SettingsScopeProvider
       search={rawSearch}
-      singleEnvironment={pathname === "/settings/providers"}
+      singleEnvironment={isSettingsSingleEnvironmentPath(pathname)}
       onChange={(next) => {
         // Send every axis so the retain middleware sees an explicit target
         // even when the choice is "all", which is the absence of a key.
         void navigate({
           to: pathname,
-          search: () => ({
-            project: next.project,
-            machine: next.machine,
-            checkout: next.checkout,
-          }),
+          search: () => resolveSettingsScopeNavigationSearch(next),
           hash: "",
           resetScroll: false,
         });
@@ -178,15 +145,12 @@ export const Route = createFileRoute("/settings")({
   validateSearch: validateSettingsRouteSearch,
   search: { middlewares: [retainSettingsScope] },
   beforeLoad: async ({ context, location }) => {
-    if (
-      context.authGateState.status !== "authenticated" &&
-      context.authGateState.status !== "hosted-static"
-    ) {
-      throw redirect({ to: "/pair", replace: true });
-    }
-
-    if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general", replace: true });
+    const redirectDecision = resolveSettingsRouteRedirect({
+      authStatus: context.authGateState.status,
+      pathname: location.pathname,
+    });
+    if (redirectDecision.kind === "redirect") {
+      throw redirect({ to: redirectDecision.to, replace: true });
     }
   },
   component: SettingsRouteLayout,

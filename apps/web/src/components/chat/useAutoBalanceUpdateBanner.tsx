@@ -12,10 +12,12 @@ import {
   isServerUpdateFailureDismissed,
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
+} from "~/versionSkew";
+import {
   resolveServerSelfUpdateCapability,
   supportsDesktopAppUpdate,
   supportsServerUpdateThreadContinuation,
-} from "~/versionSkew";
+} from "~/versionSkew.logic";
 import {
   ServerUpdateAction,
   ServerUpdateProgress,

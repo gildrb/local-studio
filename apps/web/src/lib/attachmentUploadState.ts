@@ -59,3 +59,11 @@ export function formatAttachmentUploadProgress(progress: number): string {
   const bounded = Math.max(0, Math.min(1, Number.isFinite(progress) ? progress : 0));
   return `${Math.floor(bounded * 100)}%`;
 }
+
+export function attachmentUploadStatusSuffix(
+  upload: AttachmentUploadState | undefined,
+): string | null {
+  if (upload?.status === "uploading") return formatAttachmentUploadProgress(upload.progress);
+  if (upload?.status === "failed") return "upload failed";
+  return null;
+}

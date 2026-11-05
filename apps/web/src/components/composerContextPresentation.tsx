@@ -11,7 +11,7 @@ import type { ComposerFileAttachment, ComposerImageAttachment } from "~/composer
 import { composerFileNeedsReattach } from "~/composerDraftStore";
 import { useTheme } from "~/hooks/useTheme";
 import {
-  formatAttachmentUploadProgress,
+  attachmentUploadStatusSuffix,
   type AttachmentUploadState,
 } from "~/lib/attachmentUploadState";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
@@ -158,12 +158,6 @@ function ContextChip(props: {
   );
 }
 
-function uploadStatusSuffix(upload: AttachmentUploadState | undefined): string | null {
-  if (upload?.status === "uploading") return formatAttachmentUploadProgress(upload.progress);
-  if (upload?.status === "failed") return "upload failed";
-  return null;
-}
-
 function attachmentTooltip(
   attachment: ComposerImageAttachment | ComposerFileAttachment,
   upload: AttachmentUploadState | undefined,
@@ -186,7 +180,7 @@ function ImageContextChip(props: {
             name={props.record.name}
             previewUrl={props.record.previewUrl}
             size={formatAttachmentSize(props.record.sizeBytes)}
-            suffix={uploadStatusSuffix(props.upload)}
+            suffix={attachmentUploadStatusSuffix(props.upload)}
             onClick={() => actions.expandImage(props.record.id)}
           />
         }
@@ -205,7 +199,7 @@ function FileContextChip(props: {
   const actions = use(ComposerContextActionsContext);
   const { resolvedTheme } = useTheme();
   const needsReattach = composerFileNeedsReattach(props.record);
-  const suffix = needsReattach ? "attach again" : uploadStatusSuffix(props.upload);
+  const suffix = needsReattach ? "attach again" : attachmentUploadStatusSuffix(props.upload);
   const size = formatAttachmentSize(props.record.sizeBytes);
   const isVideo = videoMimeType(props.record) !== null;
   return (

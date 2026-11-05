@@ -6,7 +6,6 @@ import {
 import { useCallback, useEffect, useRef } from "react";
 
 import {
-  type DraftId,
   type PersistedComposerImageAttachment,
   useComposerDraftStore,
 } from "../../composerDraftStore";
@@ -16,7 +15,6 @@ import { readThreadShell } from "../../state/entities";
 import { compressImageToByteLimit, dataUrlToFile } from "../../lib/imageCompression";
 import { resolveThreadActionProjectRef } from "../../lib/chatThreadActions";
 import {
-  beginSnapShotAnimation,
   dismissAllSnapShotAnimations,
   dismissSnapShotAnimation,
   finishSnapShotAnimation,
@@ -33,47 +31,22 @@ import {
 } from "../../lib/desktopSnapShot";
 import { readFileAsDataUrl } from "../ChatView.logic";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-
-type CaptureTarget = DraftId | ScopedThreadRef;
+import {
+  beginSnapShotAnimationWhenReady,
+  resolveExistingSnapShotTargetWith,
+  resolveSnapShotDeliveryTarget,
+  resolveSnapShotTargetOnce,
+  type SnapShotCaptureTarget as CaptureTarget,
+} from "./SnapShotCoordinator.logic";
 
 export function resolveExistingSnapShotTarget(
   target: CaptureTarget,
   routeThreadRef: ScopedThreadRef | null,
 ): CaptureTarget | null {
-  const store = useComposerDraftStore.getState();
-  if (typeof target === "string") {
-    const draftSession = store.getDraftSession(target);
-    if (draftSession?.promotedTo) return draftSession.promotedTo;
-    return draftSession ? target : null;
-  }
-  const targetIsCurrentRoute =
-    routeThreadRef !== null &&
-    routeThreadRef.environmentId === target.environmentId &&
-    routeThreadRef.threadId === target.threadId;
-  return targetIsCurrentRoute ||
-    store.getDraftSessionByRef(target) !== null ||
-    readThreadShell(target) !== null
-    ? target
-    : null;
+  return resolveExistingSnapShotTargetWith(target, routeThreadRef, readThreadShell);
 }
 
 const NEXT_PAINT_FALLBACK_MS = 100;
-
-export async function beginSnapShotAnimationWhenReady(
-  id: string,
-  target: Promise<CaptureTarget | null>,
-  pendingStarts: Set<string>,
-): Promise<void> {
-  pendingStarts.add(id);
-  try {
-    const resolvedTarget = await target;
-    if (pendingStarts.delete(id) && resolvedTarget) {
-      beginSnapShotAnimation(id, resolvedTarget);
-    }
-  } finally {
-    pendingStarts.delete(id);
-  }
-}
 
 export function dismissFailedSnapShot(
   id: string | undefined,
@@ -89,34 +62,6 @@ export function dismissFailedSnapShot(
     soundedIds.clear();
     dismissAllSnapShotAnimations();
   }
-}
-
-export function resolveSnapShotTargetOnce(
-  resolutionRef: { current: Promise<CaptureTarget | null> | null },
-  resolveTarget: () => Promise<CaptureTarget | null>,
-): Promise<CaptureTarget | null> {
-  if (resolutionRef.current) return resolutionRef.current;
-  const resolution = resolveTarget().finally(() => {
-    if (resolutionRef.current === resolution) resolutionRef.current = null;
-  });
-  resolutionRef.current = resolution;
-  return resolution;
-}
-
-// A capture keeps its destination even after its animation unmounts or the window blurs.
-export function resolveSnapShotDeliveryTarget(
-  targets: Map<string, Promise<CaptureTarget | null>>,
-  id: string,
-  resolveTarget: () => Promise<CaptureTarget | null>,
-): Promise<CaptureTarget | null> {
-  const existing = targets.get(id);
-  if (existing) return existing;
-  const target = resolveTarget().catch(() => null);
-  targets.set(id, target);
-  void target.then((resolved) => {
-    if (!resolved && targets.get(id) === target) targets.delete(id);
-  });
-  return target;
 }
 
 async function afterNextPaint(): Promise<void> {
@@ -232,7 +177,6 @@ export function SnapShotCoordinator() {
       activeDraftThread,
       activeThread: activeThread ?? undefined,
       defaultProjectRef,
-      handleNewThread,
     });
     if (!projectRef) return null;
     const created = await handleNewThread(projectRef);

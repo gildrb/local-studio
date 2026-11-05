@@ -1,5 +1,10 @@
 import { closestCenter, type CollisionDetection, type Modifier } from "@dnd-kit/core";
-import { verticalListSortingStrategy, type SortingStrategy } from "@dnd-kit/sortable";
+import {
+  defaultAnimateLayoutChanges,
+  verticalListSortingStrategy,
+  type AnimateLayoutChanges,
+  type SortingStrategy,
+} from "@dnd-kit/sortable";
 import {
   resolveSidebarDropTarget,
   sidebarListItemId,
@@ -8,6 +13,11 @@ import {
   type SidebarListMarker,
   type SidebarSection,
 } from "./Sidebar.logic";
+
+// Sidebar.motion handles ordinary section changes. Sortable transforms own
+// dragging; replaying their committed DOM order would animate the drop twice.
+export const animateSidebarLayoutChanges: AnimateLayoutChanges = (args) =>
+  args.isSorting ? defaultAnimateLayoutChanges(args) : false;
 
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
 const hidden = { ...stationary, scaleY: 0 };

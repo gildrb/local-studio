@@ -6,6 +6,7 @@ import {
 } from "@t3tools/client-runtime/device/screenshot";
 import { refreshDeviceHubAccess, useDeviceHubAccess } from "~/state/device";
 import { DeviceControlsRail } from "./DeviceControlsRail";
+import { deviceScreenshotFileName } from "./DeviceControlsRail.logic";
 import { DeviceStreamView, type DeviceStreamHandle } from "./DeviceStreamView";
 import { DeviceToolsPanel } from "./DeviceToolsPanel";
 import { useDeviceControls } from "./useDeviceControls";
@@ -55,7 +56,7 @@ export function DeviceWorkspace(props: {
         downloadRef.current = url;
         const link = document.createElement("a");
         link.href = url;
-        link.download = `${props.device.name.replace(/[^a-z0-9-]/gi, "-")}-${Date.now()}.png`;
+        link.download = deviceScreenshotFileName(props.device.name, Date.now());
         document.body.append(link);
         link.click();
         link.remove();

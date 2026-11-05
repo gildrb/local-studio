@@ -42,7 +42,7 @@ export interface ShortcutMatchContext {
   [key: string]: boolean;
 }
 
-interface ShortcutMatchOptions {
+export interface ShortcutMatchOptions {
   platform?: string;
   context?: Partial<ShortcutMatchContext>;
 }
@@ -196,7 +196,7 @@ export function shortcutConflictKey(
   ].join("|");
 }
 
-function findEffectiveShortcutForCommand(
+export function findEffectiveShortcutForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
   options?: ShortcutMatchOptions,

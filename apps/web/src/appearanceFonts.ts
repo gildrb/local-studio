@@ -71,6 +71,18 @@ export function cssFontFamilies(input: string): string | null {
   return families.length > 0 ? families.join(", ") : null;
 }
 
+export function fontFamilyNames(input: string): ReadonlyArray<string> {
+  return input
+    .split(",")
+    .map((name) =>
+      name
+        .trim()
+        .replace(/^(['"])(.*)\1$/, "$2")
+        .trim(),
+    )
+    .filter((name) => name.length > 0);
+}
+
 export interface AppearanceFontPreferences {
   readonly sans: string;
   readonly code: string;

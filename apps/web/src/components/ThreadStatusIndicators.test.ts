@@ -8,7 +8,7 @@ import {
   resolveThreadPullRequestBadgePresentation,
   synchronizeTerminalPulse,
 } from "./ThreadStatusIndicators";
-import { newestPullRequestSummary } from "../state/pullRequests";
+import { newestPullRequestSummary } from "../state/pullRequestSummaries";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 
 describe("synchronizeTerminalPulse", () => {

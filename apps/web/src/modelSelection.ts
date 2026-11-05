@@ -16,8 +16,8 @@ import {
   readCustomModelEntries,
   resolveSelectableModel,
 } from "@t3tools/shared/model";
-import { getComposerProviderState } from "./components/chat/composerProviderState";
-import { UnifiedSettings } from "@t3tools/contracts/settings";
+import { getComposerProviderState } from "./components/chat/composerProviderState.logic";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import * as Arr from "effect/Array";
 import * as Result from "effect/Result";
 import {
@@ -25,7 +25,7 @@ import {
   getProviderModels,
   resolveSelectableProvider,
 } from "./providerModels";
-import { ModelEsque } from "./components/chat/providerIconUtils";
+import type { ModelEsque } from "./components/chat/modelDisplayName";
 import {
   type ProviderInstanceEntry,
   deriveProviderInstanceEntries,

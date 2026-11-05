@@ -20,11 +20,11 @@ import {
   __setClientSettingsForTests,
   ensureClientSettingsHydrated,
   getClientSettings,
-  mergeEnvironmentSettings,
   persistClientSettingsPatch,
   persistClientSettingsUpdate,
-  resolveEnvironmentIdentificationMode,
 } from "./useSettings";
+import { resolveEnvironmentIdentificationMode } from "../components/SidebarStageBackdrop.logic";
+import { mergeEnvironmentSettings } from "../settingsMerge";
 
 beforeEach(() => {
   persistenceMocks.getClientSettings.mockReset().mockResolvedValue(null);

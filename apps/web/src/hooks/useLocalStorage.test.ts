@@ -23,7 +23,7 @@ function createStorage(overrides: Partial<Storage> = {}): Storage {
 async function loadWithStorage(storage: Storage) {
   vi.stubGlobal("window", { localStorage: storage });
   vi.stubGlobal("localStorage", storage);
-  return import("./useLocalStorage");
+  return import("../lib/localStorageItem");
 }
 
 afterEach(() => {
@@ -65,7 +65,8 @@ describe("local storage errors", () => {
         return storage;
       },
     });
-    const { getLocalStorageItem, LocalStorageOperationError } = await import("./useLocalStorage");
+    const { getLocalStorageItem, LocalStorageOperationError } =
+      await import("../lib/localStorageItem");
 
     expect(() => getLocalStorageItem("read-key", Schema.String)).toThrow(
       LocalStorageOperationError,

@@ -8,7 +8,6 @@ import {
   parsePersistedState,
   PERSISTED_STATE_KEY,
   type PersistedUiState,
-  persistState,
   reorderProjects,
   resolveProjectExpanded,
   setDefaultAdvertisedEndpointKey,
@@ -16,7 +15,8 @@ import {
   setSidebarProjectScopeKey,
   setThreadChangedFilesExpanded,
   type UiState,
-} from "./uiStateStore";
+} from "./uiState.logic";
+import { persistState } from "./uiStateStore";
 
 function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {

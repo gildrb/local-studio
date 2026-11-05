@@ -1,17 +1,14 @@
 import { memo, useState, useId } from "react";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import { downloadPlanAsTextFile } from "../../proposedPlan";
 import {
-  buildCollapsedProposedPlanPreviewMarkdown,
-  buildProposedPlanMarkdownFilename,
-  downloadPlanAsTextFile,
-  normalizePlanMarkdownForExport,
-  proposedPlanTitle,
-  stripDisplayedPlanMarkdown,
-} from "../../proposedPlan";
+  copyPlanFailureToast,
+  PLAN_WORKSPACE_UNAVAILABLE_TOAST,
+  resolveInitialPlanSavePath,
+  resolveProposedPlanCardModel,
+  savePlanToWorkspace,
+  type ProposedPlanToast,
+} from "./ProposedPlanCard.logic";
 import ChatMarkdown from "../ChatMarkdown";
 import { EllipsisIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -53,28 +50,25 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, {
     reportFailure: false,
   });
+  const showToast = (toast: ProposedPlanToast) => {
+    const { layout, ...rest } = toast;
+    toastManager.add(layout === "stacked" ? stackedThreadToast(rest) : rest);
+  };
   const { copyToClipboard, isCopied } = useCopyToClipboard({
     target: "plan",
     onError: (error) => {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Could not copy plan",
-          description: error instanceof Error ? error.message : "An error occurred while copying.",
-        }),
-      );
+      showToast(copyPlanFailureToast(error));
     },
   });
   const savePathInputId = useId();
-  const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
-  const lineCount = planMarkdown.split("\n").length;
-  const canCollapse = planMarkdown.length > 900 || lineCount > 20;
-  const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
-  const collapsedPreview = canCollapse
-    ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
-    : null;
-  const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
-  const saveContents = normalizePlanMarkdownForExport(planMarkdown);
+  const {
+    title,
+    canCollapse,
+    displayedMarkdown: displayedPlanMarkdown,
+    collapsedPreview,
+    downloadFilename,
+    saveContents,
+  } = resolveProposedPlanCardModel(planMarkdown);
 
   const handleDownload = () => {
     downloadPlanAsTextFile(downloadFilename, saveContents);
@@ -86,63 +80,23 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
   const openSaveDialog = () => {
     if (!workspaceRoot) {
-      toastManager.add(
-        stackedThreadToast({
-          type: "error",
-          title: "Workspace path is unavailable",
-          description: "This thread does not have a workspace path to save into.",
-        }),
-      );
+      showToast(PLAN_WORKSPACE_UNAVAILABLE_TOAST);
       return;
     }
-    setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
+    setSavePath((existing) => resolveInitialPlanSavePath(existing, downloadFilename));
     setIsSaveDialogOpen(true);
   };
 
   const handleSaveToWorkspace = () => {
-    const relativePath = savePath.trim();
-    if (!workspaceRoot) {
-      return;
-    }
-    if (!relativePath) {
-      toastManager.add({
-        type: "warning",
-        title: "Enter a workspace path",
-      });
-      return;
-    }
-
-    setIsSavingToWorkspace(true);
-    void (async () => {
-      const result = await writeProjectFile({
-        environmentId,
-        input: {
-          cwd: workspaceRoot,
-          relativePath,
-          contents: saveContents,
-        },
-      });
-      setIsSavingToWorkspace(false);
-      if (result._tag === "Success") {
-        setIsSaveDialogOpen(false);
-        toastManager.add({
-          type: "success",
-          title: "Plan saved to workspace",
-          description: result.value.relativePath,
-        });
-        return;
-      }
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not save plan",
-            description: error instanceof Error ? error.message : "An error occurred while saving.",
-          }),
-        );
-      }
-    })();
+    void savePlanToWorkspace(
+      { environmentId, workspaceRoot, savePath, contents: saveContents },
+      {
+        setSaving: setIsSavingToWorkspace,
+        writeFile: writeProjectFile,
+        onSaved: () => setIsSaveDialogOpen(false),
+        toast: showToast,
+      },
+    );
   };
 
   return (

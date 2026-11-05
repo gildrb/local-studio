@@ -1,8 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  connectionCatalogDisplayUrl,
-  type EnvironmentPresentation as BaseEnvironmentPresentation,
-} from "@t3tools/client-runtime/connection";
+import type { EnvironmentPresentation as BaseEnvironmentPresentation } from "@t3tools/client-runtime/connection";
 import { Discovery } from "@t3tools/client-runtime/relay";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
@@ -10,6 +7,7 @@ import { useMemo } from "react";
 
 import { environmentCatalog } from "../connection/catalog";
 import { environmentPresentations, useEnvironmentPresentation } from "./presentation";
+import { projectEnvironmentPresentation } from "./environmentPresentation.logic";
 import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
 import { relayEnvironmentDiscovery } from "./relay";
 import { usePreparedConnection } from "./session";
@@ -19,19 +17,6 @@ export interface EnvironmentPresentation extends BaseEnvironmentPresentation {
   readonly label: string;
   readonly displayUrl: string | null;
   readonly relayManaged: boolean;
-}
-
-function projectEnvironmentPresentation(
-  environmentId: EnvironmentId,
-  presentation: BaseEnvironmentPresentation,
-): EnvironmentPresentation {
-  return {
-    ...presentation,
-    environmentId,
-    label: presentation.entry.target.label,
-    displayUrl: connectionCatalogDisplayUrl(presentation.entry),
-    relayManaged: presentation.entry.target._tag === "RelayConnectionTarget",
-  };
 }
 
 export function useEnvironments() {

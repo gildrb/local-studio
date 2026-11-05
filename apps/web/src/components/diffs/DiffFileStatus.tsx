@@ -1,6 +1,7 @@
 import { InfoIcon, RotateCwIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { buildDiffFileStatusModel, resolveDiffFileStatusClick } from "./DiffFileStatus.logic";
 
 export function DiffFileStatus({
   error,
@@ -11,7 +12,8 @@ export function DiffFileStatus({
   truncated?: boolean | undefined;
   retry: () => void;
 }) {
-  if (!error && !truncated) return null;
+  const model = buildDiffFileStatusModel({ error, truncated });
+  if (!model) return null;
   return (
     <Tooltip>
       <TooltipTrigger
@@ -19,21 +21,21 @@ export function DiffFileStatus({
           <Button
             size="icon-micro"
             variant="ghost-muted"
-            aria-label={error ? "Retry loading diff" : "Partial diff preview"}
+            aria-label={model.ariaLabel}
             onClick={(event) => {
               event.stopPropagation();
-              if (error) retry();
+              if (resolveDiffFileStatusClick(model).kind === "retry") retry();
             }}
           />
         }
       >
-        {error ? <RotateCwIcon className="size-3" /> : <InfoIcon className="size-3" />}
+        {model.icon === "rotate-cw" ? (
+          <RotateCwIcon className="size-3" />
+        ) : (
+          <InfoIcon className="size-3" />
+        )}
       </TooltipTrigger>
-      <TooltipPopup>
-        {error
-          ? "Retry loading diff"
-          : "This file is too large to show in full. Counts include all changes."}
-      </TooltipPopup>
+      <TooltipPopup>{model.tooltip}</TooltipPopup>
     </Tooltip>
   );
 }

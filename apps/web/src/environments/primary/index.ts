@@ -10,7 +10,6 @@ export {
   isPrimaryEnvironmentPairingCredentialRejectedError,
   peekPairingTokenFromUrl,
   PrimaryEnvironmentPairingCredentialRejectedError,
-  PrimaryEnvironmentRequestError,
   resolveInitialServerAuthGateState,
   revokeOtherServerClientSessions,
   revokeServerClientSession,
@@ -22,6 +21,8 @@ export {
   type ServerPairingLinkRecord,
   __resetServerAuthBootstrapForTests,
 } from "./auth";
+
+export { PrimaryEnvironmentRequestError } from "./requestError";
 
 export { usePrimarySessionState } from "./sessionState";
 

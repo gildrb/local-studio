@@ -72,12 +72,14 @@ export default defineConfig({
       sourcemap: true,
       outExtensions: () => ({ js: ".cjs" }),
       define: publicConfigDefine,
-      entry: [
-        "src/electron/WindowsForegroundFocusWorker.ts",
-        "src/snapShot/GlobalShiftShortcutWorker.ts",
-        "src/snapShot/RegionSnapShotWorker.ts",
-        "src/snapShot/SnapShotAccessibilityWorker.ts",
-      ],
+      entry: {
+        "electron/WindowsForegroundFocusWorker": "src/electron/WindowsForegroundFocusWorker.ts",
+        "snapShot/GlobalShiftShortcutWorker": "src/snapShot/GlobalShiftShortcutWorker.ts",
+        "snapShot/RegionSnapShotWorker":
+          "../../packages/shared/src/snapShot/RegionSnapShotWorker.ts",
+        "snapShot/SnapShotAccessibilityWorker":
+          "../../packages/shared/src/snapShot/SnapShotAccessibilityWorker.ts",
+      },
       clean: false,
       deps: {
         alwaysBundle: (id) => !id.startsWith("node:") && !isMainProcessExternal(id),

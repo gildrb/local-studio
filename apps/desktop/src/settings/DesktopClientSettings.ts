@@ -170,14 +170,13 @@ const writeClientSettings = Effect.fnUntraced(function* (input: {
   );
 });
 
-export const make = Effect.gen(function* () {
-  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+export const makeAtPath = Effect.fnUntraced(function* (settingsPath: string) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
 
   return DesktopClientSettings.of({
-    get: readClientSettings(fileSystem, environment.clientSettingsPath).pipe(
+    get: readClientSettings(fileSystem, settingsPath).pipe(
       Effect.withSpan("desktop.clientSettings.get"),
     ),
     set: (settings) =>
@@ -187,7 +186,7 @@ export const make = Effect.gen(function* () {
           (cause) =>
             new DesktopClientSettingsWriteError({
               operation: "create-temporary-file-name",
-              path: environment.clientSettingsPath,
+              path: settingsPath,
               cause,
             }),
         ),
@@ -195,7 +194,7 @@ export const make = Effect.gen(function* () {
           writeClientSettings({
             fileSystem,
             path,
-            settingsPath: environment.clientSettingsPath,
+            settingsPath,
             settings,
             suffix,
           }),
@@ -203,6 +202,11 @@ export const make = Effect.gen(function* () {
         Effect.withSpan("desktop.clientSettings.set"),
       ),
   });
+});
+
+export const make = Effect.gen(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  return yield* makeAtPath(environment.clientSettingsPath);
 });
 
 export const layer = Layer.effect(DesktopClientSettings, make);

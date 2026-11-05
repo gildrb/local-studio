@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
-import {
-  getProviderStatusBannerKey,
-  getProviderStatusMessage,
-  shouldShowProviderStatusBanner,
-} from "./ProviderStatusBanner";
+import { getProviderStatusBannerKey, shouldShowProviderStatusBanner } from "./ProviderStatusBanner";
+import { getProviderStatusMessage } from "./ProviderStatusBanner.logic";
 
 const provider: ServerProvider = {
   instanceId: ProviderInstanceId.make("codex-work"),

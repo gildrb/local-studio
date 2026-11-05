@@ -10,7 +10,7 @@ import {
 import { useLocation, useNavigate, useParams } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
-import { getLocalStorageItem, removeLocalStorageItem } from "../hooks/useLocalStorage";
+import { getLocalStorageItem, removeLocalStorageItem } from "../lib/localStorageItem";
 import {
   isRichTextBoldShortcut,
   resolveShortcutCommand,

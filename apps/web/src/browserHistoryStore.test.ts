@@ -17,13 +17,13 @@ import {
   mergeBrowserHistoryState,
   migratePersistedBrowserHistoryState,
   normalizeHistoryUrl,
-  recordVisitForThread,
   removeUrlForThread,
   resetBrowserHistoryForTests,
   setTitleForThreadUrl,
   upsertHistoryEntry,
   useBrowserHistoryStore,
 } from "./browserHistoryStore";
+import { recordVisitForThread } from "./browserHistoryVisits";
 
 function entry(overrides: Partial<BrowserHistoryEntry> = {}): BrowserHistoryEntry {
   return { url: "http://localhost:3000/", lastVisitedAt: 1000, ...overrides };

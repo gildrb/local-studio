@@ -1,8 +1,4 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useCallback } from "react";
@@ -13,6 +9,11 @@ import { useEnvironments } from "~/state/environments";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useNewThreadHandler } from "./useHandleNewThread";
+import {
+  openScratchProject as openScratchProjectWith,
+  scratchEnvironmentIdFor,
+  scratchWorkspaceRootFor as scratchWorkspaceRootForEnvironment,
+} from "./scratchProject.logic";
 
 function reportScratchFailure(error: unknown) {
   toastManager.add(
@@ -35,50 +36,24 @@ export function useScratchProject() {
   const ensureScratch = useAtomCommand(projectEnvironment.ensureScratch, { reportFailure: false });
   const handleNewThread = useNewThreadHandler();
 
-  /** The scratch folder of a connected environment, or null when it offers none. */
   const scratchWorkspaceRootFor = useCallback(
-    (environmentId: EnvironmentId | null): string | null => {
-      const environment = environments.find((entry) => entry.environmentId === environmentId);
-      return environment?.connection.phase === "connected"
-        ? (environment.serverConfig?.scratchWorkspaceRoot ?? null)
-        : null;
-    },
+    (environmentId: EnvironmentId | null): string | null =>
+      scratchWorkspaceRootForEnvironment(environments, environmentId),
     [environments],
   );
 
-  // A thread without a project starts on the machine the user is working on,
-  // and only there. With no current machine (the hosted app with nothing
-  // open), it starts on the one machine that offers it, never a silent pick.
   const scratchEnvironmentId = useCallback(
-    (current: EnvironmentId | null): EnvironmentId | null => {
-      if (current !== null) return scratchWorkspaceRootFor(current) !== null ? current : null;
-      const offering = environments.filter(
-        (entry) => scratchWorkspaceRootFor(entry.environmentId) !== null,
-      );
-      return offering.length === 1 ? (offering[0]?.environmentId ?? null) : null;
-    },
-    [environments, scratchWorkspaceRootFor],
+    (current: EnvironmentId | null): EnvironmentId | null =>
+      scratchEnvironmentIdFor(environments, current),
+    [environments],
   );
 
-  /** Resolves to the scratch project once it is in this client's store. */
   const openScratchProject = useCallback(
-    async (environmentId: EnvironmentId): Promise<EnvironmentProject | null> => {
-      const result = await ensureScratch({ environmentId, input: {} });
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) {
-          reportScratchFailure(squashAtomCommandFailure(result));
-        }
-        return null;
-      }
-      // Drafts key off the project's stored path and settings, so wait for
-      // the create event to reach the store before targeting one.
-      return waitForProject(scopeProjectRef(environmentId, result.value.projectId)).catch(
-        (error: unknown) => {
-          reportScratchFailure(error);
-          return null;
-        },
-      );
-    },
+    (environmentId: EnvironmentId): Promise<EnvironmentProject | null> =>
+      openScratchProjectWith(
+        { ensureScratch, waitForProject, reportFailure: reportScratchFailure },
+        environmentId,
+      ),
     [ensureScratch],
   );
 

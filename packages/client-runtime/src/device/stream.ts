@@ -19,61 +19,22 @@
  * The decoder only runs while frames arrive and the viewer is attached; a
  * hidden panel calls `stop()` so an idle device costs nothing on the GPU.
  */
-import {
-  createDuoControl,
-  type DuoCommand,
-  type DuoControlState,
-  type DuoPose,
-} from "./duoControl.ts";
-import * as Schema from "effect/Schema";
-import * as Option from "effect/Option";
+import type { DuoCommand, DuoControlState } from "./duoControl.ts";
 import { createCanvasFrameSink, type DeviceFrameSink } from "./frame.ts";
-import { type DeviceHubAccess, withDeviceHubQuery } from "./hubAccess.ts";
+import type { DeviceHubAccess } from "./hubAccess.ts";
+import {
+  createDeviceInputSession,
+  deviceStreamEndpoints,
+  type DeviceHardwareButton,
+  type DeviceKeyInput,
+  type DeviceScreenSize,
+  encodeDeviceInputPacket,
+} from "./input.ts";
 import type { DevicePlatform } from "@t3tools/contracts";
 
+export type { DeviceHardwareButton, DeviceScreenSize } from "./input.ts";
+
 export type DeviceStreamStatus = "connecting" | "streaming" | "error";
-
-export interface DeviceScreenSize {
-  readonly width: number;
-  readonly height: number;
-  readonly orientation: "portrait" | "portrait_upside_down" | "landscape_left" | "landscape_right";
-  readonly screenId?: number;
-  readonly supportsHingeAngle?: boolean;
-  readonly supportsPhysicalOrientation?: boolean;
-  readonly hingeAngle?: number;
-  readonly hingePose?: DuoPose | null;
-  readonly tableMode?: boolean;
-  readonly tableModeAvailable?: boolean;
-}
-
-const screenConfigSchema = Schema.Struct({
-  width: Schema.Finite.check(Schema.isGreaterThan(0)),
-  height: Schema.Finite.check(Schema.isGreaterThan(0)),
-  orientation: Schema.Literals([
-    "portrait",
-    "portrait_upside_down",
-    "landscape_left",
-    "landscape_right",
-  ]),
-  screenId: Schema.optionalKey(Schema.Number),
-  supportsHingeAngle: Schema.optionalKey(Schema.Boolean),
-  supportsPhysicalOrientation: Schema.optionalKey(Schema.Boolean),
-  hingeAngle: Schema.optionalKey(
-    Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 180 })),
-  ),
-  hingePose: Schema.optionalKey(
-    Schema.NullOr(Schema.Literals(["closed", "book", "open", "laptop", "tent"])),
-  ),
-  tableMode: Schema.optionalKey(Schema.Boolean),
-  tableModeAvailable: Schema.optionalKey(Schema.Boolean),
-});
-const controlReplySchema = Schema.Struct({
-  requestId: Schema.Int,
-  ok: Schema.Boolean,
-  error: Schema.optionalKey(Schema.String),
-});
-const decodeScreenConfig = Schema.decodeUnknownOption(screenConfigSchema);
-const decodeControlReply = Schema.decodeUnknownOption(controlReplySchema);
 
 export interface DuoPanelSinks {
   readonly cover: DeviceFrameSink;
@@ -111,8 +72,6 @@ export interface DeviceStreamTarget {
   readonly videoOnly?: boolean;
 }
 
-export type DeviceHardwareButton = "home" | "back" | "recents" | "power" | "appSwitcher";
-
 const RETRY_DELAY_MS = 1_000;
 const FIRST_FRAME_TIMEOUT_MS = 15_000;
 const MJPEG_FRAME_CHECK_MS = 250;
@@ -122,30 +81,12 @@ const SEMU_HEADER_BYTES = 16;
 const SEMU_FLAG_KEY = 1;
 const SOFT_DECODE_QUEUE = 8;
 
-// serve-sim binary WS message tags (browser -> helper).
-const IOS_MSG_TOUCH = 0x03;
-const IOS_MSG_BUTTON = 0x04;
-const IOS_MSG_KEY = 0x06;
-const IOS_MSG_ORIENTATION = 0x07;
-const IOS_MSG_HARDWARE_KEYBOARD = 0x0d;
-// helper -> browser.
-const IOS_TAG_SCREEN_CONFIG = 0x82;
-
-const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 const isWebCodecsSupported = (): boolean =>
   typeof globalThis !== "undefined" &&
   "VideoDecoder" in globalThis &&
   "EncodedVideoChunk" in globalThis;
-
-function taggedJson(tag: number, payload: unknown): Uint8Array<ArrayBuffer> {
-  const json = encoder.encode(JSON.stringify(payload));
-  const out = new Uint8Array(1 + json.length);
-  out[0] = tag;
-  out.set(json, 1);
-  return out;
-}
 
 /** Build the WebCodecs `avc1.PPCCLL` string from an avcC record or an SPS NAL. */
 export function avcCodecString(bytes: Uint8Array): string {
@@ -272,7 +213,7 @@ export interface DeviceStreamClient {
   readonly setMjpegImage: (image: HTMLImageElement | null) => void;
   /** Normalized 0..1 coordinates in the displayed frame. */
   readonly sendTouch: (phase: "begin" | "move" | "end", x: number, y: number) => void;
-  readonly sendKey: (event: KeyboardEvent, phase: "down" | "up") => void;
+  readonly sendKey: (event: DeviceKeyInput, phase: "down" | "up") => void;
   readonly pressButton: (button: DeviceHardwareButton) => void;
   readonly rotate: () => void;
   readonly setOrientation: (orientation: DeviceScreenSize["orientation"]) => void;
@@ -283,67 +224,6 @@ export interface DeviceStreamClient {
   readonly sendRawTouch: (phase: "begin" | "move" | "end", x: number, y: number) => void;
 }
 
-const HID_USAGE_BY_CODE: Readonly<Record<string, number>> = {
-  Enter: 0x28,
-  Escape: 0x29,
-  Backspace: 0x2a,
-  Tab: 0x2b,
-  Space: 0x2c,
-  Minus: 0x2d,
-  Equal: 0x2e,
-  BracketLeft: 0x2f,
-  BracketRight: 0x30,
-  Backslash: 0x31,
-  Semicolon: 0x33,
-  Quote: 0x34,
-  Backquote: 0x35,
-  Comma: 0x36,
-  Period: 0x37,
-  Slash: 0x38,
-  Delete: 0x4c,
-  ArrowRight: 0x4f,
-  ArrowLeft: 0x50,
-  ArrowDown: 0x51,
-  ArrowUp: 0x52,
-  ControlLeft: 0xe0,
-  ShiftLeft: 0xe1,
-  AltLeft: 0xe2,
-  MetaLeft: 0xe3,
-  ControlRight: 0xe4,
-  ShiftRight: 0xe5,
-  AltRight: 0xe6,
-  MetaRight: 0xe7,
-};
-
-function hidUsageForCode(code: string): number | null {
-  if (/^Key[A-Z]$/.test(code)) return 0x04 + (code.charCodeAt(3) - 65);
-  if (/^Digit[1-9]$/.test(code)) return 0x1e + (code.charCodeAt(5) - 49);
-  if (code === "Digit0") return 0x27;
-  return HID_USAGE_BY_CODE[code] ?? null;
-}
-
-const ANDROID_KEYCODE_BY_KEY: Readonly<Record<string, number>> = {
-  ArrowUp: 19,
-  ArrowDown: 20,
-  ArrowLeft: 21,
-  ArrowRight: 22,
-  Tab: 61,
-  Enter: 66,
-  Backspace: 67,
-  Delete: 112,
-  Home: 122,
-  End: 123,
-  PageUp: 92,
-  PageDown: 93,
-};
-
-const IOS_ORIENTATIONS: ReadonlyArray<DeviceScreenSize["orientation"]> = [
-  "portrait",
-  "landscape_left",
-  "portrait_upside_down",
-  "landscape_right",
-];
-
 export function createDeviceStreamClient(
   target: DeviceStreamTarget,
   output: HTMLCanvasElement | DeviceFrameSink,
@@ -351,11 +231,12 @@ export function createDeviceStreamClient(
 ): DeviceStreamClient {
   const { access, platform, deviceId } = target;
   const sink = "present" in output ? output : createCanvasFrameSink(output);
-  const vendor = platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
-  const device = encodeURIComponent(deviceId);
-  const httpUrl = (path: string) =>
-    withDeviceHubQuery(`${access.httpBase}${vendor}${path}`, access);
-  const wsUrl = (path: string) => withDeviceHubQuery(`${access.wsBase}${vendor}${path}`, access);
+  const endpoints = deviceStreamEndpoints({
+    platform,
+    deviceId,
+    access,
+    ...(target.panelId ? { panelId: target.panelId } : {}),
+  });
   const useWebCodecs = isWebCodecsSupported() && !(platform === "ios" && target.preferMjpeg);
 
   let stopped = true;
@@ -366,7 +247,6 @@ export function createDeviceStreamClient(
   let videoDecoder: VideoDecoder | null = null;
   let timestamp = 0;
   let awaitingKeyframe = true;
-  let screen: DeviceScreenSize | null = null;
   let firstFrame = false;
   let configuring = false;
   let mjpeg = false;
@@ -379,37 +259,32 @@ export function createDeviceStreamClient(
   let videoGeneration = 0;
   let panelClients: DeviceStreamClient[] = [];
   let panelSinks: DuoPanelSinks | null = null;
-  let rotationCursor: DeviceScreenSize["orientation"] | null = null;
-  let pendingOrientation: { requestId: number } | null = null;
-  const duoControl = createDuoControl({
-    send(request) {
-      if (socket?.readyState !== WebSocket.OPEN || !screen?.supportsHingeAngle) return false;
-      if (request.command.control === "physical" && !screen.supportsPhysicalOrientation)
-        return false;
-      try {
-        pendingOrientation = null;
-        if (request.command.control === "orientation") {
-          const value = request.command.value;
-          pendingOrientation = { requestId: request.requestId };
-          rotationCursor = value;
-          // Upstream serializes orientation with hinge commands, then broadcasts config.
-          // An orientation-locked app can keep its framebuffer orientation after the sensor rotates.
-          socket.send(taggedJson(IOS_MSG_ORIENTATION, { orientation: value }));
-        } else socket.send(taggedJson(0x10, request));
-        return true;
-      } catch {
-        return false;
+  const input = createDeviceInputSession({
+    platform,
+    isOpen: () => !stopped && socket?.readyState === WebSocket.OPEN,
+    write: (packet) => socket?.send(encodeDeviceInputPacket(packet)),
+    onScreen: (screen, previous) => {
+      if (platform === "android") {
+        events.onScreen(screen);
+        return;
       }
+      panelSinks?.onScreen?.(screen);
+      events.onScreen(screen);
+      // A surface election can leave an existing decoder on the former
+      // encoder description. Reopen only video to acquire the elected
+      // surface's seed and codec configuration; HID and the viewer stay.
+      if (
+        panelSinks &&
+        screen.supportsPhysicalOrientation &&
+        previous &&
+        screen.screenId !== previous.screenId
+      )
+        startDuoVideo(panelSinks);
     },
-    onChange(state) {
-      if (!state.pending) pendingOrientation = null;
-      events.onDuoControl?.(state);
-    },
+    ...(events.onDuoControl ? { onDuoControl: events.onDuoControl } : {}),
   });
-  const videoPath = `/helper/${device}${target.panelId ? `/panel/${target.panelId}` : ""}/stream.avcc`;
 
-  const mjpegUrl = () => httpUrl(`/helper/${device}/stream.mjpeg`);
-
+  const mjpegUrl = () => endpoints.mjpeg;
   const setStatus = (status: DeviceStreamStatus, detail?: string) => {
     if (!stopped) events.onStatus(status, detail);
   };
@@ -498,10 +373,7 @@ export function createDeviceStreamClient(
 
   const paint = (source: CanvasImageSource, width: number, height: number) => {
     if (stopped) return;
-    if (platform === "android" && (screen?.width !== width || screen.height !== height)) {
-      screen = { width, height, orientation: width > height ? "landscape_left" : "portrait" };
-      events.onScreen(screen);
-    }
+    if (platform === "android") input.frameSize(width, height);
     if (!sink.present(source, width, height)) {
       fail("Could not display the device stream. Reconnect to try again.");
       return;
@@ -640,7 +512,7 @@ export function createDeviceStreamClient(
       controller === videoController;
     let retryDetail: string | undefined;
     try {
-      const response = await fetch(httpUrl(videoPath), {
+      const response = await fetch(endpoints.video, {
         signal: videoController.signal,
         credentials: access.credentials ? "include" : "same-origin",
       });
@@ -735,7 +607,7 @@ export function createDeviceStreamClient(
     primeController = controller;
     const timeout = setTimeout(() => controller.abort(), 2_000);
     try {
-      const response = await fetch(httpUrl(`/helper/${device}/stream.mjpeg`), {
+      const response = await fetch(endpoints.mjpeg, {
         signal: controller.signal,
         credentials: access.credentials ? "include" : "same-origin",
       });
@@ -756,7 +628,7 @@ export function createDeviceStreamClient(
     // Physical handoff elects a native surface. Fixed-panel encoders can keep
     // an inactive shutdown frame after election, so this build uses one active
     // feed instead of decoding a third stream alongside the two fixed feeds.
-    const ids = screen?.supportsPhysicalOrientation ? ([null] as const) : ([1, 3] as const);
+    const ids = input.screen()?.supportsPhysicalOrientation ? ([null] as const) : ([1, 3] as const);
     panelClients = ids.map((id) => {
       const output = id === 1 ? panels.cover : panels.inner;
       return createDeviceStreamClient(
@@ -767,7 +639,7 @@ export function createDeviceStreamClient(
               return sink.present(source, width, height);
             }
             // An inactive native LCD can emit its shutdown black frame. Retain its last useful image.
-            if (screen?.screenId !== id) return true;
+            if (input.screen()?.screenId !== id) return true;
             const retained = output.present(source, width, height);
             const primary = sink.present(source, width, height);
             return retained && primary;
@@ -793,12 +665,12 @@ export function createDeviceStreamClient(
     const session = generation;
     await primeIosHelper(session);
     if (stopped || generation !== session) return;
-    const ws = new WebSocket(wsUrl(`/helper/ws?device=${device}`));
+    const ws = new WebSocket(endpoints.iosInput);
     ws.binaryType = "arraybuffer";
     socket = ws;
     ws.onopen = () => {
       if (stopped || socket !== ws) return;
-      ws.send(taggedJson(IOS_MSG_HARDWARE_KEYBOARD, { enabled: false }));
+      for (const packet of input.opened()) ws.send(encodeDeviceInputPacket(packet));
       events.onInputConnected(true);
     };
     ws.onmessage = (event) => {
@@ -807,41 +679,7 @@ export function createDeviceStreamClient(
       const bytes = new Uint8Array(event.data);
       if (socket !== ws || stopped || bytes.length < 1) return;
       try {
-        const payload: unknown = JSON.parse(decoder.decode(bytes.subarray(1)));
-        if (bytes[0] === 0x90) {
-          const reply = decodeControlReply(payload);
-          if (Option.isSome(reply)) duoControl.receive(reply.value);
-        } else if (bytes[0] === IOS_TAG_SCREEN_CONFIG) {
-          const config = decodeScreenConfig(payload);
-          if (Option.isSome(config)) {
-            const previous = screen;
-            screen = config.value;
-            if (screen.hingePose && screen.hingePose !== previous?.hingePose)
-              rotationCursor = screen.hingePose === "laptop" ? "landscape_left" : "portrait";
-            else if (screen.orientation !== previous?.orientation)
-              rotationCursor = screen.orientation;
-            panelSinks?.onScreen?.(screen);
-            events.onScreen(screen);
-            // A surface election can leave an existing decoder on the former
-            // encoder description. Reopen only video to acquire the elected
-            // surface's seed and codec configuration; HID and the viewer stay.
-            if (
-              panelSinks &&
-              screen.supportsPhysicalOrientation &&
-              previous &&
-              screen.screenId !== previous.screenId
-            )
-              startDuoVideo(panelSinks);
-            if (pendingOrientation) {
-              const receipt = pendingOrientation;
-              pendingOrientation = null;
-              duoControl.receive({
-                requestId: receipt.requestId,
-                ok: true,
-              });
-            }
-          }
-        }
+        input.receive(bytes[0] ?? 0, JSON.parse(decoder.decode(bytes.subarray(1))));
       } catch {
         // Ignore malformed config frames.
       }
@@ -849,8 +687,7 @@ export function createDeviceStreamClient(
     ws.onclose = (event) => {
       if (socket !== ws) return;
       socket = null;
-      duoControl.clear();
-      rotationCursor = null;
+      input.reset();
       if (stopped) return;
       events.onInputConnected(
         false,
@@ -871,7 +708,7 @@ export function createDeviceStreamClient(
   // Android: one socket for video and input.
   const connectAndroid = () => {
     if (stopped) return;
-    const ws = new WebSocket(wsUrl(`/ws?device=${device}&frame-meta=1`));
+    const ws = new WebSocket(endpoints.androidSocket);
     ws.binaryType = "arraybuffer";
     socket = ws;
     ws.onopen = () => {
@@ -961,8 +798,7 @@ export function createDeviceStreamClient(
     stopped = true;
     generation++;
     videoGeneration++;
-    duoControl.clear();
-    rotationCursor = null;
+    input.reset();
     for (const panel of panelClients) panel.stop();
     panelClients = [];
     panelSinks = null;
@@ -985,37 +821,15 @@ export function createDeviceStreamClient(
     closeDecoder();
   };
 
-  const send = (payload: Uint8Array<ArrayBuffer> | string) => {
-    if (!stopped && socket?.readyState === WebSocket.OPEN) socket.send(payload);
-  };
-
-  const rawPoint = (x: number, y: number) => {
-    // serve-sim streams the raw framebuffer; rotated devices need input
-    // remapped into that raw space.
-    if (platform !== "ios" || !screen || screen.width > screen.height) return { x, y };
-    switch (screen.orientation) {
-      case "landscape_left":
-        return { x: y, y: 1 - x };
-      case "landscape_right":
-        return { x: 1 - y, y: x };
-      case "portrait_upside_down":
-        return { x: 1 - x, y: 1 - y };
-      default:
-        return { x, y };
-    }
-  };
-
   return {
     start,
     stop,
     setMjpegImage,
-    controlDuo: duoControl.enqueue,
-    sendRawTouch: (phase, x, y) => {
-      if (platform === "ios") send(taggedJson(IOS_MSG_TOUCH, { type: phase, x, y }));
-    },
+    controlDuo: input.controlDuo,
+    sendRawTouch: input.sendRawTouch,
     setDuoPanels(panels) {
       if (platform !== "ios" || target.videoOnly || stopped || panelSinks === panels) return;
-      if (panels && !screen?.supportsHingeAngle) return;
+      if (panels && !input.screen()?.supportsHingeAngle) return;
       panelSinks = panels;
       videoGeneration++;
       controller?.abort();
@@ -1032,60 +846,10 @@ export function createDeviceStreamClient(
       }
       startDuoVideo(panels);
     },
-    sendTouch: (phase, x, y) => {
-      if (platform === "ios") {
-        send(taggedJson(IOS_MSG_TOUCH, { type: phase, ...rawPoint(x, y) }));
-        return;
-      }
-      const action = phase === "begin" ? "down" : phase === "move" ? "move" : "up";
-      send(JSON.stringify({ type: "touch", action, x, y }));
-    },
-    sendKey: (event, phase) => {
-      if (platform === "ios") {
-        const usage = hidUsageForCode(event.code);
-        if (usage !== null) send(taggedJson(IOS_MSG_KEY, { type: phase, usage }));
-        return;
-      }
-      if (phase !== "down") return;
-      if (event.key === "Escape") return send(JSON.stringify({ type: "back" }));
-      const keycode = ANDROID_KEYCODE_BY_KEY[event.key];
-      if (keycode !== undefined) return send(JSON.stringify({ type: "key", keycode }));
-      if (event.key.length === 1 && !event.metaKey && !event.ctrlKey) {
-        send(JSON.stringify({ type: "text", text: event.key }));
-      }
-    },
-    pressButton: (button) => {
-      if (platform === "ios") {
-        const name =
-          button === "home"
-            ? "home"
-            : button === "appSwitcher"
-              ? "app_switcher"
-              : button === "power"
-                ? "lock"
-                : null;
-        if (name) send(taggedJson(IOS_MSG_BUTTON, { button: name }));
-        return;
-      }
-      const type = button === "appSwitcher" ? "recents" : button;
-      if (type === "home" || type === "back" || type === "recents" || type === "power") {
-        send(JSON.stringify({ type }));
-      }
-    },
-    rotate: () => {
-      if (platform !== "ios") return;
-      const current = screen?.supportsHingeAngle
-        ? (rotationCursor ?? screen.orientation)
-        : (screen?.orientation ?? "portrait");
-      const next =
-        IOS_ORIENTATIONS[(IOS_ORIENTATIONS.indexOf(current) + 1) % IOS_ORIENTATIONS.length]!;
-      if (screen?.supportsHingeAngle) {
-        rotationCursor = next;
-        duoControl.enqueue({ control: "orientation", value: next });
-      } else send(taggedJson(IOS_MSG_ORIENTATION, { orientation: next }));
-    },
-    setOrientation: (orientation) => {
-      if (platform === "ios") send(taggedJson(IOS_MSG_ORIENTATION, { orientation }));
-    },
+    sendTouch: input.sendTouch,
+    sendKey: input.sendKey,
+    pressButton: input.pressButton,
+    rotate: input.rotate,
+    setOrientation: input.setOrientation,
   };
 }

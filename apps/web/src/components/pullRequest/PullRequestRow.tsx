@@ -3,12 +3,11 @@ import { PullRequestStackPopover } from "./PullRequestStackPopover";
 import { memo, type RefCallback } from "react";
 
 import { cn } from "~/lib/utils";
-import { getSourceControlPresentationForKind } from "~/sourceControlPresentation";
 
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { PullRequestChecksPopover } from "./PullRequestChecksPopover";
 import type { EnvironmentPullRequestEntry } from "./pullRequestList.logic";
-import { openOnHostLabel, showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
+import { showPullRequestLinkContextMenu } from "./pullRequestLinkContextMenu";
 import {
   PULL_REQUEST_ROW_CLASS,
   PULL_REQUEST_ROW_NUMBER_CLASS,
@@ -21,6 +20,12 @@ import {
   PullRequestLabelChip,
   PullRequestReviewDecisionGlyph,
 } from "./pullRequestPresentation";
+import { pullRequestFilterIconComponent } from "./PullRequestListFilters";
+import {
+  buildPullRequestRowModel,
+  type PullRequestRowLabelModel,
+  type PullRequestRowTarget,
+} from "./PullRequestsPage.logic";
 
 /**
  * Each slot past the first only appears once the meta line is wide enough to hold it, so a
@@ -34,14 +39,13 @@ const LABEL_SLOTS = [
   { overflow: "" },
 ] as const;
 
-function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry["labels"] }) {
+function PullRequestRowLabels({ labels }: { labels: ReadonlyArray<PullRequestRowLabelModel> }) {
   if (labels.length === 0) return null;
   return (
     <span className="flex min-w-0 items-center gap-1">
-      {LABEL_SLOTS.map((slot, index) => {
-        const label = labels[index];
-        if (!label) return null;
-        const remaining = labels.length - index - 1;
+      {labels.map((label, index) => {
+        const slot = LABEL_SLOTS[index];
+        if (!slot) return null;
         return (
           <PullRequestLabelChip
             key={label.name}
@@ -54,9 +58,9 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
                   : "hidden @3xl/pr-row-meta:inline-flex"
             }
           >
-            {remaining > 0 ? (
-              <span className={cn("shrink-0", slot.overflow)}>+{remaining}</span>
-            ) : null}
+            {label.overflowLabel === null ? null : (
+              <span className={cn("shrink-0", slot.overflow)}>{label.overflowLabel}</span>
+            )}
           </PullRequestLabelChip>
         );
       })}
@@ -70,11 +74,6 @@ function PullRequestRowLabels({ labels }: { labels: EnvironmentPullRequestEntry[
  * two lines without the padding: a 56px row less 20px of `py-2.5`.
  */
 const PAGE_ROW_CLASS = "px-3 py-2.5 [contain-intrinsic-block-size:36.5px]";
-
-export type PullRequestRowTarget = Pick<
-  EnvironmentPullRequestEntry,
-  "environmentId" | "projectId" | "host" | "repository" | "number"
->;
 
 function PullRequestRowImpl({
   entry,
@@ -104,13 +103,25 @@ function PullRequestRowImpl({
   statsRef?: RefCallback<HTMLButtonElement>;
   onSelect: (entry: PullRequestRowTarget) => void;
 }) {
-  const { Icon, providerName } = getSourceControlPresentationForKind(entry.provider);
+  const row = buildPullRequestRowModel({
+    entry,
+    selected,
+    showProjectTitle,
+    showProvider,
+    environmentLabel,
+    matchedElsewhere,
+    nowMs: Date.now(),
+  });
+  const ProviderIcon =
+    row.provider === null
+      ? null
+      : pullRequestFilterIconComponent({ kind: "provider", id: row.provider.icon });
   return (
     <button
       ref={statsRef}
       data-pull-request-stats-key={statsKey}
       type="button"
-      aria-current={selected ? "true" : undefined}
+      aria-current={row.selected ? "true" : undefined}
       onClick={() => onSelect(entry)}
       className={cn(
         PULL_REQUEST_ROW_CLASS,
@@ -120,7 +131,7 @@ function PullRequestRowImpl({
         // viewport shows, not what the pages have loaded. The intrinsic size keeps the
         // scrollbar honest while a row is skipped.
         "[content-visibility:auto]",
-        selected ? "bg-accent" : "hover:bg-accent/60",
+        row.selected ? "bg-accent" : "hover:bg-accent/60",
       )}
     >
       <PullRequestRowGlyph
@@ -141,21 +152,21 @@ function PullRequestRowImpl({
               event.preventDefault();
               event.stopPropagation();
               void showPullRequestLinkContextMenu({
-                url: entry.url,
-                openLabel: openOnHostLabel(entry.provider),
+                url: row.url,
+                openLabel: row.openOnHostLabel,
                 position: { x: event.clientX, y: event.clientY },
               });
             }}
           >
-            #{entry.number}
+            {row.numberLabel}
           </span>
         }
-        title={entry.title}
+        title={row.title}
         signals={
           <>
-            {entry.checksState === undefined ? null : (
+            {row.checks === null ? null : (
               <PullRequestChecksPopover
-                checksState={entry.checksState}
+                checksState={row.checks.state}
                 environmentId={entry.environmentId}
                 reference={{
                   projectId: entry.projectId,
@@ -175,7 +186,7 @@ function PullRequestRowImpl({
         }
         status={
           <>
-            {entry.stack ? (
+            {row.stack ? (
               <PullRequestStackPopover
                 environmentId={entry.environmentId}
                 reference={{
@@ -184,7 +195,7 @@ function PullRequestRowImpl({
                   repository: entry.repository,
                   number: entry.number,
                 }}
-                membership={entry.stack}
+                membership={row.stack}
                 onSelect={(target) =>
                   onSelect({ ...target, host: entry.host, environmentId: entry.environmentId })
                 }
@@ -200,28 +211,28 @@ function PullRequestRowImpl({
         metaClassName="@container/pr-row-meta"
         meta={
           <>
-            {matchedElsewhere ? (
+            {row.matchedElsewhere ? (
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <span className="flex min-w-6 items-center gap-1 overflow-hidden rounded-full border border-border/60 px-1 text-3xs" />
                   }
                 >
-                  <span className="sr-only">matched in the description</span>
+                  <span className="sr-only">{row.matchedElsewhere.label}</span>
                   <SearchIcon aria-hidden className="size-3 shrink-0" />
                   <span aria-hidden className="hidden truncate @xs/pr-row-meta:block">
-                    matched in the description
+                    {row.matchedElsewhere.label}
                   </span>
                 </TooltipTrigger>
-                <TooltipPopup side="top">Matched in the description</TooltipPopup>
+                <TooltipPopup side="top">{row.matchedElsewhere.tooltip}</TooltipPopup>
               </Tooltip>
             ) : null}
-            {showProvider ? (
+            {row.provider && ProviderIcon ? (
               <Tooltip>
                 <TooltipTrigger render={<span className="inline-flex shrink-0" />}>
-                  <Icon aria-label={providerName} className="size-3" />
+                  <ProviderIcon aria-label={row.provider.name} className="size-3" />
                 </TooltipTrigger>
-                <TooltipPopup>{providerName}</TooltipPopup>
+                <TooltipPopup>{row.provider.name}</TooltipPopup>
               </Tooltip>
             ) : null}
             <PullRequestRowAuthor
@@ -229,14 +240,16 @@ function PullRequestRowImpl({
               className="min-w-3.5 max-w-40"
               labelClassName="sr-only @xs/pr-row-meta:not-sr-only @xs/pr-row-meta:truncate"
             />
-            {showProjectTitle ? <span className="truncate">{entry.repository}</span> : null}
-            {environmentLabel ? (
-              <span className="min-w-0 max-w-32 truncate">{environmentLabel}</span>
-            ) : null}
-            {entry.labels.length > 0 ? <PullRequestRowLabels labels={entry.labels} /> : null}
+            {row.repositoryLabel === null ? null : (
+              <span className="truncate">{row.repositoryLabel}</span>
+            )}
+            {row.environmentLabel === null ? null : (
+              <span className="min-w-0 max-w-32 truncate">{row.environmentLabel}</span>
+            )}
+            <PullRequestRowLabels labels={row.labels} />
           </>
         }
-        updatedAt={entry.updatedAt}
+        updatedLabel={row.updatedLabel}
       />
     </button>
   );

@@ -1,4 +1,4 @@
-import { Debouncer } from "@tanstack/react-pacer";
+import { Debouncer } from "@tanstack/pacer";
 
 export interface StateStorage<R = unknown> {
   getItem: (name: string) => string | null | Promise<string | null>;

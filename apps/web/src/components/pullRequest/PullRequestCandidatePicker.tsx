@@ -6,6 +6,7 @@
  * The same combobox as the project and branch pickers, and dressed the same, rather than a menu:
  * a menu's typeahead claims every keypress to jump between rows, which a search box cannot share.
  */
+import { TagIcon, UserPlusIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { Button } from "../ui/button";
@@ -18,76 +19,49 @@ import {
   ComboboxTrigger,
 } from "../ui/combobox";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import type {
+  PullRequestCandidatePickerIcon,
+  PullRequestCandidatePickerModel,
+} from "./PullRequestCandidatePicker.logic";
 import { PullRequestPeopleGhost } from "./PullRequestGhosts";
 
-export function PullRequestCandidatePicker<T>({
-  icon,
-  label,
-  allowed,
-  disabledReason,
+function CandidatePickerIcon({ icon }: { icon: PullRequestCandidatePickerIcon }) {
+  return icon === "tag" ? <TagIcon className="size-3.5" /> : <UserPlusIcon className="size-3.5" />;
+}
+
+export function PullRequestCandidatePicker<Row extends { readonly key: string }>({
+  model,
   open,
   onOpenChange,
   query,
   onQueryChange,
-  searchLabel,
-  isPending,
-  error,
-  candidates,
-  emptyLabel,
-  noMatchLabel,
-  errorLabel,
-  truncated,
-  truncatedLabel,
-  candidateKey,
-  disabled,
   onSelect,
   children,
 }: {
-  icon: ReactNode;
-  /** The trigger's accessible name; the button carries an icon alone. */
-  label: string;
-  /** False where the host would refuse this account's change. Disabled with the reason rather
-   * than hidden: a control that vanishes teaches nobody why. */
-  allowed: boolean;
-  disabledReason: string;
+  model: PullRequestCandidatePickerModel<Row>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   query: string;
   onQueryChange: (query: string) => void;
-  searchLabel: string;
-  isPending: boolean;
-  error: string | null;
-  /** Already narrowed by the query; the shell only decides which state to show. */
-  candidates: ReadonlyArray<T>;
-  emptyLabel: string;
-  noMatchLabel: string;
-  /** Leads the host's own message, which follows it in the same sentence. */
-  errorLabel: string;
-  /** The host has more than the read asked for, so a name missing here may still be askable. */
-  truncated: boolean;
-  truncatedLabel: string;
-  candidateKey: (candidate: T) => string;
-  /** Every row locks while one change is in flight, so a second press cannot race the first. */
-  disabled: boolean;
-  onSelect: (candidate: T) => void;
-  children: (candidate: T) => ReactNode;
+  onSelect: (row: Row) => void;
+  children: (row: Row) => ReactNode;
 }) {
-  if (!allowed) {
+  if (model.kind === "disabled") {
     return (
       <Tooltip>
         <TooltipTrigger
           render={
-            <Button size="icon-xs" variant="ghost" disabled aria-label={label}>
-              {icon}
+            <Button size="icon-xs" variant="ghost" disabled aria-label={model.label}>
+              <CandidatePickerIcon icon={model.icon} />
             </Button>
           }
         />
-        <TooltipPopup side="bottom">{disabledReason}</TooltipPopup>
+        <TooltipPopup side="bottom">{model.tooltip}</TooltipPopup>
       </Tooltip>
     );
   }
 
-  const keys = candidates.map(candidateKey);
+  const keys = model.rows.map((row) => row.key);
 
   return (
     <Combobox
@@ -98,8 +72,8 @@ export function PullRequestCandidatePicker<T>({
       autoHighlight
       value={null}
       onValueChange={(key) => {
-        const candidate = candidates.find((entry) => candidateKey(entry) === key);
-        if (candidate) onSelect(candidate);
+        const row = model.rows.find((entry) => entry.key === key);
+        if (row) onSelect(row);
       }}
       open={open}
       onOpenChange={(nextOpen, details) => {
@@ -116,46 +90,40 @@ export function PullRequestCandidatePicker<T>({
     >
       <ComboboxTrigger
         render={
-          <Button size="icon-xs" variant="ghost" aria-label={label}>
-            {icon}
+          <Button size="icon-xs" variant="ghost" aria-label={model.label}>
+            <CandidatePickerIcon icon={model.icon} />
           </Button>
         }
       />
       <ComboboxPopup align="start" side="bottom" className="w-72">
         <ComboboxSearchInput
-          aria-label={searchLabel}
-          placeholder={searchLabel}
+          aria-label={model.searchLabel}
+          placeholder={model.searchLabel}
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
         />
         <ComboboxList className="max-h-72">
-          {isPending ? (
+          {model.body.kind === "loading" ? (
             <PullRequestPeopleGhost rows={4} />
-          ) : error !== null ? (
-            <p className="p-2 text-xs text-muted-foreground">
-              {errorLabel} {error}
-            </p>
-          ) : candidates.length === 0 ? (
-            <p className="p-2 text-xs text-muted-foreground">
-              {query.length > 0 ? noMatchLabel : emptyLabel}
-            </p>
+          ) : model.body.kind === "message" ? (
+            <p className="p-2 text-xs text-muted-foreground">{model.body.message}</p>
           ) : (
-            candidates.map((candidate, index) => (
+            model.rows.map((row, index) => (
               <ComboboxItem
-                key={keys[index]}
+                key={row.key}
                 hideIndicator
                 index={index}
-                value={keys[index]}
-                disabled={disabled}
+                value={row.key}
+                disabled={model.rowsDisabled}
               >
-                {children(candidate)}
+                {children(row)}
               </ComboboxItem>
             ))
           )}
-          {truncated ? (
+          {model.truncatedNotice !== null ? (
             // Typing filters what arrived; it does not ask the host again, so this says what the
             // list is rather than offering a search that would find nothing further.
-            <p className="px-2 py-1.5 text-xs text-muted-foreground">{truncatedLabel}</p>
+            <p className="px-2 py-1.5 text-xs text-muted-foreground">{model.truncatedNotice}</p>
           ) : null}
         </ComboboxList>
       </ComboboxPopup>

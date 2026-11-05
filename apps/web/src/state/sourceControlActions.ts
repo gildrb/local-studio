@@ -4,10 +4,7 @@ import type {
   AtomCommandResult,
   AtomCommandSuccess,
 } from "@t3tools/client-runtime/state/runtime";
-import {
-  VcsActionUnavailableError,
-  type VcsActionOperation,
-} from "@t3tools/client-runtime/state/vcs";
+import { VcsActionUnavailableError } from "@t3tools/client-runtime/state/vcs";
 import type {
   EnvironmentId,
   GitActionProgressEvent,
@@ -28,18 +25,17 @@ import { useEnvironmentQuery } from "./query";
 import { sourceControlEnvironment } from "./sourceControl";
 import { useAtomCommand } from "./use-atom-command";
 import { vcsActionManager, vcsEnvironment } from "./vcs";
+import {
+  isSourceControlActionPending,
+  isSourceControlActionRunning,
+  resolveSourceControlActionScope as resolveScope,
+  SOURCE_CONTROL_ACTION_LABEL,
+  SOURCE_CONTROL_ACTION_OPERATION,
+  type SourceControlActionKind,
+  type SourceControlActionScope,
+} from "./sourceControlActions.logic";
 
-export type SourceControlActionKind =
-  | "init"
-  | "pull"
-  | "publishRepository"
-  | "runStackedAction"
-  | "preparePullRequestThread";
-
-export interface SourceControlActionScope {
-  readonly environmentId: EnvironmentId | null;
-  readonly cwd: string | null;
-}
+export type { SourceControlActionKind, SourceControlActionScope };
 
 interface SourceControlActionState<
   TArgs extends ReadonlyArray<unknown>,
@@ -55,13 +51,7 @@ interface SourceControlActionState<
   readonly resetError: () => void;
 }
 
-const ACTION_OPERATION = {
-  init: "init",
-  pull: "pull",
-  publishRepository: "publish_repository",
-  runStackedAction: "run_change_request",
-  preparePullRequestThread: "prepare_pull_request_thread",
-} as const satisfies Record<SourceControlActionKind, VcsActionOperation>;
+const ACTION_OPERATION = SOURCE_CONTROL_ACTION_OPERATION;
 
 function useAction<
   TArgs extends ReadonlyArray<unknown>,
@@ -110,19 +100,9 @@ function useAction<
 
   return {
     error: ownsState ? state.error : null,
-    isPending: ownsState && state.isRunning,
+    isPending: isSourceControlActionPending(state, input.kind),
     resetError,
     run,
-  };
-}
-
-function resolveScope(scope: SourceControlActionScope) {
-  if (scope.environmentId === null || scope.cwd === null) {
-    return null;
-  }
-  return {
-    environmentId: scope.environmentId,
-    cwd: scope.cwd,
   };
 }
 
@@ -131,11 +111,7 @@ export function useSourceControlActionRunning(
   kinds: ReadonlyArray<SourceControlActionKind>,
 ): boolean {
   const state = useAtomValue(vcsActionManager.stateAtom(scope));
-  return (
-    state.isRunning &&
-    state.operation !== null &&
-    kinds.some((kind) => ACTION_OPERATION[kind] === state.operation)
-  );
+  return isSourceControlActionRunning(state, kinds);
 }
 
 export function useVcsInitAction(scope: SourceControlActionScope) {
@@ -158,7 +134,7 @@ export function useVcsInitAction(scope: SourceControlActionScope) {
       input: { cwd: target.cwd },
     });
   }, [init, scope]);
-  return useAction({ kind: "init", label: "Initializing repository", scope, action });
+  return useAction({ kind: "init", label: SOURCE_CONTROL_ACTION_LABEL.init, scope, action });
 }
 
 export function useVcsPullAction(scope: SourceControlActionScope) {
@@ -191,7 +167,7 @@ export function useVcsPullAction(scope: SourceControlActionScope) {
   }, [pull, scope]);
   return useAction({
     kind: "pull",
-    label: "Pulling latest changes",
+    label: SOURCE_CONTROL_ACTION_LABEL.pull,
     scope,
     action,
     onSuccess: status.refresh,
@@ -247,7 +223,7 @@ export function useGitStackedAction(scope: SourceControlActionScope) {
 
   return useAction({
     kind: "runStackedAction",
-    label: "Running source control action",
+    label: SOURCE_CONTROL_ACTION_LABEL.runStackedAction,
     scope,
     action,
     onSuccess: status.refresh,
@@ -299,7 +275,7 @@ export function useSourceControlPublishRepositoryAction(scope: SourceControlActi
   );
   return useAction({
     kind: "publishRepository",
-    label: "Publishing repository",
+    label: SOURCE_CONTROL_ACTION_LABEL.publishRepository,
     scope,
     action,
     onSuccess: status.refresh,
@@ -338,7 +314,7 @@ export function usePreparePullRequestThreadAction(scope: SourceControlActionScop
   );
   return useAction({
     kind: "preparePullRequestThread",
-    label: "Preparing pull request thread",
+    label: SOURCE_CONTROL_ACTION_LABEL.preparePullRequestThread,
     scope,
     action,
   });

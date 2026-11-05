@@ -1,4 +1,4 @@
-import { iconNames, type IconName } from "lucide-react/dynamic";
+import type { IconName } from "lucide-react/dynamic";
 export { PROJECT_ICON_COLORS, projectIconColorClassName } from "./projectIconColors";
 
 const POPULAR_PROJECT_ICONS = [
@@ -61,10 +61,13 @@ export const PROJECT_EMOJIS: ReadonlyArray<{ readonly emoji: string; readonly la
   { emoji: "🌱", label: "Seedling" },
 ];
 
-export function filterProjectIconNames(query: string): ReadonlyArray<IconName> {
+export function filterProjectIconNames(
+  query: string,
+  catalog: ReadonlyArray<IconName>,
+): ReadonlyArray<IconName> {
   const normalized = query.trim().toLowerCase().replaceAll(/\s+/g, "-");
   if (!normalized) return POPULAR_PROJECT_ICONS;
-  return iconNames.filter((name) => name.includes(normalized)).slice(0, 60);
+  return catalog.filter((name) => name.includes(normalized)).slice(0, 60);
 }
 
 export function firstEmoji(value: string): string | null {

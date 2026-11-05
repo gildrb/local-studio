@@ -8,6 +8,7 @@ import {
   type ThemeDefinition,
 } from "../../themePalette";
 import { stackedThreadToast, toastManager } from "../ui/toast";
+import { resolveThemeEditorSaved } from "./ThemeEditorHost.logic";
 import { useThemeEditorStore } from "./themeEditorStore";
 
 // The host mounts above the router on every page, but the editor body only
@@ -46,64 +47,23 @@ export function ThemeEditorHost() {
       savedTheme: ThemeDefinition,
       { created, mergedAppearance }: { created: boolean; mergedAppearance?: ThemeAppearance },
     ) => {
-      // A merge completed an existing theme's light/dark pair; activating the
-      // whole theme shows the new palette right away.
-      if (mergedAppearance) {
-        if (!setTheme(savedTheme.id)) {
-          toastManager.add(
-            stackedThreadToast({
-              type: "error",
-              title: "Could not save your theme",
-              description: "Browser storage is unavailable, so the change was not kept.",
-            }),
-          );
-          return false;
-        }
-        toastManager.add(
-          stackedThreadToast({
-            type: "success",
-            title: `${savedTheme.label} updated`,
-            description: `Its ${mergedAppearance} palette was added.`,
-          }),
-        );
+      const decision = resolveThemeEditorSaved({
+        savedTheme,
+        created,
+        mergedAppearance,
+        baseThemeId: getThemeDefinition(theme)?.id ?? null,
+        themeHalves,
+      });
+      if (decision.kind === "saved") {
+        if (decision.refresh) refreshTheme();
+        toastManager.add(stackedThreadToast(decision.toast));
         return true;
       }
-      if (!created) {
-        // The edited theme may be showing through the base preference or either
-        // half of the mix; the preference itself is untouched (a setTheme here
-        // would clear the mix), the palette just needs re-applying.
-        const wasActive =
-          getThemeDefinition(theme)?.id === savedTheme.id ||
-          themeHalves?.light === savedTheme.id ||
-          themeHalves?.dark === savedTheme.id;
-        if (wasActive) refreshTheme();
-        toastManager.add(
-          stackedThreadToast({
-            type: "success",
-            title: `${savedTheme.label} saved`,
-            description: wasActive ? "Your changes are now active." : "Your changes are saved.",
-          }),
-        );
-        return true;
-      }
-
-      if (!setTheme(savedTheme.id)) {
-        toastManager.add(
-          stackedThreadToast({
-            type: "error",
-            title: "Could not save your theme",
-            description: "Browser storage is unavailable, so the change was not kept.",
-          }),
-        );
+      if (!setTheme(decision.themeId)) {
+        toastManager.add(stackedThreadToast(decision.failureToast));
         return false;
       }
-      toastManager.add(
-        stackedThreadToast({
-          type: "success",
-          title: `${savedTheme.label} created`,
-          description: "It’s now active.",
-        }),
-      );
+      toastManager.add(stackedThreadToast(decision.successToast));
       return true;
     },
     [refreshTheme, setTheme, theme, themeHalves],

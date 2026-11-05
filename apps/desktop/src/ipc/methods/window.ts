@@ -3,18 +3,16 @@ import {
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
   DesktopThemeSchema,
-  EDITORS,
   EditorId,
   PickedThemeFileSchema,
   PickFolderOptionsSchema,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
-  REMOTE_CAPABLE_EDITOR_IDS,
   SystemSettingsPaneSchema,
   type DesktopEnvironmentBootstrap,
   type PickedThemeFile,
 } from "@t3tools/contracts";
 import { WORKSPACE_IMAGE_PREVIEW_EXTENSIONS } from "@t3tools/shared/filePreview";
-import { resolveEditorCommand } from "@t3tools/shared/editor";
+import { probeRemoteCapableEditors } from "@t3tools/shared/editor";
 import * as HostProcess from "@t3tools/shared/hostProcess";
 import * as NodeOS from "node:os";
 import * as FileSystem from "effect/FileSystem";
@@ -335,15 +333,8 @@ export const probeRemoteEditors = DesktopIpc.makeIpcMethod({
   payload: Schema.Undefined,
   result: Schema.Array(EditorId),
   handler: Effect.fn("desktop.ipc.window.probeRemoteEditors")(function* () {
-    const available: Array<EditorId> = [];
     const env = yield* HostProcess.HostProcessEnvironment;
-    for (const editorId of REMOTE_CAPABLE_EDITOR_IDS) {
-      const editor = EDITORS.find((editor) => editor.id === editorId);
-      if (editor && Option.isSome(yield* resolveEditorCommand(editor, env))) {
-        available.push(editorId);
-      }
-    }
-    return available;
+    return yield* probeRemoteCapableEditors(env);
   }),
 });
 

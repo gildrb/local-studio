@@ -1,31 +1,21 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { isWindowsAbsolutePath } from "@t3tools/shared/path";
 import { useMemo, useState } from "react";
 
 import { primaryServerKeybindingsAtom } from "~/state/server";
 import { useTheme } from "~/hooks/useTheme";
-import { getLocalFileManagerName, isWindowsPlatform } from "~/lib/utils";
 import { CommandPaletteContent } from "../CommandPaletteContent";
 import type { CommandPaletteActionItem } from "../CommandPalette.logic";
 import { CommandPaletteResults } from "../CommandPaletteResults";
 import { PierreEntryIcon } from "../chat/PierreEntryIcon";
-import {
-  getProjectFilePickerMatches,
-  PROJECT_FILE_PICKER_RESULT_LIMIT,
-} from "../files/ProjectFilePicker.logic";
+import { PROJECT_FILE_PICKER_RESULT_LIMIT } from "../files/ProjectFilePicker.logic";
 import { useProjectFilePickerQuery } from "../files/projectFilesQueryState";
 import { CommandDialog, CommandDialogPopup, CommandFooterAction } from "../ui/command";
 import { toastManager } from "../ui/toast";
-
-function emptyMessage(query: string, error: string | null, isPending: boolean): string {
-  if (error) return error;
-  if (isPending) return query.trim() ? "Searching project files…" : "Indexing project files…";
-  return query.trim() ? "No matching image files." : "No image files found.";
-}
-export function canPickExternalProjectFavicon(cwd: string, platform: string): boolean {
-  return !isWindowsPlatform(platform) || isWindowsAbsolutePath(cwd);
-}
+import {
+  buildProjectFaviconPickerModel,
+  resolveProjectFaviconPickerFailure,
+} from "./ProjectFaviconPickerDialog.logic";
 
 export function ProjectFaviconPickerDialog(props: {
   readonly cwd: string;
@@ -49,40 +39,63 @@ export function ProjectFaviconPickerDialog(props: {
   const { resolvedTheme } = useTheme();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const pickExternal = props.onPickExternal;
-  const fileManagerName = getLocalFileManagerName(
-    typeof navigator === "undefined" ? "" : navigator.platform,
+  const platform = typeof navigator === "undefined" ? "" : navigator.platform;
+  const model = useMemo(
+    () =>
+      buildProjectFaviconPickerModel({
+        query,
+        entries: result.entries,
+        matchedQuery: result.matchedQuery,
+        error: result.error,
+        isPending: result.isPending,
+        platform,
+        hasExternalPicker: pickExternal !== undefined,
+        isPickingExternal,
+        projectName: props.projectName,
+      }),
+    [
+      query,
+      result.entries,
+      result.matchedQuery,
+      result.error,
+      result.isPending,
+      platform,
+      pickExternal,
+      isPickingExternal,
+      props.projectName,
+    ],
   );
   const items = useMemo<CommandPaletteActionItem[]>(
     () =>
-      getProjectFilePickerMatches(result.entries, result.matchedQuery).map((match) => ({
+      model.files.map((file) => ({
         kind: "action",
-        value: `project-favicon:${match.path}`,
-        searchTerms: [match.name, match.path],
-        title: match.name,
-        description: match.path,
-        icon: <PierreEntryIcon pathValue={match.path} kind="file" theme={resolvedTheme} />,
-        run: async () => props.onSelect(match.path),
+        value: file.value,
+        searchTerms: [...file.searchTerms],
+        title: file.title,
+        description: file.description,
+        icon: <PierreEntryIcon pathValue={file.path} kind="file" theme={resolvedTheme} />,
+        run: async () => props.onSelect(file.path),
       })),
-    [props.onSelect, resolvedTheme, result.entries, result.matchedQuery],
+    [props.onSelect, resolvedTheme, model.files],
   );
 
   return (
     <CommandDialog open={props.open} onOpenChange={props.onOpenChange}>
       {props.open ? (
         <CommandDialogPopup
-          aria-label="Choose project icon"
+          aria-label={model.title}
           className="overflow-hidden"
           onBackdropPointerDown={() => props.onOpenChange(false)}
         >
           <CommandPaletteContent
-            aria-label="Choose project icon"
+            aria-label={model.title}
             autoHighlight="always"
-            escapeLabel="Close"
-            footerActionLabel="Select icon"
+            escapeLabel={model.escapeLabel}
+            footerActionLabel={model.footerActionLabel}
             footerTrailing={
-              pickExternal ? (
+              pickExternal && model.externalAction ? (
                 <CommandFooterAction
-                  disabled={isPickingExternal}
+                  disabled={model.externalAction.disabled}
                   onClick={() => {
                     setIsPickingExternal(true);
                     void pickExternal()
@@ -92,21 +105,16 @@ export function ProjectFaviconPickerDialog(props: {
                         props.onSelect(path);
                       })
                       .catch((error: unknown) => {
-                        toastManager.add({
-                          type: "error",
-                          title: "Could not open image picker",
-                          description:
-                            error instanceof Error ? error.message : "An error occurred.",
-                        });
+                        toastManager.add(resolveProjectFaviconPickerFailure(error));
                       })
                       .finally(() => setIsPickingExternal(false));
                   }}
                 >
-                  {`Open in ${fileManagerName}`}
+                  {model.externalAction.label}
                 </CommandFooterAction>
               ) : null
             }
-            inputProps={{ placeholder: "Search image files…" }}
+            inputProps={{ placeholder: model.placeholder }}
             mode="none"
             onItemHighlighted={(value) => {
               setHighlightedItemValue(typeof value === "string" ? value : null);
@@ -122,7 +130,7 @@ export function ProjectFaviconPickerDialog(props: {
             <CommandPaletteResults
               groups={
                 items.length > 0
-                  ? [{ value: "project-favicon-files", label: props.projectName, items }]
+                  ? [{ value: model.groupValue, label: model.groupLabel, items }]
                   : []
               }
               highlightedItemValue={highlightedItemValue}
@@ -133,7 +141,7 @@ export function ProjectFaviconPickerDialog(props: {
                 props.onOpenChange(false);
                 void item.run();
               }}
-              emptyStateMessage={emptyMessage(query, result.error, result.isPending)}
+              emptyStateMessage={model.emptyStateMessage}
             />
           </CommandPaletteContent>
         </CommandDialogPopup>

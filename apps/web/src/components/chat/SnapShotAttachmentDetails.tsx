@@ -10,14 +10,14 @@ import { RenderErrorBoundary } from "../RenderErrorBoundary";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  snapShotAccessibilityDetails,
+  snapShotIncludesAccessibility,
+  type SnapShotAccessibilityDetails,
+} from "./SnapShotAttachmentDetails.logic";
 
 export const SNAP_SHOT_ATTACHMENT_FRAME_CLASS =
   "relative h-28 w-52 max-w-full overflow-hidden rounded-lg border border-border/80";
-
-export interface SnapShotAccessibilityDetails {
-  content: string;
-  format: "json" | "text";
-}
 
 interface SyntaxToken {
   readonly content: string;
@@ -102,27 +102,6 @@ export function SnapShotAccessibilityData({
       {content}
     </pre>
   );
-}
-
-export function snapShotAccessibilityDetails(
-  source: SnapShotSource,
-): SnapShotAccessibilityDetails | undefined {
-  if (source.accessibility?.format === "element-tree") {
-    return {
-      content: JSON.stringify(source.accessibility, null, 2),
-      format: "json",
-    };
-  }
-
-  const text =
-    source.accessibility?.format === "flat-text"
-      ? source.accessibility.text.trim()
-      : source.accessibleText?.trim();
-  return text ? { content: text, format: "text" } : undefined;
-}
-
-export function snapShotIncludesAccessibility(source: SnapShotSource): boolean {
-  return Boolean(source.accessibility || source.accessibleText?.trim());
 }
 
 export function SnapShotContentsButton({

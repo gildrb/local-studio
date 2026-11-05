@@ -3,24 +3,20 @@ import type {
   ResolvedKeybindingsConfig,
   T3ProjectFileScript,
 } from "@t3tools/contracts";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
 import { ChevronDownIcon, DownloadIcon, PlusIcon, SettingsIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
-import { commandForProjectScript, primaryProjectScript } from "~/projectScripts";
-import { shortcutLabelForCommand } from "~/keybindings";
+import { buildProjectScriptsToolbarModel } from "./ProjectScriptsControl.logic";
+import { ProjectScriptEditorDialog, ScriptIcon } from "./projectScriptEditor";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
   editorRequestForScript,
-  ProjectScriptEditorDialog,
-  ScriptIcon,
+  projectScriptInputFromFileScript,
+  resolveFileScriptImportFailure,
   type NewProjectScriptInput,
   type ProjectScriptActionResult,
   type ProjectScriptEditorRequest,
-} from "./projectScriptEditor";
+} from "./projectScriptEditor.logic";
 import { Button } from "./ui/button";
 import { Group, GroupSeparator } from "./ui/group";
 import {
@@ -82,25 +78,18 @@ export default function ProjectScriptsControl({
   }
   const [editorRequest, setEditorRequest] = useState<ProjectScriptEditorRequest | null>(null);
 
-  const primaryScript = useMemo(() => {
-    if (preferredScriptId) {
-      const preferred = scripts.find((script) => script.id === preferredScriptId);
-      if (preferred) return preferred;
-    }
-    return primaryProjectScript(scripts);
-  }, [preferredScriptId, scripts]);
-  const importableScripts = useMemo(
+  const model = useMemo(
     () =>
-      fileScripts.filter(
-        (fileScript) =>
-          !scripts.some(
-            (script) =>
-              script.command === fileScript.command ||
-              script.name.toLowerCase() === fileScript.name.toLowerCase(),
-          ),
-      ),
-    [fileScripts, scripts],
+      buildProjectScriptsToolbarModel({
+        scripts,
+        fileScripts,
+        keybindings,
+        preferredScriptId,
+        platform: navigator.platform,
+      }),
+    [fileScripts, keybindings, preferredScriptId, scripts],
   );
+  const primary = model.primary;
 
   const openAddDialog = () => {
     setEditorRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT });
@@ -119,44 +108,29 @@ export default function ProjectScriptsControl({
   );
 
   const importFileScript = async (fileScript: T3ProjectFileScript) => {
-    const payload: NewProjectScriptInput = {
-      name: fileScript.name,
-      command: fileScript.command,
-      icon: fileScript.icon ?? "play",
-      runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
-      waitForSetup: fileScript.runOnWorktreeCreate === true && fileScript.async === false,
-      keybinding: null,
-      previewUrl: fileScript.previewUrl ?? null,
-      autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
-    };
+    const payload = projectScriptInputFromFileScript(fileScript);
     const result = await onAddScript(payload);
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-      // Surface the failure through the regular add dialog, prefilled so the
-      // user can adjust and retry.
-      const error = squashAtomCommandFailure(result);
-      setEditorRequest({
-        scriptId: null,
-        initial: payload,
-        error: error instanceof Error ? error.message : "Failed to import action.",
-      });
-    }
+    // Surface the failure through the regular add dialog, prefilled so the
+    // user can adjust and retry.
+    const failedRequest = resolveFileScriptImportFailure(payload, result);
+    if (failedRequest) setEditorRequest(failedRequest);
   };
 
-  const importMenuItems = importableScripts.length > 0 && (
+  const importMenuItems = model.importItems.length > 0 && (
     <>
-      {primaryScript && <MenuSeparator />}
+      {model.showImportSeparator && <MenuSeparator />}
       <MenuGroup>
-        <MenuGroupLabel>From t3.json</MenuGroupLabel>
-        {importableScripts.map((fileScript) => (
+        <MenuGroupLabel>{model.importGroupLabel}</MenuGroupLabel>
+        {model.importItems.map((item) => (
           <MenuItem
             density={presentation === "menu" ? "touch" : "default"}
-            key={`${fileScript.name} ${fileScript.command}`}
-            onClick={() => void importFileScript(fileScript)}
+            key={item.key}
+            onClick={() => void importFileScript(item.fileScript)}
           >
-            <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4" />
-            <MenuItemLabel>{fileScript.name}</MenuItemLabel>
+            <ScriptIcon icon={item.icon} className="size-4" />
+            <MenuItemLabel>{item.label}</MenuItemLabel>
             <MenuShortcut>
-              <DownloadIcon className="size-3.5" aria-label="Import" />
+              <DownloadIcon className="size-3.5" aria-label={item.importAriaLabel} />
             </MenuShortcut>
           </MenuItem>
         ))}
@@ -166,22 +140,17 @@ export default function ProjectScriptsControl({
 
   const scriptItems = (
     <>
-      {scripts.map((script) => {
-        const shortcutLabel = shortcutLabelForCommand(
-          keybindings,
-          commandForProjectScript(script.id),
-        );
+      {model.scriptItems.map((item) => {
+        const shortcutLabel = item.shortcutLabel;
         return (
           <MenuItem
             density={presentation === "menu" ? "touch" : "default"}
-            key={script.id}
+            key={item.scriptId}
             className="group"
-            onClick={() => onRunScript(script)}
+            onClick={() => onRunScript(item.script)}
           >
-            <ScriptIcon icon={script.icon} className="size-4" />
-            <MenuItemLabel>
-              {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-            </MenuItemLabel>
+            <ScriptIcon icon={item.icon} className="size-4" />
+            <MenuItemLabel>{item.label}</MenuItemLabel>
             <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
               {shortcutLabel &&
                 (presentation === "menu" ? (
@@ -200,7 +169,7 @@ export default function ProjectScriptsControl({
                   variant="ghost"
                   size="icon-xs"
                   className="size-6"
-                  aria-label={`Edit ${script.name}`}
+                  aria-label={item.editAriaLabel}
                   onPointerDown={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -208,7 +177,7 @@ export default function ProjectScriptsControl({
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
-                    openEditDialog(script);
+                    openEditDialog(item.script);
                   }}
                 >
                   <SettingsIcon className="size-3.5" />
@@ -221,28 +190,27 @@ export default function ProjectScriptsControl({
       {importMenuItems}
       <MenuItem density={presentation === "menu" ? "touch" : "default"} onClick={openAddDialog}>
         <PlusIcon className="size-4" />
-        <MenuItemLabel>Add action</MenuItemLabel>
+        <MenuItemLabel>{model.addActionLabel}</MenuItemLabel>
       </MenuItem>
     </>
   );
 
+  const toolbar = model.toolbar;
   return (
     <>
       {presentation === "menu" ? (
         <>
-          {primaryScript && (
+          {primary && (
             <MenuItem
               density={presentation === "menu" ? "touch" : "default"}
-              onClick={() => onRunScript(primaryScript)}
+              onClick={() => onRunScript(primary.script)}
             >
-              <ScriptIcon icon={primaryScript.icon} className="size-4" />
-              <MenuItemLabel>Run {primaryScript.name}</MenuItemLabel>
-              <MenuShortcut>
-                {shortcutLabelForCommand(keybindings, commandForProjectScript(primaryScript.id))}
-              </MenuShortcut>
+              <ScriptIcon icon={primary.icon} className="size-4" />
+              <MenuItemLabel>{primary.runLabel}</MenuItemLabel>
+              <MenuShortcut>{primary.shortcutLabel}</MenuShortcut>
             </MenuItem>
           )}
-          {primaryScript || importableScripts.length > 0 ? (
+          {model.menuKind === "submenu" ? (
             <MenuSub
               open={actionsMenuOpen.scripts}
               onOpenChange={(open) =>
@@ -250,8 +218,8 @@ export default function ProjectScriptsControl({
               }
             >
               <MenuSubTrigger density="touch">
-                <ScriptIcon icon="play" className="size-4" />
-                <MenuItemLabel>Project actions</MenuItemLabel>
+                <ScriptIcon icon={model.submenuIcon} className="size-4" />
+                <MenuItemLabel>{model.submenuLabel}</MenuItemLabel>
               </MenuSubTrigger>
               <MenuSubPopup>{scriptItems}</MenuSubPopup>
             </MenuSub>
@@ -261,12 +229,12 @@ export default function ProjectScriptsControl({
               onClick={openAddDialog}
             >
               <PlusIcon className="size-4" />
-              <MenuItemLabel>Add project action…</MenuItemLabel>
+              <MenuItemLabel>{model.addProjectActionLabel}</MenuItemLabel>
             </MenuItem>
           )}
         </>
-      ) : primaryScript ? (
-        <Group aria-label="Project scripts">
+      ) : toolbar.kind === "split" ? (
+        <Group aria-label={model.groupAriaLabel}>
           <Tooltip>
             <TooltipTrigger
               render={
@@ -274,20 +242,20 @@ export default function ProjectScriptsControl({
                   size="xs"
                   variant="outline"
                   className="w-7 sm:w-6 @3xl/header-actions:w-auto!"
-                  aria-label={`Run ${primaryScript.name}`}
+                  aria-label={toolbar.primary.runLabel}
                   // The tooltip wrapper replaces data-slot="button", so themed
                   // toolbar styling needs its own hook.
                   data-toolbar-control=""
-                  onClick={() => onRunScript(primaryScript)}
+                  onClick={() => onRunScript(toolbar.primary.script)}
                 />
               }
             >
-              <ScriptIcon icon={primaryScript.icon} />
+              <ScriptIcon icon={toolbar.primary.icon} />
               <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                {primaryScript.name}
+                {toolbar.primary.name}
               </span>
             </TooltipTrigger>
-            <TooltipPopup side="top">Run {primaryScript.name}</TooltipPopup>
+            <TooltipPopup side="top">{toolbar.primary.runLabel}</TooltipPopup>
           </Tooltip>
           <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu
@@ -297,24 +265,30 @@ export default function ProjectScriptsControl({
             }
           >
             <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
+              render={
+                <Button size="icon-xs" variant="outline" aria-label={model.menuTriggerAriaLabel} />
+              }
             >
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end">{scriptItems}</MenuPopup>
           </Menu>
         </Group>
-      ) : importableScripts.length > 0 ? (
+      ) : toolbar.kind === "import-menu" ? (
         <Menu
           open={actionsMenuOpen.imports}
           onOpenChange={(open) =>
             setActionsMenuOpen({ presentation, scripts: false, imports: open })
           }
         >
-          <MenuTrigger render={<Button size="xs" variant="outline" aria-label="Project actions" />}>
+          <MenuTrigger
+            render={
+              <Button size="xs" variant="outline" aria-label={model.importMenuTriggerAriaLabel} />
+            }
+          >
             <PlusIcon className="size-3.5" />
             <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              Add action
+              {model.addActionLabel}
             </span>
             <ChevronDownIcon className="size-3.5" />
           </MenuTrigger>
@@ -322,7 +296,7 @@ export default function ProjectScriptsControl({
             {importMenuItems}
             <MenuItem onClick={openAddDialog}>
               <PlusIcon className="size-4" />
-              Add action
+              {model.addActionLabel}
             </MenuItem>
           </MenuPopup>
         </Menu>
@@ -334,7 +308,7 @@ export default function ProjectScriptsControl({
                 size="xs"
                 variant="outline"
                 className="w-7 sm:w-6 @3xl/header-actions:w-auto!"
-                aria-label="Add action"
+                aria-label={model.addActionLabel}
                 // The tooltip wrapper replaces data-slot="button", so themed
                 // toolbar styling needs its own hook.
                 data-toolbar-control=""
@@ -344,10 +318,10 @@ export default function ProjectScriptsControl({
           >
             <PlusIcon className="size-3.5" />
             <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              Add action
+              {model.addActionLabel}
             </span>
           </TooltipTrigger>
-          <TooltipPopup side="top">Add action</TooltipPopup>
+          <TooltipPopup side="top">{model.addActionLabel}</TooltipPopup>
         </Tooltip>
       )}
 

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { StageBackdropArt } from "./SidebarStageBackdrop";
 import {
   resolveEnvironmentIdentificationPillLabel,
   resolveSidebarStageBackdropVariant,
-  StageBackdropArt,
-} from "./SidebarStageBackdrop";
+} from "./SidebarStageBackdrop.logic";
 
 describe("SidebarStageBackdrop", () => {
   it("resolves stage artwork only when enabled", () => {

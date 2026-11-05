@@ -8,7 +8,8 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 
-import { deriveProviderModelsForDisplay, ProviderInstanceCard } from "./ProviderInstanceCard";
+import { ProviderInstanceCard } from "./ProviderInstanceCard";
+import { deriveProviderModelsForDisplay } from "./ProviderInstanceCard.logic";
 
 describe("deriveProviderModelsForDisplay", () => {
   it("uses current config custom models instead of stale live custom rows", () => {

@@ -5,18 +5,17 @@ import {
   PairingPendingSurface,
   PairingRouteSurface,
 } from "../components/auth/PairingRouteSurface";
+import {
+  resolvePairRouteAccess,
+  resolvePairRouteView,
+} from "../components/auth/PairingRouteSurface.logic";
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async ({ context }) => {
     const { authGateState } = context;
-    if (authGateState.status === "hosted-pairing") {
-      return {
-        authGateState,
-      };
-    }
-
-    if (authGateState.status === "authenticated" || authGateState.status === "hosted-static") {
-      throw redirect({ to: "/", replace: true });
+    const access = resolvePairRouteAccess(authGateState);
+    if (access.kind === "redirect") {
+      throw redirect({ to: access.to, replace: true });
     }
     return {
       authGateState,
@@ -29,22 +28,25 @@ export const Route = createFileRoute("/pair")({
 function PairRouteView() {
   const { authGateState } = Route.useRouteContext();
   const navigate = useNavigate();
+  const view = resolvePairRouteView(authGateState);
 
-  if (!authGateState) {
+  if (view.kind === "none") {
     return null;
   }
 
-  if (authGateState.status === "hosted-pairing") {
+  if (view.kind === "hosted") {
     return <HostedPairingRouteSurface />;
   }
 
   return (
     <PairingRouteSurface
-      auth={authGateState.auth}
+      auth={view.auth}
       onAuthenticated={() => {
         void navigate({ to: "/", replace: true });
       }}
-      {...(authGateState.errorMessage ? { initialErrorMessage: authGateState.errorMessage } : {})}
+      {...(view.initialErrorMessage !== null
+        ? { initialErrorMessage: view.initialErrorMessage }
+        : {})}
     />
   );
 }

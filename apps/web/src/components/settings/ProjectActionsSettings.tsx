@@ -1,21 +1,12 @@
-import { EnvironmentId, type T3ProjectFileScript } from "@t3tools/contracts";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useState } from "react";
 import { useT3ProjectFileState } from "../../hooks/useT3ProjectFileScripts";
 import { useEnvironments } from "../../state/environments";
+import { ProjectScriptEditorDialog, ScriptIcon } from "../projectScriptEditor";
 import {
-  EMPTY_PROJECT_SCRIPT_INPUT,
-  editorRequestForScript,
-  ProjectScriptEditorDialog,
-  ScriptIcon,
-  type NewProjectScriptInput,
+  resolveFileScriptImportFailure,
   type ProjectScriptEditorRequest,
-} from "../projectScriptEditor";
+} from "../projectScriptEditor.logic";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -27,6 +18,12 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { ProjectActionsList } from "./ProjectActionsList";
+import {
+  buildProjectActionsModel,
+  resolveProjectActionsIntent,
+  resolveProjectActionsSource,
+  type ProjectActionsIntent,
+} from "./ProjectActionsSettings.logic";
 import { useProjectScriptSettings } from "./useProjectScriptSettings";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
 import { useSettingsScope } from "./SettingsScopeContext";
@@ -41,139 +38,100 @@ import { useSettingsScope } from "./SettingsScopeContext";
 export function ProjectActionsSettings() {
   const { scope, targets, target } = useSettingsScope();
   const { environments } = useEnvironments();
-  const isProjectScope = scope.kind === "project" || scope.kind === "checkout";
-  const representativeConfig = target
-    ? environments.find((environment) => environment.environmentId === target.environmentId)
-        ?.serverConfig
-    : undefined;
-  const scripts = target?.settings.defaultProjectScripts ?? [];
-  const keybindings = representativeConfig?.keybindings ?? DEFAULT_RESOLVED_KEYBINDINGS;
-  const mixed = targets.some(
-    (candidate) =>
-      JSON.stringify(candidate.settings.defaultProjectScripts) !== JSON.stringify(scripts),
-  );
+  const source = resolveProjectActionsSource({
+    scopeKind: scope.kind,
+    members: scope.members,
+    target,
+    targets,
+    environments,
+  });
+  const { scripts, keybindings } = source;
   const [request, setRequest] = useState<ProjectScriptEditorRequest | null>(null);
-  const memberById = new Map(
-    isProjectScope ? scope.members.map((member) => [member.id, member]) : [],
-  );
-  const { saving, persist, submit } = useProjectScriptSettings(
-    targets.flatMap((candidate) => {
-      const environment = environments.find(
-        (entry) => entry.environmentId === candidate.environmentId,
-      );
-      if (!environment?.serverConfig) return [];
-      const member = candidate.projectId ? memberById.get(candidate.projectId) : undefined;
-      // An older server ignores the override record, so a project edit there
-      // would report success and vanish; such environments are left out and
-      // the legacy per-project map keeps serving them.
-      if (
-        member &&
-        environment.serverConfig.environment?.capabilities.projectSettingsOverrides !== true
-      ) {
-        return [];
-      }
-      return [
-        {
-          environmentId: candidate.environmentId,
-          // Writes read the raw environment settings so an override entry is
-          // extended, not derived from already-resolved values.
-          settings: environment.serverConfig.settings,
-          keybindings: environment.serverConfig.keybindings,
-          ...(member ? { project: member } : {}),
-        },
-      ];
-    }),
-  );
+  const { saving, persist, submit } = useProjectScriptSettings(source.scriptTargets);
 
   // A project's t3.json can declare actions to import. Read it from the
   // representative checkout; the imported action still fans out.
-  const representativeMember = target?.projectId ? memberById.get(target.projectId) : undefined;
   const t3File = useT3ProjectFileState(
-    representativeMember?.environmentId ?? EnvironmentId.make("none"),
-    representativeMember?.workspaceRoot ?? null,
+    source.fileSource.environmentId,
+    source.fileSource.workspaceRoot,
   );
-  const importableScripts = useMemo(
-    () =>
-      t3File.scripts.filter(
-        (fileScript) =>
-          !scripts.some(
-            (script) =>
-              script.command === fileScript.command ||
-              script.name.toLowerCase() === fileScript.name.toLowerCase(),
-          ),
-      ),
-    [scripts, t3File.scripts],
-  );
-  const importFileScript = useCallback(
-    async (fileScript: T3ProjectFileScript) => {
-      const payload: NewProjectScriptInput = {
-        name: fileScript.name,
-        command: fileScript.command,
-        icon: fileScript.icon ?? "play",
-        runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
-        waitForSetup: fileScript.runOnWorktreeCreate === true && fileScript.async === false,
-        keybinding: null,
-        previewUrl: fileScript.previewUrl ?? null,
-        autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
-      };
-      const result = await submit(null, payload);
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setRequest({
-          scriptId: null,
-          initial: payload,
-          error: error instanceof Error ? error.message : "Failed to import action.",
-        });
+  const model = buildProjectActionsModel({
+    source,
+    saving,
+    platform: typeof navigator === "undefined" ? "" : navigator.platform,
+    fileScripts: t3File.scripts,
+    fileStatus: t3File.status,
+  });
+
+  const runIntent = async (intent: ProjectActionsIntent) => {
+    const decision = resolveProjectActionsIntent(intent, {
+      scripts,
+      keybindings,
+      fileScripts: t3File.scripts,
+    });
+    switch (decision.kind) {
+      case "open-editor":
+        setRequest(decision.request);
+        return;
+      case "import": {
+        const result = await submit(null, decision.payload);
+        const failedRequest = resolveFileScriptImportFailure(decision.payload, result);
+        if (failedRequest) setRequest(failedRequest);
+        return;
       }
-    },
-    [submit],
-  );
+      case "persist":
+        await persist(decision.change);
+        return;
+      case "none":
+        return;
+    }
+  };
 
   return (
-    <SettingsSection id="project-actions" title="Actions">
+    <SettingsSection id={model.sectionId} title={model.title}>
       <SettingsRow
         serverScoped
-        settingKeys={["defaultProjectScripts"]}
-        mixed={mixed}
-        title="Actions"
-        description="Commands that run in this project's checkout or its worktree, with optional shortcuts."
-        onResetOverride={() => void persist(() => null)}
+        settingKeys={model.header.settingKeys}
+        mixed={model.header.mixed}
+        title={model.header.title}
+        description={model.header.description}
+        onResetOverride={() => void runIntent({ kind: "reset-override" })}
         control={
           <div className="flex flex-wrap items-center gap-1.5">
-            {importableScripts.length > 0 ? (
+            {model.importMenu ? (
               <Menu>
                 <MenuTrigger
                   render={
                     <Button
-                      id="import-scripts"
+                      id={model.importMenu.buttonId}
                       size="xs"
                       variant="ghost"
-                      disabled={saving}
+                      disabled={model.importMenu.disabled}
                       type="button"
                     />
                   }
                 >
-                  Import scripts
+                  {model.importMenu.label}
                   <ChevronDownIcon className="size-3.5" />
                 </MenuTrigger>
                 <MenuPopup align="end">
                   <MenuGroup>
-                    <MenuGroupLabel>Import from t3.json</MenuGroupLabel>
+                    <MenuGroupLabel>{model.importMenu.groupLabel}</MenuGroupLabel>
                     <p className="px-2 pb-2 text-pretty text-sm text-muted-foreground">
-                      Add actions declared by this checkout without editing them first.
+                      {model.importMenu.description}
                     </p>
                   </MenuGroup>
                   <MenuSeparator />
-                  {importableScripts.map((fileScript) => (
+                  {model.importMenu.items.map((item) => (
                     <MenuItem
-                      key={`${fileScript.name} ${fileScript.command}`}
-                      onClick={() => void importFileScript(fileScript)}
+                      key={item.key}
+                      onClick={() => void runIntent({ kind: "import", key: item.key })}
                     >
-                      <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4 shrink-0" />
+                      <ScriptIcon icon={item.icon} className="size-4 shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-medium">{fileScript.name}</div>
+                        <div className="truncate font-medium">{item.name}</div>
                         <div className="truncate font-mono text-muted-foreground">
-                          {fileScript.command}
+                          {item.command}
                         </div>
                       </div>
                     </MenuItem>
@@ -184,32 +142,28 @@ export function ProjectActionsSettings() {
             <Button
               size="xs"
               variant="outline"
-              disabled={saving || targets.length === 0}
-              onClick={() => setRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT })}
+              disabled={model.addAction.disabled}
+              onClick={() => void runIntent({ kind: "add" })}
             >
               <PlusIcon className="size-3.5" />
-              Add action
+              {model.addAction.label}
             </Button>
           </div>
         }
       />
-      {mixed ? (
-        <SettingsRow
-          title="Different actions across environments"
-          description="Choose one environment to edit its list. Adding an action here adds it on every selected environment."
-        />
+      {model.mixedNotice ? (
+        <SettingsRow title={model.mixedNotice.title} description={model.mixedNotice.description} />
       ) : (
         <ProjectActionsList
-          scripts={scripts}
-          keybindings={keybindings}
-          disabled={saving}
-          onEdit={(script) => setRequest(editorRequestForScript(script, keybindings))}
+          rows={model.rows}
+          emptyLabel={model.emptyLabel}
+          onEdit={(scriptId) => void runIntent({ kind: "edit", scriptId })}
         />
       )}
-      {t3File.status === "invalid" ? (
+      {model.invalidFileNotice ? (
         <SettingsRow
-          title="t3.json is invalid"
-          description="A t3.json exists in this checkout but fails to parse, so every action and icon it declares is ignored. Check the JSON syntax and icon values."
+          title={model.invalidFileNotice.title}
+          description={model.invalidFileNotice.description}
           className="text-warning"
         />
       ) : null}
@@ -217,9 +171,7 @@ export function ProjectActionsSettings() {
         request={request}
         scripts={scripts}
         onSubmit={submit}
-        onDelete={(id) =>
-          void persist((current) => current.filter((script) => script.id !== id), id, null)
-        }
+        onDelete={(scriptId) => void runIntent({ kind: "remove", scriptId })}
         onClose={() => setRequest(null)}
       />
     </SettingsSection>

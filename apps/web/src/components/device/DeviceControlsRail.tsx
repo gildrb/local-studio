@@ -33,6 +33,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import type { DeviceStreamHandle, DeviceViewControls } from "./DeviceStreamView";
 import type { DeviceControls } from "./useDeviceControls";
+import { buildDeviceControlsRailModel, DEVICE_RAIL_TEXT_SIZES } from "./DeviceControlsRail.logic";
 
 /** Stable floating controls for both presentations, regardless of panel width. */
 export function DeviceControlsRail(props: {
@@ -51,8 +52,17 @@ export function DeviceControlsRail(props: {
   const { view, handle, controls } = props;
   const popupSide = "left";
   const settings = controls.detail?.settings;
-  const inputDisabled = !handle?.inputConnected;
-  const nextAppearance = settings?.appearance === "dark" ? "light" : "dark";
+  const rail = buildDeviceControlsRailModel({
+    platform: props.platform,
+    inputConnected: !!handle?.inputConnected,
+    controlsDisabled: controls.disabled,
+    settings,
+    streaming: view.streaming,
+    phoneUnavailableReason: view.phoneUnavailableReason,
+    keyboardAttached: view.keyboard ? view.keyboard.attached : null,
+    screenshotPending: props.screenshotPending,
+  });
+  const inputDisabled = rail.inputDisabled;
   return (
     <aside
       aria-label="Device controls"
@@ -68,7 +78,7 @@ export function DeviceControlsRail(props: {
         >
           <Home />
         </RailButton>
-        {props.platform === "android" ? (
+        {rail.rotate.kind === "menu" ? (
           <>
             <RailButton
               tooltipSide={popupSide}
@@ -93,7 +103,7 @@ export function DeviceControlsRail(props: {
                     size="icon-sm"
                     variant="ghost"
                     aria-label="Rotate device"
-                    disabled={controls.disabled}
+                    disabled={rail.rotate.disabled}
                   />
                 }
               >
@@ -119,7 +129,7 @@ export function DeviceControlsRail(props: {
           <RailButton
             tooltipSide={popupSide}
             label="Rotate device"
-            disabled={inputDisabled || !!view.keyboard?.attached}
+            disabled={rail.rotate.disabled}
             onClick={() => handle?.rotate()}
           >
             <RotateCcw />
@@ -128,11 +138,11 @@ export function DeviceControlsRail(props: {
         <RailDivider />
         <RailButton
           tooltipSide={popupSide}
-          label={`Switch device to ${nextAppearance} mode`}
-          disabled={controls.disabled || !settings?.appearance}
-          onClick={() => void controls.act({ type: "setAppearance", value: nextAppearance })}
+          label={rail.appearance.label}
+          disabled={rail.appearance.disabled}
+          onClick={() => void controls.act({ type: "setAppearance", value: rail.appearance.next })}
         >
-          {settings?.appearance === "dark" ? <Sun /> : <Moon />}
+          {rail.appearance.icon === "sun" ? <Sun /> : <Moon />}
         </RailButton>
         <Menu>
           <MenuTrigger
@@ -142,7 +152,7 @@ export function DeviceControlsRail(props: {
                 variant="ghost"
                 aria-label="Device text size"
                 title="Device text size"
-                disabled={controls.disabled || !settings?.textSize}
+                disabled={rail.textSize.disabled}
               />
             }
           >
@@ -150,7 +160,7 @@ export function DeviceControlsRail(props: {
           </MenuTrigger>
           <MenuPopup side={popupSide} className="min-w-40">
             <MenuRadioGroup
-              value={settings?.textSize ?? ""}
+              value={rail.textSize.value ?? ""}
               onValueChange={(value) => {
                 if (
                   value === "small" ||
@@ -161,14 +171,7 @@ export function DeviceControlsRail(props: {
                   void controls.act({ type: "setTextSize", value });
               }}
             >
-              {(
-                [
-                  ["small", "Small"],
-                  ["default", "Default"],
-                  ["large", "Large"],
-                  ["extra-large", "Extra large"],
-                ] as const
-              ).map(([value, label]) => (
+              {DEVICE_RAIL_TEXT_SIZES.map(([value, label]) => (
                 <MenuRadioItem key={value} value={value}>
                   <span className="flex items-center gap-2">
                     <span className="flex-1">{label}</span>
@@ -189,8 +192,8 @@ export function DeviceControlsRail(props: {
         </RailButton>
         <RailButton
           tooltipSide={popupSide}
-          label={props.screenshotPending ? "Capturing screenshot" : "Save screenshot"}
-          disabled={!view.streaming || props.screenshotPending}
+          label={rail.screenshot.label}
+          disabled={rail.screenshot.disabled}
           onClick={props.onScreenshot}
         >
           <Camera />
@@ -229,8 +232,8 @@ export function DeviceControlsRail(props: {
           tooltipSide={popupSide}
           label="3D view"
           pressed={view.phone}
-          disabled={!view.streaming || !!view.phoneUnavailableReason}
-          description={view.phoneUnavailableReason ?? undefined}
+          disabled={rail.phoneView.disabled}
+          description={rail.phoneView.description ?? undefined}
           onClick={view.showPhone}
         >
           <Box />
@@ -239,16 +242,16 @@ export function DeviceControlsRail(props: {
           tooltipSide={popupSide}
           label="Flat view"
           pressed={!view.phone}
-          disabled={!view.streaming}
+          disabled={rail.flatViewDisabled}
           onClick={view.showFlat}
         >
           <Smartphone />
         </RailButton>
-        {view.keyboard ? (
+        {view.keyboard && rail.keyboard ? (
           <RailButton
             tooltipSide={popupSide}
-            label={view.keyboard.attached ? "Detach Magic Keyboard" : "Attach Magic Keyboard"}
-            pressed={view.keyboard.attached}
+            label={rail.keyboard.label}
+            pressed={rail.keyboard.attached}
             onClick={view.keyboard.toggle}
           >
             <Keyboard />

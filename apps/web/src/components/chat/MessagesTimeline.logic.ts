@@ -4,6 +4,14 @@ import * as Equal from "effect/Equal";
 import { shallow } from "zustand/vanilla/shallow";
 import { renderCodexDirectivesForCopy } from "@t3tools/client-runtime/codex-markdown-directives";
 import { commandProgramName } from "@t3tools/client-runtime/work-log/command-label";
+import { parseMarkdownTree } from "@t3tools/client-runtime/markdown-parse";
+import type { Root, RootContent } from "mdast";
+import remarkGfm from "remark-gfm";
+import {
+  getQuestionAnswerPreview,
+  getQuestionTextPreview,
+  hasQuestionAnswer,
+} from "@t3tools/client-runtime/work-log/user-input";
 import {
   liveActivityToolStatus,
   normalizeCompactToolLabel,
@@ -26,6 +34,7 @@ import {
   workEntryIndicatesToolSuccess,
   workEntryIndicatesToolNeutralStatus,
   workLogEntryIsToolLike,
+  workEntrySignalsSevereFailure,
   type TimelineEntry,
   type WorkLogEntry,
 } from "../../session-logic";
@@ -34,6 +43,7 @@ import type { QueuedComposerMessage } from "../../queuedMessageStore";
 import {
   type MessageId,
   type OrchestrationLatestTurn,
+  type ToolActivityIcon,
   type TurnId,
   type WorktreeSetupSnapshot,
 } from "@t3tools/contracts";
@@ -1693,4 +1703,410 @@ function isRowUnchanged(a: MessagesTimelineRow, b: MessagesTimelineRow): boolean
       );
     }
   }
+}
+
+export type WorkEntryIconName =
+  | "bot"
+  | "brain"
+  | "browser"
+  | "check"
+  | "circle-alert"
+  | "computer"
+  | "device"
+  | "eye"
+  | "globe"
+  | "hammer"
+  | "message-circle"
+  | "search"
+  | "square-pen"
+  | "terminal"
+  | "pull-request"
+  | "t3-code"
+  | "wrench"
+  | "x"
+  | "zap";
+
+export type WorkEntryIconTint = "foreground" | "icon-muted";
+
+export function workToneIcon(tone: WorkLogEntry["tone"]): {
+  iconName: WorkEntryIconName;
+  tint: WorkEntryIconTint;
+} {
+  if (tone === "error") {
+    return { iconName: "circle-alert", tint: "foreground" };
+  }
+  if (tone === "thinking") {
+    return { iconName: "brain", tint: "icon-muted" };
+  }
+  if (tone === "info") {
+    return { iconName: "check", tint: "icon-muted" };
+  }
+  return { iconName: "zap", tint: "foreground" };
+}
+
+export function toolGroupSummaryIconName(kind: ToolGroupSummaryKind): WorkEntryIconName {
+  switch (kind) {
+    case "pull-request":
+    case "link-pr":
+    case "unlink-pr":
+    case "list-prs":
+      return "pull-request";
+    case "read":
+      return "eye";
+    case "edit":
+      return "square-pen";
+    case "command":
+      return "terminal";
+    case "browser":
+      return "browser";
+    case "device":
+      return "device";
+    case "search":
+      return "globe";
+    case "code-search":
+      return "search";
+    case "other":
+      return "wrench";
+    case "dynamic-tool":
+      return "hammer";
+    case "agent-tool":
+      return "bot";
+    case "tone-tool":
+      return "zap";
+    case "update":
+    case "mixed":
+      return "hammer";
+  }
+}
+
+export function workEntryIconName(workEntry: WorkLogEntry): WorkEntryIconName {
+  if (
+    workEntry.questionAnswer ||
+    workEntry.sourceActivityKind === "user-input.requested" ||
+    workEntry.sourceActivityKind === "user-input.resolved"
+  ) {
+    return "message-circle";
+  }
+  if (workEntry.toolSurface) return workEntry.toolSurface;
+  const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
+  if (toolPresentation) return toolPresentation.icon;
+  const action = toolGroupAction(workEntry);
+  if (action !== "other") return toolGroupSummaryIconName(action);
+
+  switch (workEntry.itemType) {
+    case "mcp_tool_call":
+      return "wrench";
+    case "dynamic_tool_call":
+      return "hammer";
+    case "collab_agent_tool_call":
+      return "bot";
+  }
+
+  if (workEntry.taskId) {
+    return "bot";
+  }
+
+  return workToneIcon(workEntry.tone).iconName;
+}
+
+export function toolIconAcceptsTint(
+  iconName: WorkEntryIconName,
+  toolIcon: ToolActivityIcon | undefined,
+): boolean {
+  return toolIcon === undefined && iconName !== "computer";
+}
+
+export function workEntryRawCommand(
+  workEntry: Pick<WorkLogEntry, "command" | "rawCommand">,
+): string | null {
+  const rawCommand = workEntry.rawCommand?.trim();
+  if (!rawCommand || !workEntry.command) {
+    return null;
+  }
+  return rawCommand === workEntry.command.trim() ? null : rawCommand;
+}
+
+export function buildToolCallExpandedBody(
+  workEntry: WorkLogEntry,
+  workspaceRoot: string | undefined,
+  visibleLabel: string,
+  viewedImagePath: string | null,
+): string | null {
+  const blocks: string[] = [];
+  const seen = new Set<string>([visibleLabel.trim()]);
+  const addBlock = (value: string | null | undefined) => {
+    const text = value?.trim();
+    if (!text || seen.has(text)) return;
+    seen.add(text);
+    blocks.push(text);
+  };
+  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
+    addBlock(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
+  }
+  const command = workEntry.command?.trim();
+  const raw = workEntryRawCommand(workEntry);
+  if (command === visibleLabel.trim()) {
+    seen.add(command);
+  } else {
+    addBlock(raw ?? command);
+  }
+  const detail = workEntry.detail?.trim();
+  if (detail !== viewedImagePath?.trim()) {
+    addBlock(detail);
+  }
+  const viewedImagePaths = new Set(
+    viewedImagePath
+      ? [viewedImagePath.trim(), formatWorkspaceRelativePath(viewedImagePath, workspaceRoot)]
+      : [],
+  );
+  const changedFiles = (workEntry.changedFiles ?? []).flatMap((filePath) => {
+    const formattedPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
+    return viewedImagePaths.has(filePath) ||
+      viewedImagePaths.has(formattedPath) ||
+      filePath.trim() === detail ||
+      formattedPath === detail
+      ? []
+      : [formattedPath];
+  });
+  if (changedFiles.length > 0) {
+    addBlock([...new Set(changedFiles)].join("\n"));
+  }
+  return blocks.length > 0 ? blocks.join("\n\n") : null;
+}
+
+export type WorkEntryRowIconTone = "warning" | "destructive" | "failed" | WorkEntryIconTint;
+
+export type WorkEntryRowHeadingTone =
+  | "warning"
+  | "destructive"
+  | "secondary-label"
+  | "foreground-80";
+
+export interface PlainWorkEntryRowInput {
+  readonly workEntry: WorkLogEntry;
+  readonly workspaceRoot: string | undefined;
+  readonly displayLabel: string | undefined;
+  readonly viewedImagePath: string | null;
+  readonly expanded: boolean;
+}
+
+export interface PlainWorkEntryRowModel {
+  readonly previewText: string;
+  readonly answerPreview: string | null;
+  readonly answerHighlighted: boolean;
+  readonly showWarningIndicator: boolean;
+  readonly showFailedIndicator: boolean;
+  readonly showDestructiveRowStyle: boolean;
+  readonly entryIconName: WorkEntryIconName;
+  readonly entryToolIcon: ToolActivityIcon | undefined;
+  readonly iconTone: WorkEntryRowIconTone;
+  readonly headingTone: WorkEntryRowHeadingTone;
+  readonly showTrailingFailureMark: boolean;
+  readonly canExpand: boolean;
+  readonly expandedBody: string | null;
+  readonly accessibleDisplayText: string;
+}
+
+export function buildPlainWorkEntryRowModel(input: PlainWorkEntryRowInput): PlainWorkEntryRowModel {
+  const { workEntry, workspaceRoot, displayLabel, viewedImagePath, expanded } = input;
+  const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
+  const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
+  const showDestructiveRowStyle =
+    showFailedIndicator &&
+    (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
+  const entryIconName =
+    showWarningIndicator || showDestructiveRowStyle ? "circle-alert" : workEntryIconName(workEntry);
+  const entryToolIcon =
+    showWarningIndicator || showDestructiveRowStyle
+      ? undefined
+      : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
+  const questionHeading = workEntry.questionAnswer
+    ? getQuestionTextPreview(workEntry.questionAnswer)
+    : "";
+  const previewText =
+    displayLabel ?? (questionHeading || workEntryDisplayLabel(workEntry, workspaceRoot));
+  const hasAnswer = workEntry.questionAnswer ? hasQuestionAnswer(workEntry.questionAnswer) : false;
+  const answerPreview =
+    workEntry.questionAnswer && hasAnswer
+      ? getQuestionAnswerPreview(workEntry.questionAnswer)
+      : null;
+  const canExpand =
+    Boolean(workEntry.questionAnswer) ||
+    (showFailedIndicator && previewText.trim().length > 0) ||
+    (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
+    Boolean(
+      workEntryRawCommand(workEntry) ||
+      workEntry.command?.trim() ||
+      workEntry.detail?.trim() ||
+      workEntry.changedFiles?.length ||
+      viewedImagePath,
+    );
+  const expandedBody = expanded
+    ? buildToolCallExpandedBody(workEntry, workspaceRoot, previewText, viewedImagePath)
+    : null;
+  const iconTone: WorkEntryRowIconTone = showWarningIndicator
+    ? "warning"
+    : showDestructiveRowStyle
+      ? "destructive"
+      : showFailedIndicator
+        ? "failed"
+        : workEntry.tone === "tool"
+          ? "icon-muted"
+          : workToneIcon(workEntry.tone).tint;
+  const headingTone: WorkEntryRowHeadingTone = showWarningIndicator
+    ? "warning"
+    : showDestructiveRowStyle
+      ? "destructive"
+      : workLogEntryIsToolLike(workEntry)
+        ? "secondary-label"
+        : "foreground-80";
+  const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
+  return {
+    previewText,
+    answerPreview,
+    answerHighlighted: !expanded && hasAnswer,
+    showWarningIndicator,
+    showFailedIndicator,
+    showDestructiveRowStyle,
+    entryIconName,
+    entryToolIcon,
+    iconTone,
+    headingTone,
+    showTrailingFailureMark:
+      showFailedIndicator &&
+      !showDestructiveRowStyle &&
+      !toolIconAcceptsTint(entryIconName, entryToolIcon),
+    canExpand,
+    expandedBody,
+    accessibleDisplayText: showFailedIndicator
+      ? `${accessiblePreview}, tool call failed`
+      : accessiblePreview,
+  };
+}
+
+export interface ActivityGroupHeaderModel {
+  readonly label: string;
+  readonly iconName: WorkEntryIconName;
+  readonly toolIcon: ToolActivityIcon | undefined;
+  readonly failed: boolean;
+  readonly thinking: boolean;
+  readonly visibleWorkCount: number;
+}
+
+export function buildActivityGroupHeaderModel(
+  row: Extract<MessagesTimelineRow, { kind: "activity-group" }>,
+  workspaceRoot: string | undefined,
+): ActivityGroupHeaderModel {
+  const work = omitSupersededLifecycleMarkers(
+    row.entries.flatMap((entry) =>
+      entry.kind === "work" && workEntryIsVisibleInGroup(entry.entry, row.active)
+        ? [entry.entry]
+        : [],
+    ),
+    (entry) => entry,
+  );
+  const thoughtCount = row.entries.filter((entry) => entry.kind === "message").length;
+  const lastThoughtIndex = row.entries.findLastIndex((entry) => entry.kind === "message");
+  const trailingWork = omitSupersededLifecycleMarkers(
+    row.entries
+      .slice(lastThoughtIndex + 1)
+      .flatMap((entry) =>
+        entry.kind === "work" && workEntryIsVisibleInGroup(entry.entry, row.active)
+          ? [entry.entry]
+          : [],
+      ),
+    (entry) => entry,
+  );
+  const liveWork = trailingWork.findLast(workEntryIsActiveTurnActivity) ?? trailingWork.at(-1);
+  const thinking = row.active && liveWork === undefined;
+  const iconWork = row.active ? liveWork : work.at(-1);
+  const failed = iconWork !== undefined && workEntryDisplayIndicatesToolFailure(iconWork);
+  const label = row.active
+    ? liveWork
+      ? liveWorkEntryLabel(liveWork, workspaceRoot, true)
+      : "Thinking"
+    : work.length > 0
+      ? summarizeToolGroup(work)
+      : `Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`;
+  return {
+    label,
+    iconName: iconWork ? workEntryIconName(iconWork) : "brain",
+    toolIcon: iconWork?.toolIcon ?? iconWork?.toolSource?.icon,
+    failed,
+    thinking,
+    visibleWorkCount: work.length,
+  };
+}
+
+export type TimelineRowBottomPadding = 0 | 4 | 6 | 8 | 16;
+
+/** Space under each timeline row in px. Commentary (non-terminal assistant) rows carry no
+    metadata row, so they sit closer to the work that follows them. */
+export function timelineRowBottomPadding(row: MessagesTimelineRow): TimelineRowBottomPadding {
+  if (row.kind === "work" && row.isExpandedToolGroup) return 4;
+  if ((row.kind === "work-toggle" || row.kind === "work-live") && row.expanded) return 0;
+  if (row.kind === "turn-fold" || row.kind === "working") return 6;
+  if (
+    (row.kind === "message" && row.message.role === "assistant" && !row.showAssistantMeta) ||
+    (row.kind === "message" && row.message.role === "reasoning") ||
+    row.kind === "work" ||
+    row.kind === "work-live" ||
+    row.kind === "work-toggle" ||
+    row.kind === "activity-group" ||
+    row.kind === "thinking" ||
+    row.kind === "worktree-setup"
+  ) {
+    return 8;
+  }
+  return 16;
+}
+
+function thoughtPreviewPlainText(node: Root | RootContent): string {
+  if (node.type === "html" || node.type === "definition") return "";
+  if ("alt" in node) return node.alt ?? "";
+  if ("value" in node) return node.value;
+  if ("children" in node) {
+    const separator = ["root", "blockquote", "list", "listItem", "table", "tableRow"].includes(
+      node.type,
+    )
+      ? " "
+      : "";
+    return node.children.map(thoughtPreviewPlainText).join(separator);
+  }
+  return node.type === "break" ? " " : "";
+}
+
+export function remarkThoughtPreview(fallback: string) {
+  return (tree: Root) => {
+    tree.children = [
+      {
+        type: "text",
+        value: thoughtPreviewPlainText(tree).replace(/\s+/g, " ").trim() || fallback,
+      },
+    ];
+  };
+}
+
+export function thoughtPreviewText(markdown: string, fallback: string): string {
+  const tree = parseMarkdownTree(markdown, [remarkGfm, [remarkThoughtPreview, fallback]]);
+  return tree.children.map(thoughtPreviewPlainText).join("");
+}
+
+export function formatWorkingTimer(startIso: string, endIso: string): string | null {
+  const startedAtMs = Date.parse(startIso);
+  const endedAtMs = Date.parse(endIso);
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
+    return null;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+
+  return formatDuration(elapsedSeconds * 1_000);
+}
+
+export function formatWorkingTimerNow(startIso: string): string {
+  return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
 }

@@ -3,12 +3,12 @@ import { EnvironmentId } from "@t3tools/contracts";
 
 import type { ComposerFileAttachment } from "../../composerDraftStore";
 import {
-  wrapExpandedImageIndex,
   attachVideoThumbnail,
   buildAttachmentVideoPreview,
   buildExpandedImagePreview,
   resolveMarkdownMediaPreview,
 } from "./ExpandedImagePreview";
+import { wrapExpandedImageIndex } from "./expandedMedia.logic";
 
 describe("resolveMarkdownMediaPreview", () => {
   afterEach(() => {

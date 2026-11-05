@@ -3,7 +3,8 @@ import { CircleIcon } from "lucide-react";
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { PullRequestFiltersMenu, pullRequestProjectKey } from "./PullRequestListFilters";
+import { PullRequestFiltersMenu } from "./PullRequestListFilters";
+import { pullRequestProjectKey } from "./PullRequestsPage.logic";
 
 function findValueChange(
   node: ReactNode,

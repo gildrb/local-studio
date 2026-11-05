@@ -5,12 +5,8 @@
  * a list of everyone with access, which is worth a request when somebody wants it and worth
  * nothing on every pull request they merely open.
  */
-import type {
-  EnvironmentId,
-  PullRequestRef,
-  PullRequestReviewerCandidate,
-} from "@t3tools/contracts";
-import { CheckIcon, UserPlusIcon } from "lucide-react";
+import type { EnvironmentId, PullRequestRef } from "@t3tools/contracts";
+import { CheckIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
@@ -21,18 +17,13 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import { toastManager } from "../ui/toast";
 import { PullRequestCandidatePicker } from "./PullRequestCandidatePicker";
 import { PullRequestActorLabel } from "./pullRequestPresentation";
-import { readableFailure } from "./pullRequestDetail.logic";
-
-/** Long lists are common — an organisation repository lists everyone — so what arrived can be
- * narrowed here. It narrows only what arrived: the host is asked once, when the menu opens. */
-function matches(candidate: PullRequestReviewerCandidate, query: string): boolean {
-  if (query.length === 0) return true;
-  const needle = query.toLowerCase();
-  return (
-    candidate.login.toLowerCase().includes(needle) ||
-    (candidate.name ?? "").toLowerCase().includes(needle)
-  );
-}
+import {
+  buildPullRequestReviewerPickerModel,
+  pullRequestReviewerCandidateKey,
+  pullRequestReviewerToggleToast,
+  resolvePullRequestReviewerToggle,
+  type PullRequestReviewerCandidateRowModel,
+} from "./PullRequestReviewerPicker.logic";
 
 export function PullRequestReviewerPicker({
   environmentId,
@@ -56,76 +47,70 @@ export function PullRequestReviewerPicker({
   const requestReviewers = useAtomCommand(pullRequestEnvironment.requestReviewers, {
     reportFailure: false,
   });
-
-  const candidates = useMemo(
-    () => (candidatesQuery.data?.candidates ?? []).filter((entry) => matches(entry, query)),
-    [candidatesQuery.data, query],
+  const candidateByKey = useMemo(
+    () =>
+      new Map(
+        (candidatesQuery.data?.candidates ?? []).map(
+          (candidate) => [pullRequestReviewerCandidateKey(candidate), candidate] as const,
+        ),
+      ),
+    [candidatesQuery.data],
   );
 
-  const toggle = async (candidate: PullRequestReviewerCandidate) => {
-    if (pending !== null) return;
+  const model = buildPullRequestReviewerPickerModel({
+    allowed,
+    query,
+    candidates: candidatesQuery.data?.candidates ?? null,
+    isPending: candidatesQuery.isPending,
+    error: candidatesQuery.error,
+    truncated: candidatesQuery.data?.truncated === true,
+    changePending: pending !== null,
+  });
+
+  const toggle = async (row: PullRequestReviewerCandidateRowModel) => {
+    const candidate = candidateByKey.get(row.key);
+    if (candidate === undefined) return;
+    const decision = resolvePullRequestReviewerToggle({
+      candidate,
+      changePending: pending !== null,
+    });
+    if (decision.kind === "ignore") return;
     setPending(candidate.id);
     const result = await requestReviewers({
       environmentId,
       input: {
         ...reference,
-        reviewers: [{ id: candidate.id, kind: candidate.kind }],
-        requested: !candidate.isRequested,
+        reviewers: [decision.reviewer],
+        requested: decision.requested,
       },
     });
     setPending(null);
-    if (result._tag === "Failure") {
-      toastManager.add({
-        type: "error",
-        title: candidate.isRequested
-          ? `Could not take back the review request to ${candidate.login}`
-          : `Could not ask ${candidate.login} for a review`,
-        description: readableFailure(
-          squashAtomCommandFailure(result),
-          "The host refused it. Check that you have write access on this repository, and that they still have access to it.",
-        ),
-      });
-      return;
-    }
-    toastManager.add({
-      type: "success",
-      title: candidate.isRequested
-        ? `Review request to ${candidate.login} taken back`
-        : `Review requested from ${candidate.login}`,
-    });
+    toastManager.add(
+      pullRequestReviewerToggleToast({
+        candidate,
+        failed: result._tag === "Failure",
+        failure: result._tag === "Failure" ? squashAtomCommandFailure(result) : null,
+      }),
+    );
   };
 
   return (
     <PullRequestCandidatePicker
-      icon={<UserPlusIcon className="size-3.5" />}
-      label="Request a review"
-      allowed={allowed}
-      disabledReason="Asking someone to review needs write access on this repository"
+      model={model}
       open={open}
       onOpenChange={setOpen}
       query={query}
       onQueryChange={setQuery}
-      searchLabel="Search people with access"
-      isPending={candidatesQuery.isPending && candidatesQuery.data === null}
-      error={candidatesQuery.data === null ? candidatesQuery.error : null}
-      candidates={candidates}
-      emptyLabel="Nobody else has access to this repository."
-      noMatchLabel="Nobody with access matches that."
-      errorLabel="The people with access could not be read."
-      truncated={candidatesQuery.data?.truncated === true}
-      truncatedLabel="This repository has more people with access than are listed here. Ask for the rest on the host."
-      candidateKey={(candidate) => `${candidate.kind}:${candidate.id}`}
-      disabled={pending !== null}
-      onSelect={(candidate) => void toggle(candidate)}
+      onSelect={(row) => void toggle(row)}
     >
-      {(candidate) => (
+      {(row) => (
         <>
-          <PullRequestActorLabel actor={candidate} className="flex-1" />
-          {candidate.kind === "team" ? (
-            <span className="shrink-0 text-muted-foreground">team</span>
+          <PullRequestActorLabel actor={candidateByKey.get(row.key) ?? null} className="flex-1" />
+          {row.kindLabel !== null ? (
+            <span className="shrink-0 text-muted-foreground">{row.kindLabel}</span>
           ) : null}
-          {candidate.isRequested ? (
-            <CheckIcon aria-label="Already asked" className="size-3.5 shrink-0" />
+          {row.requested ? (
+            <CheckIcon aria-label={row.requestedAriaLabel} className="size-3.5 shrink-0" />
           ) : null}
         </>
       )}

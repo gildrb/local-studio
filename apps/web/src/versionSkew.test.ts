@@ -15,11 +15,13 @@ import {
   isServerUpdateFailureDismissed,
   isVersionMismatchDismissed,
   resolveServerConfigVersionMismatch,
-  resolveServerSelfUpdateCapability,
   resolveVersionMismatch,
+} from "./versionSkew";
+import {
+  resolveServerSelfUpdateCapability,
   serverUpdateGuidance,
   supportsDesktopAppUpdate,
-} from "./versionSkew";
+} from "./versionSkew.logic";
 
 const MISMATCH_HINT =
   "Version mismatch. Try syncing the client and server to the same T3 Code version.";

@@ -13,8 +13,13 @@ import {
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Switch } from "../ui/switch";
+import {
+  buildLocalEnvironmentSettingModel,
+  describeLocalEnvironmentSettingFailure,
+  resolveLocalEnvironmentSettingChange,
+  type LocalEnvironmentSettingIntent,
+} from "./LocalEnvironmentSetting.logic";
 import { SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
 
 // Toggling relaunches the desktop app, so the switch only reflects the value
 // this process started with; there is no live state to keep in sync.
@@ -24,15 +29,29 @@ export function LocalEnvironmentSetting() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (!setEnabled) return null;
+  const model = buildLocalEnvironmentSettingModel({
+    available: setEnabled !== undefined,
+    enabled,
+    confirmOpen,
+    isUpdating,
+    error,
+  });
+  if (!setEnabled || model === null) return null;
 
-  const applyChange = async () => {
+  const dispatch = async (intent: LocalEnvironmentSettingIntent) => {
+    const change = resolveLocalEnvironmentSettingChange({ enabled, isUpdating, intent });
+    if (change.kind === "none") return;
+    if (change.kind === "set-dialog") {
+      setConfirmOpen(change.open);
+      if (change.clearError) setError(null);
+      return;
+    }
     setIsUpdating(true);
     setError(null);
     try {
-      await setEnabled(!enabled);
+      await setEnabled(change.enabled);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Couldn't change this setting.");
+      setError(describeLocalEnvironmentSettingFailure(cause));
       setIsUpdating(false);
     }
   };
@@ -40,59 +59,49 @@ export function LocalEnvironmentSetting() {
   return (
     <>
       <SettingsRow
-        {...searchableSetting("local-environment")}
-        description={
-          enabled
-            ? "Run agents on this computer. Turn off to use T3 Code only with remote environments."
-            : "Turned off. Agents only run in remote environments."
-        }
+        id={model.id}
+        title={model.title}
+        description={model.description}
         control={
           <Switch
-            checked={enabled}
-            disabled={isUpdating}
-            onCheckedChange={() => setConfirmOpen(true)}
-            aria-label="Local environment"
+            checked={model.switch.checked}
+            disabled={model.switch.disabled}
+            onCheckedChange={() => void dispatch({ kind: "toggle" })}
+            aria-label={model.switch.ariaLabel}
           />
         }
       />
       <AlertDialog
-        open={confirmOpen}
-        onOpenChange={(open) => {
-          if (isUpdating) return;
-          setConfirmOpen(open);
-          if (!open) setError(null);
-        }}
+        open={model.dialog.open}
+        onOpenChange={(open) => void dispatch({ kind: "dialog-open-change", open })}
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {enabled ? "Turn off local environment?" : "Turn on local environment?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {enabled
-                ? "T3 Code will restart without running a server on this computer. Any agents and terminals running here will stop, and other devices will no longer be able to connect to this computer. Your projects, history, and remote environments are unaffected."
-                : "T3 Code will restart and start running a server on this computer again."}
-            </AlertDialogDescription>
+            <AlertDialogTitle>{model.dialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>{model.dialog.description}</AlertDialogDescription>
           </AlertDialogHeader>
-          {error ? <p className="px-6 pb-4 text-sm text-destructive">{error}</p> : null}
+          {model.dialog.error !== null ? (
+            <p className="px-6 pb-4 text-sm text-destructive">{model.dialog.error}</p>
+          ) : null}
           <AlertDialogFooter>
-            <AlertDialogClose disabled={isUpdating} render={<Button variant="outline" />}>
-              Cancel
+            <AlertDialogClose
+              disabled={model.dialog.cancelDisabled}
+              render={<Button variant="outline" />}
+            >
+              {model.dialog.cancelLabel}
             </AlertDialogClose>
             <Button
-              variant={enabled ? "destructive" : "default"}
-              disabled={isUpdating}
-              onClick={() => void applyChange()}
+              variant={model.dialog.confirm.variant}
+              disabled={model.dialog.confirm.disabled}
+              onClick={() => void dispatch({ kind: "confirm" })}
             >
-              {isUpdating ? (
+              {model.dialog.confirm.busy ? (
                 <>
                   <Spinner size="sm" />
-                  Restarting…
+                  {model.dialog.confirm.label}
                 </>
-              ) : enabled ? (
-                "Restart and turn off"
               ) : (
-                "Restart and turn on"
+                model.dialog.confirm.label
               )}
             </Button>
           </AlertDialogFooter>

@@ -10,6 +10,10 @@ import { isElectron } from "../../env";
 import { AuthSurfaceShell } from "../auth/AuthSurfaceShell";
 import { resolveClerkSignInProps } from "../clerk/authRedirect";
 import { Button } from "../ui/button";
+import {
+  buildConnectCliAuthModel,
+  resolveConnectCliAuthEffect,
+} from "./ConnectCliAuthSurface.logic";
 
 function ConnectCliAuthMessage({
   eyebrow,
@@ -30,13 +34,6 @@ function ConnectCliAuthMessage({
     </>
   );
 }
-
-const invalidLinkMessage = {
-  eyebrow: "Authorization request",
-  title: "This connect link is incomplete",
-  description:
-    "The link is missing its authorization request. Re-run `t3 connect` in your terminal and open the freshly printed URL.",
-} as const;
 
 /**
  * /connect: the URL the CLI prints for the loopback flow. Waits for a Clerk
@@ -64,14 +61,19 @@ export function ConnectCliAuthorizeSurface() {
   }, [clerk, request]);
 
   useEffect(() => {
-    if (!request || !isLoaded || redirecting.current) {
+    const effect = resolveConnectCliAuthEffect({
+      hasRequest: Boolean(request),
+      isLoaded,
+      isSignedIn: isSignedIn === true,
+      signInOpened: signInOpened.current,
+      redirecting: redirecting.current,
+    });
+    if (effect.kind === "openSignIn") {
+      signInOpened.current = true;
+      openSignIn();
       return;
     }
-    if (!isSignedIn) {
-      if (!signInOpened.current) {
-        signInOpened.current = true;
-        openSignIn();
-      }
+    if (effect.kind !== "redirect" || !request) {
       return;
     }
     const authorizeUrl = buildConnectCliClerkAuthorizeUrl(request);
@@ -82,29 +84,23 @@ export function ConnectCliAuthorizeSurface() {
     window.location.assign(authorizeUrl);
   }, [isLoaded, isSignedIn, openSignIn, request]);
 
-  if (!request) {
-    return (
-      <AuthSurfaceShell>
-        <ConnectCliAuthMessage {...invalidLinkMessage} />
-      </AuthSurfaceShell>
-    );
-  }
+  const model = buildConnectCliAuthModel({
+    hasRequest: Boolean(request),
+    isLoaded,
+    isSignedIn: isSignedIn === true,
+  });
 
   return (
     <AuthSurfaceShell>
       <ConnectCliAuthMessage
-        eyebrow="Browser authorization"
-        title="Connecting your terminal"
-        description={
-          isSignedIn
-            ? "Redirecting to authorize T3 Connect for your CLI…"
-            : "Sign in to continue authorizing T3 Connect for your CLI."
-        }
+        eyebrow={model.eyebrow}
+        title={model.title}
+        description={model.description}
       />
-      {isLoaded && !isSignedIn ? (
+      {model.signIn !== null ? (
         <div className="mt-6">
           <Button type="button" onClick={openSignIn}>
-            Sign in
+            {model.signIn.label}
           </Button>
         </div>
       ) : null}

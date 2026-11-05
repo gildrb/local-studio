@@ -4,6 +4,12 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironments } from "../../state/environments";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { toastManager } from "../ui/toast";
+import {
+  isProviderAuthDeliveryConnected,
+  resolveProviderAuthCallbackFeedback,
+  resolveProviderAuthCompletion,
+  type ProviderAuthCallbackOutcome,
+} from "./ProviderAuthCallbackCoordinator.logic";
 
 /** Hosted web receives only the one-time code; the selected environment verifies and stores tokens. */
 export function ProviderAuthCallbackCoordinator() {
@@ -13,34 +19,34 @@ export function ProviderAuthCallbackCoordinator() {
   const { environments } = useEnvironments();
   const [delivery, setDelivery] = useState(pendingProviderAuthDelivery);
   const started = useRef(false);
-  const environmentId = delivery?.environmentId;
-  const connected = environments.some(
-    (environment) =>
-      environment.environmentId === environmentId && environment.connection.phase === "connected",
+  const connected = isProviderAuthDeliveryConnected(
+    delivery,
+    environments.map((environment) => ({
+      environmentId: environment.environmentId,
+      connected: environment.connection.phase === "connected",
+    })),
   );
   useEffect(() => {
-    const input = delivery;
-    if (!input || started.current || !connected) return;
+    const completion = resolveProviderAuthCompletion({
+      delivery,
+      started: started.current,
+      connected,
+    });
+    if (!completion) return;
     started.current = true;
-    void completeAuth({
-      environmentId: input.environmentId,
-      input: { instanceId: input.instanceId, flowId: input.flowId, callbackUrl: input.callbackUrl },
-    })
-      .then((result) => {
-        if (result._tag === "Failure")
-          toastManager.add({
-            type: "error",
-            title: "ChatGPT sign-in couldn't finish",
-            description: "Return to the provider and try again.",
-          });
-      })
-      .catch(() =>
+    const report = (outcome: ProviderAuthCallbackOutcome) => {
+      const feedback = resolveProviderAuthCallbackFeedback(outcome);
+      if (feedback.kind === "error-toast") {
         toastManager.add({
           type: "error",
-          title: "ChatGPT sign-in couldn't finish",
-          description: "Reconnect to the environment and try again.",
-        }),
-      )
+          title: feedback.title,
+          description: feedback.description,
+        });
+      }
+    };
+    void completeAuth(completion)
+      .then((result) => report(result._tag === "Failure" ? "failure" : "success"))
+      .catch(() => report("error"))
       .finally(() => {
         setDelivery(undefined);
         clearProviderAuthDelivery();

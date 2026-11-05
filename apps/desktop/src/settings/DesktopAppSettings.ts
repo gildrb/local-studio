@@ -467,13 +467,17 @@ const writeSettings = Effect.fn("desktop.settings.writeSettings")(function* (inp
   );
 });
 
-/** @public Service construction is part of the canonical Effect module API. */
-export const make = Effect.gen(function* () {
-  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+export interface DesktopAppSettingsLocation {
+  readonly settingsPath: string;
+  readonly defaultSettings: DesktopSettings;
+  readonly appVersion: string;
+}
+
+export const makeAtPath = Effect.fnUntraced(function* (location: DesktopAppSettingsLocation) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
-  const settingsRef = yield* SynchronizedRef.make(environment.defaultDesktopSettings);
+  const settingsRef = yield* SynchronizedRef.make(location.defaultSettings);
 
   const updateInMemory = (update: (settings: DesktopSettings) => DesktopSettings) =>
     SynchronizedRef.modify(settingsRef, (settings) => {
@@ -496,7 +500,7 @@ export const make = Effect.gen(function* () {
           (cause) =>
             new DesktopSettingsWriteError({
               operation: "create-temporary-file-name",
-              path: environment.desktopSettingsPath,
+              path: location.settingsPath,
               cause,
             }),
         ),
@@ -504,9 +508,9 @@ export const make = Effect.gen(function* () {
           writeSettings({
             fileSystem,
             path,
-            settingsPath: environment.desktopSettingsPath,
+            settingsPath: location.settingsPath,
             settings: nextSettings,
-            defaultSettings: environment.defaultDesktopSettings,
+            defaultSettings: location.defaultSettings,
             suffix,
           }),
         ),
@@ -517,11 +521,7 @@ export const make = Effect.gen(function* () {
   return DesktopAppSettings.of({
     get: SynchronizedRef.get(settingsRef),
     load: Effect.gen(function* () {
-      const settings = yield* readSettings(
-        fileSystem,
-        environment.desktopSettingsPath,
-        environment.appVersion,
-      );
+      const settings = yield* readSettings(fileSystem, location.settingsPath, location.appVersion);
       return yield* SynchronizedRef.setAndGet(settingsRef, settings);
     }).pipe(Effect.withSpan("desktop.settings.load")),
     setMainWindowBounds: (bounds, isMaximized) =>
@@ -572,6 +572,16 @@ export const make = Effect.gen(function* () {
     applyWslWindowsFallbackInMemory: updateInMemory(applyWslWindowsFallback).pipe(
       Effect.withSpan("desktop.settings.applyWslWindowsFallbackInMemory"),
     ),
+  });
+});
+
+/** @public Service construction is part of the canonical Effect module API. */
+export const make = Effect.gen(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  return yield* makeAtPath({
+    settingsPath: environment.desktopSettingsPath,
+    defaultSettings: environment.defaultDesktopSettings,
+    appVersion: environment.appVersion,
   });
 });
 

@@ -34,12 +34,12 @@ vi.mock("./ui/popover", () => ({
 vi.mock("./ui/switch", () => ({ Switch: "input" }));
 vi.mock("./ui/textarea", () => ({ Textarea: "textarea" }));
 
+import { ProjectScriptEditorDialog } from "./projectScriptEditor";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
-  ProjectScriptEditorDialog,
   type ProjectScriptActionResult,
   type ProjectScriptEditorRequest,
-} from "./projectScriptEditor";
+} from "./projectScriptEditor.logic";
 
 const onSubmit = vi.fn<Parameters<typeof ProjectScriptEditorDialog>[0]["onSubmit"]>();
 const onClose = vi.fn();

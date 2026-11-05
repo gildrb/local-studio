@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { summarizeGitHubRouting } from "./GitHubRoutingSettings";
+import { summarizeGitHubRouting } from "./GitHubRoutingSettings.logic";
 
 describe("summarizeGitHubRouting", () => {
   it("is empty when no machine shares", () => {

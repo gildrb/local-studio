@@ -13,6 +13,7 @@ import * as Ref from "effect/Ref";
 
 import * as BrowserSession from "../BrowserSession.ts";
 import * as BrowserImport from "./BrowserImport.ts";
+import { BrowserImportFailedError } from "./BrowserImportReader.ts";
 import { BROWSER_IMPORT_SOURCES, sourcePathContext } from "./Sources.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
@@ -101,7 +102,7 @@ describe("BrowserImport.importCookies", () => {
         })
         .pipe(Effect.flip);
 
-      assert.instanceOf(error, BrowserImport.BrowserImportFailedError);
+      assert.instanceOf(error, BrowserImportFailedError);
       assert.equal(error.reason, "unknownSourceProfile");
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
   );

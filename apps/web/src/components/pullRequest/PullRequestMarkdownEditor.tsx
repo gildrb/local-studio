@@ -7,6 +7,10 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { PullRequestMarkdown } from "./PullRequestMarkdown";
+import {
+  buildPullRequestMarkdownEditorModel,
+  resolvePullRequestMarkdownEditorKey,
+} from "./PullRequestMarkdownEditor.logic";
 
 /**
  * The box a body is rewritten in — a description, or a remark already posted. It owns the draft
@@ -54,47 +58,52 @@ export function PullRequestMarkdownEditor({
     setSeed(value);
     setDraft(value);
   }
-  const empty = draft.trim().length === 0;
-  const saveDisabled = saving || (empty && !allowEmpty);
+  const model = buildPullRequestMarkdownEditorModel({ draft, preview, saving, allowEmpty });
 
   return (
     <div
       className={cn("space-y-2", className)}
       onKeyDown={(event) => {
         if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-        if (
-          event.key === "Enter" &&
-          (event.metaKey || event.ctrlKey) &&
-          !event.shiftKey &&
-          !event.altKey
-        ) {
+        const key = resolvePullRequestMarkdownEditorKey({
+          key: event.key,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          saving,
+        });
+        if (key === "save") {
           event.preventDefault();
           event.stopPropagation();
-          if (!saveDisabled && !event.repeat) onSave(draft);
+          if (!model.saveDisabled && !event.repeat) onSave(draft);
           return;
         }
-        if (event.key !== "Escape" || saving) return;
+        if (key !== "cancel") return;
         event.preventDefault();
         onCancel();
       }}
     >
       <ToggleGroup
-        aria-label="Markdown editor mode"
+        aria-label={model.modeLabel}
         variant="segmented"
-        value={[preview ? "preview" : "write"]}
-        disabled={saving}
+        value={[model.mode]}
+        disabled={model.modeDisabled}
         onValueChange={(next) => {
           const mode = next[0];
           if (mode === "write" || mode === "preview") setPreview(mode === "preview");
         }}
       >
-        <Toggle value="write">Write</Toggle>
-        <Toggle value="preview">Preview</Toggle>
+        {model.modes.map((mode) => (
+          <Toggle key={mode.value} value={mode.value}>
+            {mode.label}
+          </Toggle>
+        ))}
       </ToggleGroup>
       {preview ? (
         <div className="rounded-lg border border-border/60 px-3 py-2">
-          {empty ? (
-            <p className="text-xs text-muted-foreground">Nothing to preview.</p>
+          {model.empty ? (
+            <p className="text-xs text-muted-foreground">{model.emptyPreviewLabel}</p>
           ) : (
             <PullRequestMarkdown
               text={draft}
@@ -116,11 +125,16 @@ export function PullRequestMarkdownEditor({
         />
       )}
       <div className="flex justify-end gap-2">
-        <Button size="xs" variant="ghost" disabled={saving} onClick={onCancel}>
-          Cancel
+        <Button size="xs" variant="ghost" disabled={model.cancelDisabled} onClick={onCancel}>
+          {model.cancelLabel}
         </Button>
-        <Button size="xs" variant="outline" disabled={saveDisabled} onClick={() => onSave(draft)}>
-          {saving ? "Saving..." : "Save"}
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={model.saveDisabled}
+          onClick={() => onSave(draft)}
+        >
+          {model.saveLabel}
         </Button>
       </div>
     </div>

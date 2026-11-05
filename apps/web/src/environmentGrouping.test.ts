@@ -15,7 +15,7 @@ import {
   projectGroupsSpanEnvironments,
 } from "./sidebarProjectGrouping";
 import { orderItemsByPreferredIds } from "./components/Sidebar.logic";
-import { legacyProjectCwdPreferenceKey } from "./uiStateStore";
+import { legacyProjectCwdPreferenceKey } from "./uiState.logic";
 import type { Project } from "./types";
 
 const primaryEnvironmentId = EnvironmentId.make("env-primary");

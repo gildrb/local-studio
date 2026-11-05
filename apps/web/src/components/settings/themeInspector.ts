@@ -1,18 +1,16 @@
 import { THEME_COLOR_ROLES, getThemeColorVariable, type ThemeColorRole } from "../../themePalette";
+import {
+  changedThemePaintKinds,
+  THEME_PAINT_KIND_ORDER,
+  themeRoleFromUtilityClass,
+  type ThemePaintKind,
+  type ThemePaintSnapshot,
+} from "./themeInspector.logic";
 
-export type ThemePaintKind = "background" | "border" | "foreground";
-
-export type ThemePaintSnapshot = Readonly<Record<ThemePaintKind, string>>;
 export type ThemeElementInspection = Readonly<{
   element: Element;
   role: ThemeColorRole;
 }>;
-
-const THEME_PAINT_KIND_ORDER: ReadonlyArray<ThemePaintKind> = [
-  "background",
-  "border",
-  "foreground",
-];
 
 const THEME_INSPECTOR_MATCH_ATTRIBUTE = "data-theme-inspector-match";
 
@@ -24,60 +22,6 @@ const THEME_SPOTLIGHT_MASK_ID = "theme-inspector-spotlight-mask";
 const THEME_SPOTLIGHT_GLOW_ID = "theme-inspector-spotlight-glow";
 const THEME_HOVER_ID = "theme-inspector-hover";
 const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
-
-const THEME_UTILITY_ROLES: Readonly<Partial<Record<string, ThemeColorRole>>> = {
-  background: "canvas",
-  foreground: "text",
-  card: "surface",
-  "card-foreground": "text",
-  popover: "surfaceOverlay",
-  "popover-foreground": "text",
-  "surface-raised": "surfaceRaised",
-  primary: "messageAction",
-  "primary-foreground": "messageActionForeground",
-  secondary: "secondary",
-  "secondary-foreground": "secondaryForeground",
-  muted: "muted",
-  "muted-foreground": "mutedForeground",
-  placeholder: "placeholder",
-  "secondary-label": "secondaryLabel",
-  "icon-muted": "iconMuted",
-  accent: "accentSurface",
-  "accent-foreground": "accentSurfaceForeground",
-  destructive: "error",
-  "destructive-foreground": "errorForeground",
-  error: "error",
-  "error-foreground": "errorForeground",
-  "error-surface": "errorSurface",
-  warning: "warning",
-  "warning-foreground": "warningForeground",
-  "warning-surface": "warningSurface",
-  update: "update",
-  "update-foreground": "updateForeground",
-  "update-surface": "updateSurface",
-  message: "messageSurface",
-  "message-foreground": "messageForeground",
-  "message-action": "messageAction",
-  "message-action-foreground": "messageActionForeground",
-  "message-action-hover": "messageActionHover",
-  sidebar: "sidebar",
-  "sidebar-foreground": "sidebarForeground",
-  "sidebar-muted-foreground": "sidebarMutedForeground",
-  "sidebar-control-surface": "sidebarControlSurface",
-  "sidebar-row-hover": "sidebarRowHover",
-  "sidebar-row-active": "sidebarRowActive",
-  "sidebar-row-selected": "sidebarRowSelected",
-  "sidebar-border": "sidebarBorder",
-  border: "border",
-  input: "input",
-  ring: "focus",
-};
-
-const THEME_UTILITY_PREFIXES: Readonly<Record<ThemePaintKind, ReadonlyArray<string>>> = {
-  background: ["bg-"],
-  border: ["border-", "outline-", "ring-"],
-  foreground: ["text-", "caret-", "fill-", "stroke-"],
-};
 
 function clearThemeInspectorAttribute(attribute: string): void {
   document
@@ -294,13 +238,6 @@ function getThemePaintSnapshot(
   };
 }
 
-export function changedThemePaintKinds(
-  before: ThemePaintSnapshot,
-  after: ThemePaintSnapshot,
-): ReadonlyArray<ThemePaintKind> {
-  return THEME_PAINT_KIND_ORDER.filter((kind) => before[kind] !== after[kind]);
-}
-
 function withThemeTokenProbeSession<Result>(run: () => Result): Result {
   const root = document.documentElement;
   const wasAlreadyProbing = root.hasAttribute(THEME_TOKEN_PROBE_ATTRIBUTE);
@@ -349,21 +286,6 @@ function themeInspectorCandidates(): ReadonlyArray<Element> {
       !element.closest("[data-theme-editor-panel]") &&
       !element.closest(`#${THEME_SPOTLIGHT_ID}, #${THEME_HOVER_ID}`),
   );
-}
-
-export function themeRoleFromUtilityClass(
-  className: string,
-  kind: ThemePaintKind,
-): ThemeColorRole | null {
-  // Stateful variants such as hover: and disabled: may not be contributing to
-  // the current paint. The computed-style probe below handles those exactly.
-  if (className.includes(":")) return null;
-  for (const prefix of THEME_UTILITY_PREFIXES[kind]) {
-    if (!className.startsWith(prefix)) continue;
-    const colorName = className.slice(prefix.length).split("/", 1)[0] ?? "";
-    return THEME_UTILITY_ROLES[colorName] ?? null;
-  }
-  return null;
 }
 
 function themeRoleFromUtilities(element: Element): ThemeColorRole | null {

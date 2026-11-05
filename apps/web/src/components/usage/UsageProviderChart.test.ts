@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildPeriodColumns, niceScale } from "./UsageProviderChart";
-import { providersWithUsage } from "./usageProviders";
+import { buildPeriodColumns, niceScale } from "./UsageProviderChart.logic";
+import { providersWithUsage } from "./usageProviders.logic";
 
 describe("niceScale", () => {
   it("never puts the peak above the top of the scale", () => {

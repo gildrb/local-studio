@@ -7,7 +7,8 @@ import {
   useState,
 } from "react";
 
-import { getLocalStorageItem, setLocalStorageItem } from "./useLocalStorage";
+import { getLocalStorageItem, setLocalStorageItem } from "../lib/localStorageItem";
+import { clampResizableWidth } from "./useResizableWidth.logic";
 import { useResizeDrag } from "./useResizeDrag";
 
 const WidthSchema = Schema.Finite;
@@ -50,10 +51,7 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
   const { storageKey, defaultWidth, minWidth, maxWidth, edge } = options;
 
   const clamp = useCallback(
-    (value: number): number => {
-      if (!Number.isFinite(value)) return defaultWidth;
-      return Math.max(minWidth, Math.min(maxWidth, value));
-    },
+    (value: number): number => clampResizableWidth(value, { defaultWidth, minWidth, maxWidth }),
     [defaultWidth, maxWidth, minWidth],
   );
 

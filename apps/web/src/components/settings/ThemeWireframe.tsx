@@ -1,5 +1,5 @@
 import { cn } from "../../lib/utils";
-import type { ThemeCardPreviewColors } from "./ThemePreviewCircles";
+import type { ThemeCardPreviewColors } from "./ThemePreviewCircles.logic";
 
 // A simple miniature of the app: sidebar, a short conversation, the
 // composer, and the orchestrator panel floating over the interface as an

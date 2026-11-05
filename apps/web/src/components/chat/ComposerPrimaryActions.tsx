@@ -7,6 +7,11 @@ import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { composerFloatingLayerProps } from "./composerEventScope";
+import {
+  formatPendingPrimaryActionLabel,
+  isPendingPrimaryActionDisabled,
+  resolvePlanFollowUpPrimaryAction,
+} from "./threadInteractions.logic";
 
 interface PendingActionState {
   questionIndex: number;
@@ -33,24 +38,6 @@ interface ComposerPrimaryActionsProps {
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
 }
-
-const formatPendingPrimaryActionLabel = (input: {
-  compact: boolean;
-  isLastQuestion: boolean;
-  isResponding: boolean;
-  questionIndex: number;
-}) => {
-  if (input.isResponding) {
-    return "Submitting...";
-  }
-  if (input.compact) {
-    return input.isLastQuestion ? "Submit" : "Next";
-  }
-  if (!input.isLastQuestion) {
-    return "Next question";
-  }
-  return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
-};
 
 // The composer's labeled primary actions (Submit, Refine, Implement) share the send button's
 // message-action pill, so they are composer-owned buttons rather than restyled Buttons.
@@ -140,11 +127,13 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           type="submit"
           className={cn(messageActionPillClassName, "h-8 sm:h-7", compact ? "px-3" : "px-4")}
           {...pointerFocusProps}
-          disabled={
-            isEnvironmentUnavailable ||
-            pendingAction.isResponding ||
-            (pendingAction.isLastQuestion ? !pendingAction.isComplete : !pendingAction.canAdvance)
-          }
+          disabled={isPendingPrimaryActionDisabled({
+            isEnvironmentUnavailable,
+            isResponding: pendingAction.isResponding,
+            isLastQuestion: pendingAction.isLastQuestion,
+            isComplete: pendingAction.isComplete,
+            canAdvance: pendingAction.canAdvance,
+          })}
         >
           {formatPendingPrimaryActionLabel({
             compact,
@@ -158,15 +147,22 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   if (showPlanFollowUpPrompt) {
-    if (promptHasText) {
+    const planAction = resolvePlanFollowUpPrimaryAction({
+      promptHasText,
+      isSendBusy,
+      isSendDisabled,
+      isConnecting,
+      isEnvironmentUnavailable,
+    });
+    if (planAction.kind === "refine") {
       return (
         <button
           type="submit"
           className={cn(messageActionPillClassName, "h-9 sm:h-8", compact ? "px-3" : "px-4")}
           {...pointerFocusProps}
-          disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+          disabled={planAction.disabled}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Refine"}
+          {planAction.label}
         </button>
       );
     }
@@ -177,9 +173,9 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           type="submit"
           className={cn(messageActionPillClassName, "h-9 rounded-r-none px-4 sm:h-8")}
           {...pointerFocusProps}
-          disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+          disabled={planAction.disabled}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Implement"}
+          {planAction.label}
         </button>
         <Menu>
           <MenuTrigger
@@ -192,7 +188,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 )}
                 aria-label="Implementation actions"
                 {...pointerFocusProps}
-                disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+                disabled={planAction.disabled}
               />
             }
           >
@@ -200,7 +196,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           </MenuTrigger>
           <MenuPopup align="end" side="top" {...composerFloatingLayerProps}>
             <MenuItem
-              disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+              disabled={planAction.disabled}
               onClick={() => void onImplementPlanInNewThread()}
             >
               Implement in a new thread

@@ -6,8 +6,8 @@ import {
   terminalContextMenuItems,
   terminalSelectionLineRange,
   terminalSelectionMenuItems,
-  terminalThemeFromApp,
-} from "./ThreadTerminalDrawer";
+} from "./ThreadTerminalDrawer.logic";
+import { terminalThemeFromApp } from "./ThreadTerminalDrawer";
 
 describe("terminal selection menus", () => {
   it("omits Add to chat when the terminal has no chat target", () => {

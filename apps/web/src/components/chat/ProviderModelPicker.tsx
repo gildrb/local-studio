@@ -1,22 +1,22 @@
-import {
-  ANTIGRAVITY_DEFAULT_MODEL,
-  type ProviderInstanceId,
-  type ProviderDriverKind,
-  type ResolvedKeybindingsConfig,
+import type {
+  ProviderInstanceId,
+  ProviderDriverKind,
+  ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import { memo, useEffect, useMemo, useState } from "react";
 import { Badge } from "../ui/badge";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
-import { ModelPickerContent, resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import { ModelPickerContent } from "./ModelPickerContent";
+import {
+  formatModelPickerTriggerTooltip,
+  resolveModelPickerSelectionsTrigger,
+  resolveModelPickerTrigger,
+} from "./modelPickerTrigger.logic";
 import { ChatGptSharingControl } from "./ChatGptSharingControl";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
-import {
-  ModelEsque,
-  getTriggerDisplayModelLabel,
-  getTriggerDisplayModelName,
-} from "./providerIconUtils";
+import { type ModelEsque } from "./modelDisplayName";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
 import {
   ComposerControl,
@@ -73,24 +73,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId;
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? [];
-  // Account-specific catalogs must keep the selected model label while unavailable.
-  const selectedModel =
-    resolveModelPickerSelectedModel({
-      driverKind: activeEntry?.driverKind,
-      model: props.model,
-      options: selectedInstanceOptions,
-    }) ??
-    (activeEntry?.driverKind === "opencode" || activeEntry?.driverKind === "antigravity"
-      ? undefined
-      : selectedInstanceOptions[0]);
-  const triggerTitle = selectedModel
-    ? getTriggerDisplayModelName(selectedModel)
-    : props.model === ANTIGRAVITY_DEFAULT_MODEL
-      ? "Choose model"
-      : props.model || "Choose model";
-  const triggerLabel = selectedModel
-    ? `${getTriggerDisplayModelLabel(selectedModel)}${selectedModel.isUnavailable ? " (Unavailable)" : ""}`
-    : triggerTitle;
+  const {
+    selectedModel,
+    title: triggerTitle,
+    label: triggerLabel,
+  } = resolveModelPickerTrigger({
+    driverKind: activeEntry?.driverKind,
+    model: props.model,
+    options: selectedInstanceOptions,
+  });
   const showInstanceBadge =
     activeEntry !== null && shouldShowInstanceBadge(activeEntry, props.instanceEntries);
 
@@ -158,37 +149,20 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const shortcutLabel = props.keybindings
     ? shortcutLabelForCommand(props.keybindings, "modelPicker.toggle")
     : null;
-  const selectedEntries = props.selectedModels?.map((selection) => {
-    const entry = props.instanceEntries.find(
-      (candidate) => candidate.instanceId === selection.instanceId,
-    );
-    const model = resolveModelPickerSelectedModel({
-      driverKind: entry?.driverKind,
-      model: selection.model,
-      options: props.modelOptionsByInstance.get(selection.instanceId) ?? [],
-    });
-    return {
-      ...selection,
-      entry,
-      label: model
-        ? `${getTriggerDisplayModelName(model)}${model.isUnavailable ? " (Unavailable)" : ""}`
-        : selection.model,
-    };
-  });
-  const multipleLabel = selectedEntries
-    ? selectedEntries.length === 0
-      ? "Choose models"
-      : `${selectedEntries
-          .slice(0, 2)
-          .map((selection) => selection.label)
-          .join(", ")}${selectedEntries.length > 2 ? `, ${selectedEntries.length - 2} more` : ""}`
+  const selectionsTrigger = props.selectedModels
+    ? resolveModelPickerSelectionsTrigger({
+        selectedModels: props.selectedModels,
+        instanceEntries: props.instanceEntries,
+        modelOptionsByInstance: props.modelOptionsByInstance,
+      })
     : undefined;
-  const allModelNames = selectedEntries
-    ? selectedEntries.map((selection) => selection.label).join(", ") || "Choose models"
-    : undefined;
-  const triggerTooltipContent = shortcutLabel
-    ? `${props.triggerLabel ?? allModelNames ?? triggerLabel} · ${shortcutLabel}`
-    : (props.triggerLabel ?? allModelNames ?? triggerLabel);
+  const selectedEntries = selectionsTrigger?.entries;
+  const multipleLabel = selectionsTrigger?.label;
+  const allModelNames = selectionsTrigger?.title;
+  const triggerTooltipContent = formatModelPickerTriggerTooltip(
+    props.triggerLabel ?? allModelNames ?? triggerLabel,
+    shortcutLabel,
+  );
 
   return (
     <Popover

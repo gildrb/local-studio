@@ -15,22 +15,11 @@ import {
 } from "react";
 import {
   applyThemeColorPreview,
-  THEME_COLOR_ROLES,
-  THEME_FILE_VERSION,
-  createVividThemeColors,
   getCustomThemes,
-  getStandardThemeColors,
-  getThemeColorsForMode,
-  getThemeModes,
   installCustomTheme,
-  isThemeColor,
-  parseThemeFile,
   removeCustomTheme,
-  themeIdFromName,
-  updateThemeColorFamily,
   updateCustomTheme,
   type ThemeAppearance,
-  type ThemeColors,
   type ThemeColorRole,
   type ThemeDefinition,
 } from "../../themePalette";
@@ -40,7 +29,7 @@ import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { getThemeRoleLabel, ThemeColorField } from "./ThemeColorPicker";
+import { ThemeColorField } from "./ThemeColorPicker";
 import {
   clearThemeInspectorHover,
   clearThemeInspectorHighlights,
@@ -51,223 +40,26 @@ import {
   showThemeInspectorHover,
   type ThemeElementInspection,
 } from "./themeInspector";
-
-const THEME_EDITOR_SIMPLE_ROLES: ReadonlyArray<ThemeColorRole> = ["canvas", "accent"];
-
-type ThemeEditorColorFamily = Readonly<{
-  id: string;
-  label: string;
-  role: ThemeColorRole;
-  roles: ReadonlyArray<ThemeColorRole>;
-}>;
-
-const THEME_EDITOR_ROLE_GROUPS: ReadonlyArray<{
-  id: string;
-  title: string;
-  families: ReadonlyArray<ThemeEditorColorFamily>;
-}> = [
-  {
-    id: "foundation",
-    title: "Foundation",
-    families: [
-      {
-        id: "background",
-        label: "Background",
-        role: "canvas",
-        roles: ["canvas", "chrome", "toolbar"],
-      },
-      { id: "surface", label: "Surface", role: "surface", roles: ["surface"] },
-      {
-        id: "raised-surface",
-        label: "Raised surface",
-        role: "surfaceRaised",
-        roles: ["surfaceRaised"],
-      },
-      {
-        id: "overlay",
-        label: "Overlay",
-        role: "surfaceOverlay",
-        roles: ["surfaceOverlay"],
-      },
-      {
-        id: "text",
-        label: "Text",
-        role: "text",
-        roles: ["text", "toolbarForeground", "toolbarControlForeground"],
-      },
-      {
-        id: "muted-text",
-        label: "Muted text",
-        role: "mutedForeground",
-        roles: [
-          "textMuted",
-          "mutedForeground",
-          "placeholder",
-          "secondaryLabel",
-          "iconMuted",
-          "sidebarMutedForeground",
-        ],
-      },
-      {
-        id: "border",
-        label: "Border",
-        role: "border",
-        roles: ["border", "toolbarBorder", "sidebarBorder"],
-      },
-      { id: "input", label: "Input", role: "input", roles: ["input"] },
-    ],
-  },
-  {
-    id: "brand-content",
-    title: "Brand & content",
-    families: [
-      {
-        id: "subtle-surface",
-        label: "Subtle surface",
-        role: "secondary",
-        roles: ["secondary", "secondaryForeground", "muted", "toolbarControl"],
-      },
-      {
-        id: "highlight-surface",
-        label: "Highlight surface",
-        role: "accentSurface",
-        roles: ["accentSurface", "accentSurfaceForeground", "toolbarControlHover"],
-      },
-      {
-        id: "accent",
-        label: "Accent",
-        role: "accent",
-        roles: [
-          "accent",
-          "accentForeground",
-          "focus",
-          "update",
-          "updateForeground",
-          "updateSurface",
-          "terminalCursor",
-        ],
-      },
-      {
-        id: "action",
-        label: "Action",
-        role: "messageAction",
-        roles: ["messageAction", "messageActionForeground", "messageActionHover"],
-      },
-      {
-        id: "message-surface",
-        label: "Message surface",
-        role: "messageSurface",
-        roles: ["messageSurface", "messageForeground"],
-      },
-      {
-        id: "code-surface",
-        label: "Code surface",
-        role: "codeBackground",
-        roles: ["codeBackground", "codeForeground"],
-      },
-    ],
-  },
-  {
-    id: "context",
-    title: "Context",
-    families: [
-      {
-        id: "sidebar-background",
-        label: "Sidebar background",
-        role: "sidebar",
-        roles: ["sidebar", "sidebarForeground"],
-      },
-      {
-        id: "sidebar-controls",
-        label: "Sidebar controls",
-        role: "sidebarControlSurface",
-        roles: ["sidebarControlSurface"],
-      },
-      {
-        id: "sidebar-selection",
-        label: "Sidebar selection",
-        role: "sidebarRowSelected",
-        roles: ["sidebarRowHover", "sidebarRowActive", "sidebarRowSelected"],
-      },
-      {
-        id: "terminal-background",
-        label: "Terminal background",
-        role: "terminalBackground",
-        roles: [
-          "terminalBackground",
-          "terminalForeground",
-          "terminalSelection",
-          "terminalScrollbar",
-          "terminalScrollbarHover",
-        ],
-      },
-    ],
-  },
-  {
-    id: "status",
-    title: "Status",
-    families: [
-      {
-        id: "error",
-        label: "Error",
-        role: "error",
-        roles: ["error", "errorForeground", "errorSurface"],
-      },
-      {
-        id: "warning",
-        label: "Warning",
-        role: "warning",
-        roles: ["warning", "warningForeground", "warningSurface"],
-      },
-    ],
-  },
-];
-
-const THEME_EDITOR_COLOR_FAMILIES = THEME_EDITOR_ROLE_GROUPS.flatMap((group) => group.families);
-const THEME_EDITOR_COLOR_FAMILY_BY_ROLE = new Map(
-  THEME_EDITOR_COLOR_FAMILIES.flatMap((family) =>
-    family.roles.map((role) => [role, family] as const),
-  ),
-);
-
-function getThemeEditorColorFamily(role: ThemeColorRole): ThemeEditorColorFamily | null {
-  return THEME_EDITOR_COLOR_FAMILY_BY_ROLE.get(role) ?? null;
-}
-
-type ThemeEditorColors = ThemeColors;
-type ThemeEditorColorsByAppearance = Record<ThemeAppearance, ThemeEditorColors>;
-
-// A draft with no source theme starts as the standard T3 Code look — the
-// palette on screen when no theme is installed — so creating from the default
-// theme changes nothing until the user edits a color.
-function getThemeEditorDefaults(appearance: ThemeAppearance): ThemeEditorColors {
-  return { ...getStandardThemeColors(appearance) };
-}
-
-function getThemeEditorColorsByAppearance(): ThemeEditorColorsByAppearance {
-  return {
-    light: getThemeEditorDefaults("light"),
-    dark: getThemeEditorDefaults("dark"),
-  };
-}
-
-function isThemeEditorColor(value: string): boolean {
-  return isThemeColor(value.trim());
-}
-
-function getManagedEditorColors(
-  appearance: ThemeAppearance,
-  colors: ThemeEditorColors,
-): ThemeEditorColors {
-  const defaults = getStandardThemeColors(appearance);
-  // The editor keeps the user's exact picks and derives the rest through the
-  // perceptual vivid engine, so a two-color theme carries its own identity.
-  return createVividThemeColors(
-    appearance,
-    isThemeEditorColor(colors.canvas) ? colors.canvas : defaults.canvas,
-    isThemeEditorColor(colors.accent) ? colors.accent : defaults.accent,
-  );
-}
+import {
+  applyThemeEditorColorChange,
+  buildThemeEditorModel,
+  getThemeEditorColorsByAppearance,
+  markThemeEditorAppearancesDirty,
+  regenerateThemeEditorColors,
+  resolveThemeEditorAdvancedToggle,
+  resolveThemeEditorAutoAppearance,
+  resolveThemeEditorColorChangeEffects,
+  resolveThemeEditorRoleSelection,
+  resolveThemeEditorRoleToggle,
+  resolveThemeEditorSave,
+  resolveThemeEditorSeed,
+  themeEditorRoleDisplayLabel,
+  themeEditorSaveErrorMessage,
+  THEME_EDITOR_ACTIVATION_FAILURE_MESSAGE,
+  type ThemeEditorAppearanceOption,
+  type ThemeEditorColorsByAppearance,
+} from "./ThemeEditorPanel.logic";
+import type { ThemeColorFieldModel } from "./ThemeColorPicker.logic";
 
 export function ThemeEditorPanel({
   open,
@@ -376,38 +168,18 @@ export function ThemeEditorPanel({
 
   useEffect(() => {
     if (open && !previousOpenRef.current) {
-      // Editing works on the theme itself; creating starts from the theme
-      // that is currently in use, so tuning what you already run is an edit
-      // away instead of a rebuild from the defaults.
-      const sourceTheme = editingTheme ?? seedTheme ?? null;
-      const nextColors = getThemeEditorColorsByAppearance();
-      const nextAppearance = sourceTheme
-        ? getThemeColorsForMode(sourceTheme, initialAppearance)
-          ? initialAppearance
-          : sourceTheme.appearance
-        : initialAppearance;
-      if (sourceTheme) {
-        nextColors[sourceTheme.appearance] = { ...sourceTheme.colors };
-        for (const appearance of ["light", "dark"] as const) {
-          const variantColors = sourceTheme.variants?.[appearance];
-          if (variantColors) nextColors[appearance] = { ...variantColors };
-        }
-      }
-
-      setName(editingTheme?.label ?? seedName ?? "");
-      setActiveAppearance(nextAppearance);
-      // Themes saved by the guided editor carry the managed flag; anything
-      // else (imports, hand-edited files, older saves) opens in advanced mode
-      // so guided regeneration cannot silently discard hand-tuned colors. A
-      // seeded new theme follows the same rule: its palette is only safe to
-      // regenerate when the guided editor produced it.
-      setIsAdvanced(sourceTheme !== null && sourceTheme.managed !== true);
+      const seed = resolveThemeEditorSeed({
+        editingTheme,
+        seedTheme: seedTheme ?? null,
+        seedName: seedName ?? null,
+        initialAppearance,
+      });
+      setName(seed.name);
+      setActiveAppearance(seed.activeAppearance);
+      setIsAdvanced(seed.isAdvanced);
       setSimpleColorsDirtyByAppearance({ light: false, dark: false });
-      // An unmanaged palette needs conversion when the user opts into the
-      // guided editor. Merely revealing Advanced for a managed/default draft
-      // must stay read-only until a color changes.
-      setShouldRegenerateGuidedColors(sourceTheme !== null && sourceTheme.managed !== true);
-      setColorsByAppearance(nextColors);
+      setShouldRegenerateGuidedColors(seed.shouldRegenerateGuidedColors);
+      setColorsByAppearance(seed.colorsByAppearance);
       setSelectedRole(null);
       setUsageCount(null);
       setIsInspecting(false);
@@ -418,52 +190,29 @@ export function ThemeEditorPanel({
     previousOpenRef.current = open;
   }, [editingTheme, initialAppearance, isDraftSeeded, open, seedName, seedTheme]);
 
-  // A name an installed theme already uses combines instead of failing:
-  // creating adds the new palette to that theme, and renaming an existing
-  // theme onto it folds the edited palette in and retires the old entry —
-  // light "My Theme" plus a dark "My Theme" become one theme with both modes.
-  // Labels are matched as well as derived ids: a rename keeps a theme's
-  // original id, so its label is the only name a user can see and retype.
-  const nameTargetId = themeIdFromName(name);
-  const normalizedName = name.trim().toLowerCase();
-  const mergeTarget =
-    normalizedName === ""
-      ? null
-      : (getCustomThemes().find(
-          (theme) =>
-            theme.id !== editingTheme?.id &&
-            (theme.id === nameTargetId || theme.label.trim().toLowerCase() === normalizedName),
-        ) ?? null);
-  const takenAppearances = mergeTarget ? getThemeModes(mergeTarget) : [];
-  const editableAppearances = editingTheme ? getThemeModes(editingTheme) : null;
+  const model = buildThemeEditorModel({
+    editingTheme,
+    customThemes: getCustomThemes(),
+    name,
+    activeAppearance,
+    isAdvanced,
+    colorsByAppearance,
+    roleQuery,
+    selectedRole,
+    usageCount,
+    isInspecting,
+    isMinimized,
+    error,
+  });
 
-  // The appearance a mode button would produce can be blocked two ways: the
-  // merge target already has that palette, or the theme being edited never
-  // had it (adding one is a create-with-same-name away).
-  const appearanceLockReason = (appearance: ThemeAppearance): string | null => {
-    if (editableAppearances && !editableAppearances.includes(appearance)) {
-      return `“${editingTheme?.label}” has no ${appearance} palette. Create a theme with the same name to add one.`;
-    }
-    if (!isEditing && takenAppearances.includes(appearance)) {
-      return `“${mergeTarget?.label}” already has a ${appearance} palette.`;
-    }
-    return null;
-  };
-
-  // Typing a name whose theme already owns the selected appearance flips the
-  // draft to the free side, so the merge affordance works without a manual
-  // toggle. Both sides taken leaves the selection alone; save is blocked with
-  // an explanation instead.
-  const mergeTargetId = mergeTarget?.id ?? null;
-  const takenAppearancesKey = takenAppearances.join(",");
+  const mergeTargetId = model.mergeTarget?.id ?? null;
+  const takenAppearancesKey = model.mergeTarget?.takenAppearances.join(",") ?? "";
   useEffect(() => {
     if (isEditing || mergeTargetId === null) return;
-    const taken = takenAppearancesKey.split(",").filter(Boolean) as ThemeAppearance[];
-    if (taken.length !== 1) return;
-    setActiveAppearance((current) => {
-      if (!taken.includes(current)) return current;
-      return taken[0] === "light" ? "dark" : "light";
-    });
+    const taken = takenAppearancesKey
+      .split(",")
+      .filter((value): value is ThemeAppearance => value === "light" || value === "dark");
+    setActiveAppearance((current) => resolveThemeEditorAutoAppearance(current, taken));
   }, [isEditing, mergeTargetId, takenAppearancesKey]);
 
   // The whole app wears the draft while the editor is open, so a role change
@@ -483,35 +232,23 @@ export function ThemeEditorPanel({
 
   const updateColor = useCallback(
     (role: ThemeColorRole, value: string) => {
-      setColorsByAppearance((current) => {
-        const nextColors = { ...current[activeAppearance], [role]: value };
-        const shouldManageColors =
-          !isAdvanced && THEME_EDITOR_SIMPLE_ROLES.includes(role) && isThemeEditorColor(value);
-
-        return {
-          ...current,
-          [activeAppearance]: isAdvanced
-            ? updateThemeColorFamily(activeAppearance, current[activeAppearance], role, value)
-            : shouldManageColors
-              ? getManagedEditorColors(activeAppearance, nextColors)
-              : nextColors,
-        };
-      });
-      if (!isAdvanced && THEME_EDITOR_SIMPLE_ROLES.includes(role) && isThemeEditorColor(value)) {
-        setSimpleColorsDirtyByAppearance((current) => ({
-          ...current,
-          [activeAppearance]: true,
-        }));
+      const change = { activeAppearance, isAdvanced, role, value };
+      setColorsByAppearance((current) => applyThemeEditorColorChange(current, change));
+      const effects = resolveThemeEditorColorChangeEffects(change);
+      if (effects.markGuidedDirty) {
+        setSimpleColorsDirtyByAppearance((current) =>
+          markThemeEditorAppearancesDirty(current, [activeAppearance]),
+        );
       }
-      if (isAdvanced) setShouldRegenerateGuidedColors(true);
+      if (effects.markRegenerateGuided) setShouldRegenerateGuidedColors(true);
     },
     [activeAppearance, isAdvanced],
   );
 
   const selectThemeRole = useCallback((role: ThemeColorRole, reveal = false) => {
-    const visibleRole = getThemeEditorColorFamily(role)?.role ?? role;
-    setSelectedRole(visibleRole);
-    if (!THEME_EDITOR_SIMPLE_ROLES.includes(visibleRole)) {
+    const selection = resolveThemeEditorRoleSelection(role);
+    setSelectedRole(selection.selectedRole);
+    if (selection.revealAdvanced) {
       setIsAdvanced(true);
       setRoleQuery("");
     }
@@ -519,13 +256,13 @@ export function ThemeEditorPanel({
 
     requestAnimationFrame(() => {
       panelRef.current
-        ?.querySelector(`[data-theme-color-role="${visibleRole}"]`)
+        ?.querySelector(`[data-theme-color-role="${selection.selectedRole}"]`)
         ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     });
   }, []);
 
   const toggleThemeRole = useCallback((role: ThemeColorRole) => {
-    setSelectedRole((current) => (current === role ? null : role));
+    setSelectedRole((current) => resolveThemeEditorRoleToggle(current, role));
   }, []);
 
   const clearInspectorSelection = useCallback(() => {
@@ -534,18 +271,7 @@ export function ThemeEditorPanel({
     setIsInspecting(false);
   }, []);
 
-  const selectedHighlightRoles = selectedRole
-    ? isAdvanced
-      ? (getThemeEditorColorFamily(selectedRole)?.roles ?? [selectedRole])
-      : THEME_EDITOR_SIMPLE_ROLES.includes(selectedRole)
-        ? THEME_COLOR_ROLES.filter(
-            (role) =>
-              colorsByAppearance[activeAppearance][role].trim().toLowerCase() ===
-              colorsByAppearance[activeAppearance][selectedRole].trim().toLowerCase(),
-          )
-        : [selectedRole]
-    : [];
-  const selectedHighlightRolesKey = selectedHighlightRoles.join(",");
+  const selectedHighlightRolesKey = model.highlightRoles.join(",");
 
   useEffect(() => {
     clearThemeInspectorHighlights();
@@ -638,10 +364,7 @@ export function ThemeEditorPanel({
     };
     const showInspection = (inspection: ThemeElementInspection) => {
       hoverInspection = inspection;
-      showThemeInspectorHover(
-        inspection,
-        getThemeEditorColorFamily(inspection.role)?.label ?? getThemeRoleLabel(inspection.role),
-      );
+      showThemeInspectorHover(inspection, themeEditorRoleDisplayLabel(inspection.role));
     };
     const handlePointerOver = (event: PointerEvent) => {
       const target = event.target;
@@ -706,8 +429,7 @@ export function ThemeEditorPanel({
         if (hoverInspection) {
           showThemeInspectorHover(
             hoverInspection,
-            getThemeEditorColorFamily(hoverInspection.role)?.label ??
-              getThemeRoleLabel(hoverInspection.role),
+            themeEditorRoleDisplayLabel(hoverInspection.role),
           );
         }
       });
@@ -737,196 +459,86 @@ export function ThemeEditorPanel({
 
   const handleAdvancedChange = useCallback(
     (checked: boolean) => {
-      setIsAdvanced(checked);
-      if (checked) return;
-      if (selectedRole && !THEME_EDITOR_SIMPLE_ROLES.includes(selectedRole)) {
-        setSelectedRole(null);
-      }
-      if (!shouldRegenerateGuidedColors) return;
-
-      // Regenerate every appearance the theme will save, not just the visible
-      // one, so the palettes shown after toggling match what gets saved.
-      const managedAppearances: ReadonlyArray<ThemeAppearance> =
-        editingTheme && getThemeModes(editingTheme).length > 1
-          ? ["light", "dark"]
-          : [activeAppearance];
-      setSimpleColorsDirtyByAppearance((current) => {
-        const next = { ...current };
-        for (const appearance of managedAppearances) next[appearance] = true;
-        return next;
+      const decision = resolveThemeEditorAdvancedToggle({
+        checked,
+        selectedRole,
+        shouldRegenerateGuidedColors,
+        editingTheme,
+        activeAppearance,
       });
-      setColorsByAppearance((current) => {
-        const next = { ...current };
-        for (const appearance of managedAppearances) {
-          next[appearance] = getManagedEditorColors(appearance, current[appearance]);
-        }
-        return next;
-      });
+      setIsAdvanced(decision.isAdvanced);
+      if (decision.clearSelectedRole) setSelectedRole(null);
+      const appearances = decision.regenerateAppearances;
+      if (appearances === null) return;
+      setSimpleColorsDirtyByAppearance((current) =>
+        markThemeEditorAppearancesDirty(current, appearances),
+      );
+      setColorsByAppearance((current) => regenerateThemeEditorColors(current, appearances));
       setShouldRegenerateGuidedColors(false);
     },
     [activeAppearance, editingTheme, selectedRole, shouldRegenerateGuidedColors],
   );
 
   const handleSubmit = () => {
-    if (!name.trim()) {
-      setError("Name your theme first.");
-      return;
-    }
-
     try {
-      // Only regenerate palettes the user actually touched in guided mode, so
-      // untouched appearances save exactly what the editor displayed.
-      const colorsForSave = !isAdvanced
-        ? {
-            light: simpleColorsDirtyByAppearance.light
-              ? getManagedEditorColors("light", colorsByAppearance.light)
-              : colorsByAppearance.light,
-            dark: simpleColorsDirtyByAppearance.dark
-              ? getManagedEditorColors("dark", colorsByAppearance.dark)
-              : colorsByAppearance.dark,
-          }
-        : colorsByAppearance;
-
-      let savedTheme: ThemeDefinition;
-      let mergedAppearance: ThemeAppearance | null = null;
-      let retiredTheme: ThemeDefinition | null = null;
-      if (editingTheme && mergeTarget) {
-        // Renamed onto another installed theme: this theme's palettes fold
-        // into it and the edited entry retires, so both cards become one.
-        // Colliding palettes cannot merge — neither side should be silently
-        // overwritten.
-        const editedModes = getThemeModes(editingTheme);
-        const collision = editedModes.find((mode) => takenAppearances.includes(mode));
-        if (collision) {
-          setError(`“${mergeTarget.label}” already has a ${collision} palette. Pick another name.`);
-          return;
-        }
-        mergedAppearance = editedModes[0] ?? null;
-        savedTheme = updateCustomTheme({
-          ...parseThemeFile({
-            version: THEME_FILE_VERSION,
-            id: mergeTarget.id,
-            name: mergeTarget.label,
-            appearance: mergeTarget.appearance,
-            colors: mergeTarget.colors,
-            variants: {
-              ...mergeTarget.variants,
-              ...Object.fromEntries(editedModes.map((mode) => [mode, colorsForSave[mode]])),
-            },
-            ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
-          }),
-          ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
-        });
-        retiredTheme = editingTheme;
+      const plan = resolveThemeEditorSave({
+        name,
+        editingTheme,
+        customThemes: getCustomThemes(),
+        activeAppearance,
+        isAdvanced,
+        colorsByAppearance,
+        guidedDirtyByAppearance: simpleColorsDirtyByAppearance,
+      });
+      if (plan.kind === "error") {
+        setError(plan.message);
+        return;
+      }
+      const savedTheme =
+        plan.kind === "install" ? installCustomTheme(plan.theme) : updateCustomTheme(plan.theme);
+      if (plan.kind === "merge-edited") {
         try {
-          removeCustomTheme(editingTheme.id);
+          removeCustomTheme(plan.retiredTheme.id);
         } catch (cause) {
           // The merge already persisted. Leaving it while the edited theme
           // survives would collide on every retry, so the target goes back to
           // its pre-merge palettes before the failure surfaces.
           try {
-            updateCustomTheme(mergeTarget);
+            updateCustomTheme(plan.mergeTarget);
           } catch {
             // Storage is failing wholesale; the rethrow below reports it.
           }
           throw cause;
         }
-      } else if (editingTheme) {
-        const baseAppearance = editingTheme.appearance;
-        const variantAppearance = baseAppearance === "light" ? "dark" : "light";
-        savedTheme = updateCustomTheme({
-          ...parseThemeFile({
-            version: THEME_FILE_VERSION,
-            id: editingTheme.id,
-            name,
-            appearance: baseAppearance,
-            colors: colorsForSave[baseAppearance],
-            ...(getThemeModes(editingTheme).length > 1
-              ? { variants: { [variantAppearance]: colorsForSave[variantAppearance] } }
-              : {}),
-            ...(isAdvanced ? {} : { managed: true }),
-          }),
-          ...(editingTheme.collection ? { collection: editingTheme.collection } : {}),
-        });
-      } else if (mergeTarget) {
-        if (takenAppearances.includes(activeAppearance)) {
-          setError(
-            `“${mergeTarget.label}” already has light and dark palettes. Pick another name.`,
-          );
-          return;
-        }
-        // The new palette joins the existing theme as its other mode; its
-        // stored palettes are untouched. The guided (managed) flag only
-        // survives when every palette in the theme came from the guided
-        // editor.
-        mergedAppearance = activeAppearance;
-        savedTheme = updateCustomTheme({
-          ...parseThemeFile({
-            version: THEME_FILE_VERSION,
-            id: mergeTarget.id,
-            name: mergeTarget.label,
-            appearance: mergeTarget.appearance,
-            colors: mergeTarget.colors,
-            variants: {
-              ...mergeTarget.variants,
-              [activeAppearance]: colorsForSave[activeAppearance],
-            },
-            ...(mergeTarget.managed === true && !isAdvanced ? { managed: true } : {}),
-          }),
-          ...(mergeTarget.collection ? { collection: mergeTarget.collection } : {}),
-        });
-      } else {
-        savedTheme = installCustomTheme(
-          parseThemeFile({
-            version: THEME_FILE_VERSION,
-            name,
-            appearance: activeAppearance,
-            colors: colorsForSave[activeAppearance],
-            ...(isAdvanced ? {} : { managed: true }),
-          }),
-        );
       }
-      if (
-        !onSaved(savedTheme, {
-          created: editingTheme === null && mergedAppearance === null,
-          ...(mergedAppearance ? { mergedAppearance } : {}),
-        })
-      ) {
-        if (!editingTheme && mergedAppearance === null) {
-          // Roll the install back so a retry can run it again instead of
-          // failing on the already-taken theme id.
+      if (!onSaved(savedTheme, plan.context)) {
+        const rollback = plan.rollback;
+        if (rollback.kind === "remove-saved") {
           try {
             removeCustomTheme(savedTheme.id);
           } catch {
             // Storage is failing wholesale; the error below covers it.
           }
-        } else if (mergeTarget && mergedAppearance !== null) {
-          // Put the pre-merge definitions back for the same reason.
+        } else if (rollback.kind === "restore-merge") {
           try {
-            updateCustomTheme(mergeTarget);
-            if (retiredTheme) installCustomTheme(retiredTheme);
+            updateCustomTheme(rollback.mergeTarget);
+            if (rollback.retiredTheme) installCustomTheme(rollback.retiredTheme);
           } catch {
             // Storage is failing wholesale; the error below covers it.
           }
         }
-        setError("Theme saved, but it could not be made active. Try again.");
+        setError(THEME_EDITOR_ACTIVATION_FAILURE_MESSAGE);
         return;
       }
       onOpenChange(false);
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : isEditing
-            ? "Could not save the theme."
-            : "Could not create the theme.",
-      );
+      setError(themeEditorSaveErrorMessage(cause, isEditing));
     }
   };
 
   const renderNameField = () => (
     <label className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3">
-      <span className="text-sm font-medium">Theme name</span>
+      <span className="text-sm font-medium">{model.nameField.label}</span>
       <Input
         autoFocus
         size="sm"
@@ -936,49 +548,42 @@ export function ThemeEditorPanel({
           // the stale message goes with the old name.
           setError(null);
         }}
-        placeholder={isEditing ? "Theme name" : "e.g. Aurora"}
-        value={name}
+        placeholder={model.nameField.placeholder}
+        value={model.nameField.value}
       />
     </label>
   );
 
-  const renderAppearanceButton = (appearance: ThemeAppearance) => {
-    const lockReason = appearanceLockReason(appearance);
+  const renderAppearanceButton = (option: ThemeEditorAppearanceOption) => {
     // A locked mode stays hoverable so the tooltip can say why it is off;
     // a real disabled attribute would swallow the pointer events.
     const button = (
-      <Toggle aria-disabled={lockReason !== null} value={appearance}>
-        {appearance === "light" ? "Light" : "Dark"}
+      <Toggle aria-disabled={option.locked} key={option.value} value={option.value}>
+        {option.label}
       </Toggle>
     );
-    if (lockReason === null) return button;
+    if (option.lockReason === null) return button;
     return (
-      <Tooltip>
+      <Tooltip key={option.value}>
         <TooltipTrigger render={button} />
-        <TooltipPopup>{lockReason}</TooltipPopup>
+        <TooltipPopup>{option.lockReason}</TooltipPopup>
       </Tooltip>
     );
   };
 
   const renderAppearanceButtons = () => (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-center gap-3">
-      <span className="text-sm font-medium">Appearance</span>
+      <span className="text-sm font-medium">{model.appearance.label}</span>
       <ToggleGroup
-        aria-label="Theme appearance"
+        aria-label={model.appearance.ariaLabel}
         variant="segmented"
-        value={[activeAppearance]}
+        value={[model.appearance.value]}
         onValueChange={(next) => {
-          const appearance = next[0];
-          if (
-            (appearance === "light" || appearance === "dark") &&
-            appearanceLockReason(appearance) === null
-          ) {
-            setActiveAppearance(appearance);
-          }
+          const option = model.appearance.options.find((candidate) => candidate.value === next[0]);
+          if (option && !option.locked) setActiveAppearance(option.value);
         }}
       >
-        {renderAppearanceButton("light")}
-        {renderAppearanceButton("dark")}
+        {model.appearance.options.map(renderAppearanceButton)}
       </ToggleGroup>
     </div>
   );
@@ -986,27 +591,27 @@ export function ThemeEditorPanel({
   const renderColorsHeader = () => (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start gap-3">
       <div>
-        <h3 className="text-sm font-medium">Colors</h3>
-        {isAdvanced ? null : (
-          <p className="text-xs text-muted-foreground">Two colors, rest derived</p>
+        <h3 className="text-sm font-medium">{model.colors.title}</h3>
+        {model.colors.subtitle === null ? null : (
+          <p className="text-xs text-muted-foreground">{model.colors.subtitle}</p>
         )}
       </div>
       <div className="flex min-w-0 items-start gap-3">
-        {isAdvanced ? (
+        {model.colors.filter ? (
           <Input
-            aria-label="Filter colors"
+            aria-label={model.colors.filter.ariaLabel}
             className="min-w-0 flex-1"
             onChange={(event) => setRoleQuery(event.currentTarget.value)}
-            placeholder="Filter colors"
+            placeholder={model.colors.filter.placeholder}
             size="sm"
-            value={roleQuery}
+            value={model.colors.filter.value}
           />
         ) : null}
         <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-2 pt-0.5 text-sm font-medium">
-          <span>Advanced</span>
+          <span>{model.colors.advancedLabel}</span>
           <Switch
-            aria-label="Use advanced theme colors"
-            checked={isAdvanced}
+            aria-label={model.colors.advancedAriaLabel}
+            checked={model.colors.advanced}
             onCheckedChange={(checked) => handleAdvancedChange(Boolean(checked))}
           />
         </label>
@@ -1014,66 +619,35 @@ export function ThemeEditorPanel({
     </div>
   );
 
-  const renderRoleFields = (
-    families: ReadonlyArray<ThemeEditorColorFamily>,
-    gridClassName = "grid gap-2 sm:grid-cols-2",
-  ) => (
-    <div className={gridClassName}>
-      {families.map((family) => (
-        <ThemeColorField
-          key={family.id}
-          label={family.label}
-          onChange={updateColor}
-          onSelect={selectThemeRole}
-          onToggleSelected={toggleThemeRole}
-          role={family.role}
-          selected={selectedRole === family.role}
-          value={colorsByAppearance[activeAppearance][family.role]}
-        />
-      ))}
-    </div>
+  const renderColorField = (field: ThemeColorFieldModel) => (
+    <ThemeColorField
+      key={field.id}
+      label={field.label}
+      onChange={updateColor}
+      onSelect={selectThemeRole}
+      onToggleSelected={toggleThemeRole}
+      role={field.role}
+      selected={field.selected}
+      value={field.value}
+    />
   );
 
-  const renderColorFields = () => {
-    const query = roleQuery.trim().toLowerCase();
-    const groups = THEME_EDITOR_ROLE_GROUPS.map((group) => ({
-      ...group,
-      families: group.families.filter(
-        (family) =>
-          !query ||
-          [family.label, ...family.roles.map((role) => getThemeRoleLabel(role))]
-            .join(" ")
-            .toLowerCase()
-            .includes(query),
-      ),
-    })).filter((group) => group.families.length > 0);
-    return isAdvanced ? (
+  const renderColorFields = () =>
+    model.colors.advanced ? (
       <div className="space-y-5">
-        {groups.map((group) => (
+        {model.colors.groups.map((group) => (
           <section className="space-y-2" key={group.id}>
             <h4 className="text-sm font-medium text-foreground">{group.title}</h4>
-            {renderRoleFields(group.families, "grid gap-1")}
+            <div className="grid gap-1">{group.fields.map(renderColorField)}</div>
           </section>
         ))}
-        {groups.length === 0 ? <p className="text-xs text-muted-foreground">No matches.</p> : null}
+        {model.colors.emptyMessage === null ? null : (
+          <p className="text-xs text-muted-foreground">{model.colors.emptyMessage}</p>
+        )}
       </div>
     ) : (
-      <div className="grid gap-1">
-        {THEME_EDITOR_SIMPLE_ROLES.map((role) => (
-          <ThemeColorField
-            key={role}
-            onChange={updateColor}
-            onSelect={selectThemeRole}
-            onToggleSelected={toggleThemeRole}
-            role={role}
-            label={role === "canvas" ? "Background" : "Accent"}
-            selected={selectedRole === role}
-            value={colorsByAppearance[activeAppearance][role]}
-          />
-        ))}
-      </div>
+      <div className="grid gap-1">{model.colors.guidedFields.map(renderColorField)}</div>
     );
-  };
 
   const clampPosition = (x: number, y: number, widthOverride?: number) => {
     const panel = panelRef.current;
@@ -1152,7 +726,7 @@ export function ThemeEditorPanel({
 
   return (
     <div
-      aria-label={isEditing ? "Edit theme" : "Create theme"}
+      aria-label={model.title}
       className={cn(
         "dialog-glass fixed z-[110] flex max-h-[min(42rem,calc(100dvh-6rem))] w-[min(26rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border text-popover-foreground",
         position === null && "bottom-4 right-4",
@@ -1177,27 +751,19 @@ export function ThemeEditorPanel({
         onPointerUp={endDrag}
       >
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <h2 className="shrink-0 truncate text-sm font-medium">
-            {isEditing ? "Edit theme" : "Create theme"}
-          </h2>
-          {isMinimized ? null : (
-            <p className="truncate text-xs text-muted-foreground">
-              {isInspecting
-                ? "Select an element · Esc to cancel"
-                : selectedRole
-                  ? `${isAdvanced ? (getThemeEditorColorFamily(selectedRole)?.label ?? getThemeRoleLabel(selectedRole)) : getThemeRoleLabel(selectedRole)} · ${usageCount ?? 0} ${usageCount === 1 ? "use" : "uses"}`
-                  : "Select a color below"}
-            </p>
+          <h2 className="shrink-0 truncate text-sm font-medium">{model.title}</h2>
+          {model.statusText === null ? null : (
+            <p className="truncate text-xs text-muted-foreground">{model.statusText}</p>
           )}
         </div>
         <Tooltip>
           <TooltipTrigger
             render={
               <Button
-                aria-label={isInspecting ? "Cancel inspecting app colors" : "Inspect app colors"}
-                aria-pressed={isInspecting}
+                aria-label={model.inspect.ariaLabel}
+                aria-pressed={model.inspect.active}
                 size="xs"
-                variant={isInspecting ? "secondary" : "ghost"}
+                variant={model.inspect.active ? "secondary" : "ghost"}
                 onClick={() => {
                   if (isInspecting) {
                     clearInspectorSelection();
@@ -1207,16 +773,14 @@ export function ThemeEditorPanel({
                 }}
               >
                 <MousePointer2Icon />
-                {isInspecting ? "Cancel" : "Inspect"}
+                {model.inspect.label}
               </Button>
             }
           />
-          <TooltipPopup data-theme-editor-panel="">
-            {isInspecting ? "Cancel and clear the selection" : "Pick a color from the app"}
-          </TooltipPopup>
+          <TooltipPopup data-theme-editor-panel="">{model.inspect.tooltip}</TooltipPopup>
         </Tooltip>
         <Button
-          aria-label={isMinimized ? "Expand the theme editor" : "Minimize the theme editor"}
+          aria-label={model.minimize.ariaLabel}
           size="icon-xs"
           variant="ghost"
           onClick={() => setIsMinimized(!isMinimized)}
@@ -1224,7 +788,7 @@ export function ThemeEditorPanel({
           {isMinimized ? <ChevronUpIcon /> : <ChevronDownIcon />}
         </Button>
         <Button
-          aria-label="Close the theme editor"
+          aria-label={model.close.ariaLabel}
           size="icon-xs"
           variant="ghost"
           onClick={() => onOpenChange(false)}
@@ -1239,9 +803,9 @@ export function ThemeEditorPanel({
             {renderNameField()}
             {/* Inline and above the color list: the panel scrolls, and an
                 error parked below every role would go unseen. */}
-            {error ? (
+            {model.error ? (
               <p aria-live="polite" className="text-sm text-destructive">
-                {error}
+                {model.error}
               </p>
             ) : null}
             {renderAppearanceButtons()}
@@ -1252,26 +816,15 @@ export function ThemeEditorPanel({
           </div>
           <div className="flex items-center justify-end gap-2 border-t border-border/70 px-3 py-2">
             <Button size="sm" variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
+              {model.footer.cancelLabel}
             </Button>
-            <Button disabled={!name.trim()} size="sm" onClick={handleSubmit}>
-              {isEditing ? (
-                mergeTarget ? (
-                  `Merge into “${mergeTarget.label}”`
-                ) : (
-                  "Save changes"
-                )
-              ) : mergeTarget ? (
-                <>
-                  <PlusIcon />
-                  {`Add ${activeAppearance} palette`}
-                </>
-              ) : (
-                <>
-                  <PaintbrushIcon />
-                  Create theme
-                </>
-              )}
+            <Button disabled={model.footer.submitDisabled} size="sm" onClick={handleSubmit}>
+              {model.footer.submitIcon === "plus" ? (
+                <PlusIcon />
+              ) : model.footer.submitIcon === "paintbrush" ? (
+                <PaintbrushIcon />
+              ) : null}
+              {model.footer.submitLabel}
             </Button>
           </div>
           <div

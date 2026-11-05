@@ -1,4 +1,9 @@
-import type { FileDiffContentsLoader } from "@pierre/diffs";
+import {
+  hydratePartialDiff,
+  type FileDiffContentsLoader,
+  type FileDiffLoadedFiles,
+  type FileDiffMetadata,
+} from "@pierre/diffs";
 import {
   squashAtomCommandFailure,
   type AtomCommandResult,
@@ -42,6 +47,45 @@ type GetPullRequestDiffFileContents<E> = (request: {
   readonly input: PullRequestDiffFileContentsInput;
 }) => Promise<AtomCommandResult<PullRequestDiffFileContentsResult, E>>;
 
+export function loadedDiffFiles(
+  fileDiff: FileDiffMetadata,
+  contents: { readonly oldContents: string; readonly newContents: string },
+  cacheKey: string,
+): FileDiffLoadedFiles {
+  const newPath = resolveFileDiffPath(fileDiff);
+  const oldPath = diffFileOldPath(fileDiff);
+  const newFile = {
+    name: newPath,
+    contents: contents.newContents,
+    cacheKey: `${cacheKey}:new:${newPath}`,
+  };
+  if (fileDiff.type === "rename-pure") {
+    return { oldFile: null, newFile };
+  }
+  return {
+    oldFile: {
+      name: oldPath,
+      contents: contents.oldContents,
+      cacheKey: `${cacheKey}:old:${oldPath}`,
+    },
+    newFile,
+  };
+}
+
+export function diffFileOldPath(fileDiff: FileDiffMetadata): string {
+  return fileDiff.prevName
+    ? resolveFileDiffPath({ ...fileDiff, name: fileDiff.prevName })
+    : resolveFileDiffPath(fileDiff);
+}
+
+export function hydratedDiffFile(
+  fileDiff: FileDiffMetadata,
+  contents: { readonly oldContents: string; readonly newContents: string },
+  cacheKey: string,
+): FileDiffMetadata {
+  return hydratePartialDiff("clone", fileDiff, loadedDiffFiles(fileDiff, contents, cacheKey));
+}
+
 function createDiffFileContentsLoader(
   load: (input: {
     readonly changeType: PullRequestDiffFileContentsInput["changeType"];
@@ -51,27 +95,12 @@ function createDiffFileContentsLoader(
   cacheKey: string,
 ): FileDiffContentsLoader {
   return async (fileDiff) => {
-    const newPath = resolveFileDiffPath(fileDiff);
-    const oldPath = fileDiff.prevName
-      ? resolveFileDiffPath({ ...fileDiff, name: fileDiff.prevName })
-      : newPath;
-    const contents = await load({ changeType: fileDiff.type, oldPath, newPath });
-    const newFile = {
-      name: newPath,
-      contents: contents.newContents,
-      cacheKey: `${cacheKey}:new:${newPath}`,
-    };
-    if (fileDiff.type === "rename-pure") {
-      return { oldFile: null, newFile };
-    }
-    return {
-      oldFile: {
-        name: oldPath,
-        contents: contents.oldContents,
-        cacheKey: `${cacheKey}:old:${oldPath}`,
-      },
-      newFile,
-    };
+    const contents = await load({
+      changeType: fileDiff.type,
+      oldPath: diffFileOldPath(fileDiff),
+      newPath: resolveFileDiffPath(fileDiff),
+    });
+    return loadedDiffFiles(fileDiff, contents, cacheKey);
   };
 }
 

@@ -35,6 +35,7 @@ import {
   FileSurfaceLoading,
   FileSurfaceNotice,
 } from "./fileSurfaceChrome";
+import { renderedToggleLabel } from "./filePreviewMode";
 
 const SourcePreview = lazy(() => import("./ReadOnlySourcePreview"));
 
@@ -48,12 +49,6 @@ export function ReadOnlySourcePreview(props: { name: string; text: string }) {
       <SourcePreview {...props} />
     </Suspense>
   );
-}
-
-function renderedToggleLabel(mode: "markdown" | "html" | "table", rendered: boolean): string {
-  if (mode === "markdown") return rendered ? "Show markdown source" : "Show rendered markdown";
-  if (mode === "table") return rendered ? "Show source" : "Show table";
-  return rendered ? "Show HTML source" : "Show rendered page";
 }
 
 /**

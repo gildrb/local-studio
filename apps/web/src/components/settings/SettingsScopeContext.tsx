@@ -1,23 +1,43 @@
 import { T3_PROJECT_FILE_NAME, type T3ProjectFile } from "@t3tools/contracts";
-import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { useAtomValue } from "@effect/atom-react";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 
-import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import type { SidebarProjectSnapshot } from "../../sidebarProjectGrouping";
+import {
+  useEnvironments,
+  usePrimaryEnvironmentId,
+  type EnvironmentPresentation,
+} from "../../state/environments";
 import { getProjectFileQueryAtom, optimisticFileAtom } from "../files/projectFilesQueryState";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
-import { resolveScopedSettingsTargets, selectScopedSettingsEnvironments } from "./scopedSettings";
-import { resolveSettingsScope, type SettingsScopeSearch } from "./settingsScope";
-import { selectSingleEnvironmentScope } from "./settingsScopeAxis";
+import {
+  resolveSettingsScopeSearch,
+  resolveSettingsScopeSelection,
+  settingsScopeProjectFile,
+  type SettingsScopeSelection,
+} from "./SettingsScopeContext.logic";
+import {
+  resolveSettingsScope,
+  type ResolvedSettingsScope,
+  type SettingsScopeSearch,
+} from "./settingsScope";
+
+export type SettingsScopeContextValue = SettingsScopeSelection<EnvironmentPresentation> & {
+  readonly scope: ResolvedSettingsScope;
+  readonly groups: readonly SidebarProjectSnapshot[];
+  readonly search: SettingsScopeSearch;
+  readonly singleEnvironment: boolean;
+  readonly selectScope: (next: SettingsScopeSearch) => void;
+};
 
 /**
  * Each member's decoded t3.json, so file-backed settings show the file as a
  * layer in the inheritance chain. A member is only present once its read has
  * settled; the query atom caches per (environment, cwd).
  */
-function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
+function useMemberProjectFiles(scope: ResolvedSettingsScope) {
   const members = scope.kind === "project" || scope.kind === "checkout" ? scope.members : [];
   return useAtomValue(
     useMemo(
@@ -42,10 +62,7 @@ function useMemberProjectFiles(scope: ReturnType<typeof resolveSettingsScope>) {
                   T3_PROJECT_FILE_NAME,
                 ),
               )?.data ?? Option.getOrNull(AsyncResult.value(result));
-            files.set(
-              member.physicalProjectKey,
-              data === null || data.truncated ? null : parseT3ProjectFile(data.contents),
-            );
+            files.set(member.physicalProjectKey, settingsScopeProjectFile(data));
           }
           return files;
         }),
@@ -60,14 +77,13 @@ function useResolvedSettingsScope(rawSearch: SettingsScopeSearch, singleEnvironm
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const search = useMemo(
     () =>
-      singleEnvironment
-        ? selectSingleEnvironmentScope(
-            rawSearch,
-            resolveSettingsScope(rawSearch, groups, availableEnvironments),
-            availableEnvironments,
-            primaryEnvironmentId,
-          )
-        : rawSearch,
+      resolveSettingsScopeSearch({
+        rawSearch,
+        singleEnvironment,
+        groups,
+        environments: availableEnvironments,
+        primaryEnvironmentId,
+      }),
     [availableEnvironments, groups, primaryEnvironmentId, rawSearch, singleEnvironment],
   );
   const scope = useMemo(
@@ -75,37 +91,23 @@ function useResolvedSettingsScope(rawSearch: SettingsScopeSearch, singleEnvironm
     [availableEnvironments, groups, search],
   );
   const projectFiles = useMemberProjectFiles(scope);
-  return useMemo(() => {
-    const selected = selectScopedSettingsEnvironments(
+  return useMemo(
+    () => ({
       scope,
-      availableEnvironments,
-      primaryEnvironmentId,
-    );
-    const targets = resolveScopedSettingsTargets(
-      scope,
-      selected.connectedEnvironments,
-      projectFiles,
-    );
-    // The representative target supplies display values; project scopes
-    // prefer the member on the primary environment, like environments do.
-    const target =
-      targets.find(
-        (candidate) => candidate.environmentId === selected.environment?.environmentId,
-      ) ??
-      targets[0] ??
-      null;
-    return { scope, groups, search, ...selected, targets, target };
-  }, [availableEnvironments, groups, primaryEnvironmentId, projectFiles, scope, search]);
+      groups,
+      search,
+      ...resolveSettingsScopeSelection({
+        scope,
+        environments: availableEnvironments,
+        primaryEnvironmentId,
+        projectFiles,
+      }),
+    }),
+    [availableEnvironments, groups, primaryEnvironmentId, projectFiles, scope, search],
+  );
 }
 
-const SettingsScopeContext = createContext<
-  | (ReturnType<typeof useResolvedSettingsScope> & {
-      singleEnvironment: boolean;
-      search: SettingsScopeSearch;
-      selectScope: (next: SettingsScopeSearch) => void;
-    })
-  | null
->(null);
+const SettingsScopeContext = createContext<SettingsScopeContextValue | null>(null);
 
 export function SettingsScopeProvider({
   search,
@@ -120,7 +122,7 @@ export function SettingsScopeProvider({
 }) {
   const resolved = useResolvedSettingsScope(search, singleEnvironment);
   const value = useMemo(
-    () => ({ ...resolved, singleEnvironment, selectScope: onChange }),
+    (): SettingsScopeContextValue => ({ ...resolved, singleEnvironment, selectScope: onChange }),
     [onChange, resolved, singleEnvironment],
   );
   return <SettingsScopeContext value={value}>{children}</SettingsScopeContext>;

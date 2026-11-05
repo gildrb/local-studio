@@ -7,10 +7,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 
-import {
-  DesktopSshEnvironmentRequestError,
-  fetchSshEnvironmentDescriptor,
-} from "./sshEnvironment.ts";
+import { DesktopSshEnvironmentRequestError } from "../../ssh/DesktopSshEnvironmentApi.ts";
+import { fetchSshEnvironmentDescriptor } from "./sshEnvironment.ts";
 
 function jsonResponse(request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) {
   return HttpClientResponse.fromWeb(

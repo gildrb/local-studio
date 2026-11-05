@@ -4,10 +4,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   getProviderStatusBannerKey,
-  getProviderStatusMessage,
   ProviderStatusBanner,
   shouldShowProviderStatusBanner,
 } from "./ProviderStatusBanner";
+import { getProviderStatusMessage } from "./ProviderStatusBanner.logic";
 
 function warningProvider(): ServerProvider {
   return {

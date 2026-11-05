@@ -15,7 +15,6 @@ import {
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { Atom, AsyncResult } from "effect/unstable/reactivity";
 import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentThreadDetails } from "../state/threads";
 
 import type { Thread, ThreadShell, TurnDiffSummary } from "../types";
 import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
@@ -2147,11 +2146,16 @@ describe("rewind draft recovery", () => {
 
   it("waits past command acceptance until the exact message disappears", async () => {
     const atom = Atom.make<Thread | null>(makeThread({ messages: [message] }));
-    vi.spyOn(environmentThreadDetails, "detailAtom").mockReturnValue(atom);
     let accepted = false;
-    const result = waitForRevertedMessage({ environmentId, threadId }, message.id, 0, async () => {
-      accepted = true;
-    });
+    const result = waitForRevertedMessage(
+      { registry: appAtomRegistry, detailAtom: () => atom },
+      { environmentId, threadId },
+      message.id,
+      0,
+      async () => {
+        accepted = true;
+      },
+    );
     let completed = false;
     void result.then(() => {
       completed = true;
@@ -2186,26 +2190,31 @@ describe("rewind draft recovery", () => {
 
   it("rejects a new provider rewind failure without restoring a draft", async () => {
     const atom = Atom.make<Thread | null>(makeThread({ messages: [message] }));
-    vi.spyOn(environmentThreadDetails, "detailAtom").mockReturnValue(atom);
-    const result = waitForRevertedMessage({ environmentId, threadId }, message.id, 0, async () => {
-      appAtomRegistry.set(
-        atom,
-        makeThread({
-          messages: [message],
-          activities: [
-            {
-              id: EventId.make("rewind-failed"),
-              kind: "checkpoint.revert.failed",
-              tone: "error",
-              summary: "Checkpoint revert failed",
-              payload: { detail: "Native history unavailable", turnCount: 0 },
-              turnId: null,
-              createdAt: now,
-            },
-          ],
-        }),
-      );
-    });
+    const result = waitForRevertedMessage(
+      { registry: appAtomRegistry, detailAtom: () => atom },
+      { environmentId, threadId },
+      message.id,
+      0,
+      async () => {
+        appAtomRegistry.set(
+          atom,
+          makeThread({
+            messages: [message],
+            activities: [
+              {
+                id: EventId.make("rewind-failed"),
+                kind: "checkpoint.revert.failed",
+                tone: "error",
+                summary: "Checkpoint revert failed",
+                payload: { detail: "Native history unavailable", turnCount: 0 },
+                turnId: null,
+                createdAt: now,
+              },
+            ],
+          }),
+        );
+      },
+    );
     await expect(result).rejects.toThrow("Native history unavailable");
   });
 
@@ -2214,8 +2223,8 @@ describe("rewind draft recovery", () => {
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     const atom = Atom.make<Thread | null>(makeThread({ messages: [message] }));
-    vi.spyOn(environmentThreadDetails, "detailAtom").mockReturnValue(atom);
     const result = waitForRevertedMessage(
+      { registry: appAtomRegistry, detailAtom: () => atom },
       { environmentId, threadId },
       message.id,
       0,

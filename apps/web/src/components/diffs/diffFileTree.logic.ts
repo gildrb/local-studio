@@ -9,7 +9,7 @@ export interface DiffFileTreeEntry {
   readonly status: GitStatus;
 }
 
-function toGitStatus(file: FileDiffMetadata): GitStatus {
+export function diffFileGitStatus(file: FileDiffMetadata): GitStatus {
   switch (file.type) {
     case "new":
       return "added";
@@ -34,7 +34,7 @@ export function diffFileTreeEntries(
   const statusByPath = new Map<string, GitStatus>();
   for (const file of files) {
     const path = resolveFileDiffPath(file);
-    const status = toGitStatus(file);
+    const status = diffFileGitStatus(file);
     const previous = statusByPath.get(path);
     statusByPath.set(path, previous === undefined || previous === status ? status : "modified");
   }
@@ -129,4 +129,276 @@ export function buildDiffFileTreeUpdates(
   }
 
   return updates;
+}
+
+export type DiffFileGitStatusPresentation = {
+  readonly letter: string | null;
+  readonly title: string;
+  readonly tone: GitStatus;
+};
+
+const GIT_STATUS_PRESENTATION: Readonly<Record<GitStatus, DiffFileGitStatusPresentation>> = {
+  added: { letter: "A", title: "Git status: added", tone: "added" },
+  deleted: { letter: "D", title: "Git status: deleted", tone: "deleted" },
+  ignored: { letter: null, title: "Git status: ignored", tone: "ignored" },
+  modified: { letter: "M", title: "Git status: modified", tone: "modified" },
+  renamed: { letter: "R", title: "Git status: renamed", tone: "renamed" },
+  untracked: { letter: "U", title: "Git status: untracked", tone: "untracked" },
+};
+
+export function describeDiffFileGitStatus(status: GitStatus): DiffFileGitStatusPresentation {
+  return GIT_STATUS_PRESENTATION[status];
+}
+
+export const DIFF_FILE_TREE_DIRECTORY_DECORATION_TITLE = "Contains git status items";
+
+export type DiffFileTreeToggleAllModel = {
+  readonly expanded: boolean;
+  readonly ariaLabel: string;
+  readonly tooltip: string;
+  readonly icon: "chevrons-down-up" | "chevrons-up-down";
+};
+
+export type DiffFileTreeHeaderInput = {
+  readonly fileCount: number;
+  readonly directoryCount: number;
+  readonly allDirectoriesExpanded: boolean;
+};
+
+export type DiffFileTreeHeaderModel = {
+  readonly title: string;
+  readonly fileCount: number;
+  readonly toggleAllDirectories: DiffFileTreeToggleAllModel | null;
+};
+
+export function buildDiffFileTreeHeaderModel(
+  input: DiffFileTreeHeaderInput,
+): DiffFileTreeHeaderModel {
+  const expanded = input.allDirectoriesExpanded;
+  const label = expanded ? "Collapse all folders" : "Expand all folders";
+  return {
+    title: "Files",
+    fileCount: input.fileCount,
+    toggleAllDirectories:
+      input.directoryCount > 0
+        ? {
+            expanded,
+            ariaLabel: label,
+            tooltip: label,
+            icon: expanded ? "chevrons-down-up" : "chevrons-up-down",
+          }
+        : null,
+  };
+}
+
+export type DiffFileTreeDirectoryRow = {
+  readonly kind: "directory";
+  readonly path: string;
+  readonly name: string;
+  readonly depth: number;
+  readonly expanded: boolean;
+  readonly decorationTitle: string;
+};
+
+export type DiffFileTreeFileRow = {
+  readonly kind: "file";
+  readonly path: string;
+  readonly name: string;
+  readonly depth: number;
+  readonly status: GitStatus;
+  readonly statusLetter: string | null;
+  readonly statusTitle: string;
+  readonly tone: GitStatus;
+  readonly selected: boolean;
+};
+
+export type DiffFileTreeRow = DiffFileTreeDirectoryRow | DiffFileTreeFileRow;
+
+export type DiffFileTreeInput = {
+  readonly entries: ReadonlyArray<DiffFileTreeEntry>;
+  readonly selectedPath: string | null;
+  readonly collapsedDirectoryPaths: ReadonlyArray<string>;
+};
+
+export type DiffFileTreeModel = {
+  readonly header: DiffFileTreeHeaderModel;
+  readonly directoryPaths: ReadonlyArray<string>;
+  readonly rows: ReadonlyArray<DiffFileTreeRow>;
+};
+
+type TreeDirectory = {
+  readonly path: string;
+  readonly name: string;
+  readonly directories: Map<string, TreeDirectory>;
+  readonly files: DiffFileTreeEntry[];
+};
+
+type TreeChild =
+  | { readonly kind: "directory"; readonly path: string; readonly node: TreeDirectory }
+  | { readonly kind: "file"; readonly path: string; readonly entry: DiffFileTreeEntry };
+
+function sortedTreeChildren(
+  directory: TreeDirectory,
+  positions: ReadonlyMap<string, number>,
+): ReadonlyArray<TreeChild> {
+  const children: TreeChild[] = [
+    ...[...directory.directories.values()].map((node): TreeChild => ({
+      kind: "directory",
+      path: node.path,
+      node,
+    })),
+    ...directory.files.map((entry): TreeChild => ({ kind: "file", path: entry.path, entry })),
+  ];
+  return children.toSorted(
+    (left, right) =>
+      (positions.get(left.path) ?? Number.MAX_SAFE_INTEGER) -
+        (positions.get(right.path) ?? Number.MAX_SAFE_INTEGER) ||
+      left.path.localeCompare(right.path),
+  );
+}
+
+function appendDiffFileTreeRows(
+  rows: DiffFileTreeRow[],
+  directory: TreeDirectory,
+  depth: number,
+  context: {
+    readonly positions: ReadonlyMap<string, number>;
+    readonly collapsed: ReadonlySet<string>;
+    readonly selectedPath: string | null;
+  },
+): void {
+  for (const child of sortedTreeChildren(directory, context.positions)) {
+    if (child.kind === "file") {
+      const presentation = describeDiffFileGitStatus(child.entry.status);
+      rows.push({
+        kind: "file",
+        path: child.entry.path,
+        name: child.entry.path.split("/").at(-1) ?? child.entry.path,
+        depth,
+        status: child.entry.status,
+        statusLetter: presentation.letter,
+        statusTitle: presentation.title,
+        tone: presentation.tone,
+        selected: child.entry.path === context.selectedPath,
+      });
+      continue;
+    }
+    let node = child.node;
+    let name = node.name;
+    while (node.files.length === 0 && node.directories.size === 1) {
+      const only = node.directories.values().next().value;
+      if (only === undefined) break;
+      node = only;
+      name = `${name}/${only.name}`;
+    }
+    const expanded = !context.collapsed.has(node.path);
+    rows.push({
+      kind: "directory",
+      path: node.path,
+      name,
+      depth,
+      expanded,
+      decorationTitle: DIFF_FILE_TREE_DIRECTORY_DECORATION_TITLE,
+    });
+    if (expanded) appendDiffFileTreeRows(rows, node, depth + 1, context);
+  }
+}
+
+export function buildDiffFileTreeModel(input: DiffFileTreeInput): DiffFileTreeModel {
+  const paths = input.entries.map((entry) => entry.path);
+  const directoryPaths = collectDirectoryPaths(paths);
+  const collapsed = new Set(
+    input.collapsedDirectoryPaths.filter((path) => directoryPaths.includes(path)),
+  );
+  const root: TreeDirectory = { path: "", name: "", directories: new Map(), files: [] };
+  for (const entry of input.entries) {
+    let directory = root;
+    for (const segment of entry.path.split("/").slice(0, -1)) {
+      const existing = directory.directories.get(segment);
+      if (existing) {
+        directory = existing;
+        continue;
+      }
+      const created: TreeDirectory = {
+        path: `${directory.path}${segment}/`,
+        name: segment,
+        directories: new Map(),
+        files: [],
+      };
+      directory.directories.set(segment, created);
+      directory = created;
+    }
+    directory.files.push(entry);
+  }
+  const rows: DiffFileTreeRow[] = [];
+  appendDiffFileTreeRows(rows, root, 0, {
+    positions: diffFileTreePositions(paths),
+    collapsed,
+    selectedPath: input.selectedPath,
+  });
+  return {
+    header: buildDiffFileTreeHeaderModel({
+      fileCount: input.entries.length,
+      directoryCount: directoryPaths.length,
+      allDirectoriesExpanded: collapsed.size === 0,
+    }),
+    directoryPaths,
+    rows,
+  };
+}
+
+export type DiffFileTreeSelectIntent =
+  | { readonly kind: "select-file"; readonly path: string }
+  | { readonly kind: "none" };
+
+export function resolveDiffFileTreeSelectionChange(
+  selectedPaths: ReadonlyArray<string>,
+  filePaths: ReadonlySet<string>,
+): DiffFileTreeSelectIntent {
+  const path = selectedPaths.at(-1)?.replace(/\/$/, "");
+  return path && filePaths.has(path) ? { kind: "select-file", path } : { kind: "none" };
+}
+
+export type DiffFileTreeRowClickInput = {
+  readonly isPlainPrimaryClick: boolean;
+  readonly selectedPaths: ReadonlyArray<string>;
+  readonly filePaths: ReadonlySet<string>;
+  readonly clickedItemPaths: ReadonlyArray<string>;
+};
+
+export function resolveDiffFileTreeRowClick(
+  input: DiffFileTreeRowClickInput,
+): DiffFileTreeSelectIntent {
+  if (!input.isPlainPrimaryClick) return { kind: "none" };
+  const path = input.selectedPaths.length === 1 ? input.selectedPaths[0] : undefined;
+  if (!path || !input.filePaths.has(path)) return { kind: "none" };
+  return input.clickedItemPaths.includes(path) ? { kind: "select-file", path } : { kind: "none" };
+}
+
+export type DiffFileTreeToggleAllIntent = {
+  readonly kind: "set-all-directories-expanded";
+  readonly expanded: boolean;
+};
+
+export function resolveDiffFileTreeToggleAllDirectories(
+  allDirectoriesExpanded: boolean,
+): DiffFileTreeToggleAllIntent {
+  return { kind: "set-all-directories-expanded", expanded: !allDirectoriesExpanded };
+}
+
+export type DiffFileTreeToggleDirectoryIntent = {
+  readonly kind: "set-collapsed-directories";
+  readonly paths: ReadonlyArray<string>;
+};
+
+export function resolveDiffFileTreeToggleDirectory(
+  collapsedDirectoryPaths: ReadonlyArray<string>,
+  path: string,
+): DiffFileTreeToggleDirectoryIntent {
+  return {
+    kind: "set-collapsed-directories",
+    paths: collapsedDirectoryPaths.includes(path)
+      ? collapsedDirectoryPaths.filter((candidate) => candidate !== path)
+      : [...collapsedDirectoryPaths, path],
+  };
 }

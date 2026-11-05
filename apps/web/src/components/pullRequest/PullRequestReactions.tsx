@@ -15,24 +15,16 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
-  applyPendingPullRequestReactions,
-  PULL_REQUEST_REACTION_ORDER,
-  pullRequestReactionEmoji,
-  pullRequestReactionName,
-  pullRequestReactionTooltip,
+  buildPullRequestReactionBarModel,
+  PULL_REQUEST_REACTION_FAILURE_TITLE,
+  pullRequestReactionsSignature,
+  resolvePullRequestReactionToggle,
 } from "./pullRequestReactions.logic";
 
 const PILL_CLASS =
   "inline-flex h-6 shrink-0 items-center gap-1 rounded-full border px-2 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring";
 
 const EMPTY_PENDING: ReadonlyMap<PullRequestReactionContent, boolean> = new Map();
-
-/** What the host last said, so a press in flight is forgotten the moment the real counts land. */
-function reactionsSignature(reactions: ReadonlyArray<PullRequestReaction>): string {
-  return reactions
-    .map((reaction) => `${reaction.content}:${reaction.count}:${reaction.viewerHasReacted ? 1 : 0}`)
-    .join(" ");
-}
 
 /** Reaction counts and an always-visible picker, routed to the supplied host subject. */
 export function PullRequestReactionBar({
@@ -60,11 +52,12 @@ export function PullRequestReactionBar({
   }>({ signature: "", values: EMPTY_PENDING });
   const setReaction = useAtomCommand(pullRequestEnvironment.setReaction, { reportFailure: false });
 
-  const signature = reactionsSignature(reactions);
+  const signature = pullRequestReactionsSignature(reactions);
   const values = pending.signature === signature ? pending.values : EMPTY_PENDING;
-  const shown = applyPendingPullRequestReactions(reactions, values);
+  const model = buildPullRequestReactionBarModel({ reactions, pending: values, canReact });
 
-  const toggle = async (content: PullRequestReactionContent, reacted: boolean) => {
+  const toggle = async (content: PullRequestReactionContent) => {
+    const { reacted } = resolvePullRequestReactionToggle(model, content);
     setPending({ signature, values: new Map([...values, [content, reacted]]) });
     const result = await setReaction({
       environmentId,
@@ -81,50 +74,50 @@ export function PullRequestReactionBar({
         next.delete(content);
         return { signature: current.signature, values: next };
       });
-      toastManager.add({ type: "error", title: "The reaction could not be saved" });
+      toastManager.add({ type: "error", title: PULL_REQUEST_REACTION_FAILURE_TITLE });
       return;
     }
     onRefresh();
   };
 
-  if (shown.length === 0 && !canReact) return null;
+  if (!model.visible) return null;
 
   return (
     <div className={cn("flex min-w-0 max-w-full flex-wrap items-center gap-1", className)}>
-      {shown.map((reaction) => (
-        <Tooltip key={reaction.content}>
+      {model.pills.map((pill) => (
+        <Tooltip key={pill.content}>
           <TooltipTrigger
             render={
               <button
                 type="button"
-                aria-pressed={reaction.viewerHasReacted}
-                aria-label={`${pullRequestReactionName(reaction.content)}, ${reaction.count}`}
-                disabled={!canReact}
+                aria-pressed={pill.pressed}
+                aria-label={pill.ariaLabel}
+                disabled={pill.disabled}
                 className={cn(
                   PILL_CLASS,
-                  reaction.viewerHasReacted
+                  pill.pressed
                     ? "border-primary/60 bg-primary/10 text-foreground"
                     : "border-border/70 bg-muted/40 text-muted-foreground",
-                  canReact ? "hover:border-primary/60" : "cursor-default",
+                  pill.disabled ? "cursor-default" : "hover:border-primary/60",
                 )}
-                onClick={() => void toggle(reaction.content, !reaction.viewerHasReacted)}
+                onClick={() => void toggle(pill.content)}
               />
             }
           >
-            <span aria-hidden>{pullRequestReactionEmoji(reaction.content)}</span>
-            <span className="tabular-nums">{reaction.count}</span>
+            <span aria-hidden>{pill.emoji}</span>
+            <span className="tabular-nums">{pill.count}</span>
           </TooltipTrigger>
-          <TooltipPopup side="top">{pullRequestReactionTooltip(reaction)}</TooltipPopup>
+          <TooltipPopup side="top">{pill.tooltip}</TooltipPopup>
         </Tooltip>
       ))}
 
-      {canReact ? (
+      {model.picker.visible ? (
         <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
           <PopoverTrigger
             render={
               <button
                 type="button"
-                aria-label="Add a reaction"
+                aria-label={model.picker.ariaLabel}
                 className={cn(
                   PILL_CLASS,
                   "border-border/70 px-1.5 text-muted-foreground hover:border-primary/60 hover:text-foreground",
@@ -136,28 +129,24 @@ export function PullRequestReactionBar({
           </PopoverTrigger>
           <PopoverPopup align="start" side="top" padding="compact">
             <div className="flex items-center gap-0.5">
-              {PULL_REQUEST_REACTION_ORDER.map((content) => {
-                const reacted =
-                  shown.find((reaction) => reaction.content === content)?.viewerHasReacted ?? false;
-                return (
-                  <button
-                    key={content}
-                    type="button"
-                    aria-pressed={reacted}
-                    aria-label={pullRequestReactionName(content)}
-                    className={cn(
-                      "flex size-7 items-center justify-center rounded-md text-base outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
-                      reacted && "bg-primary/10",
-                    )}
-                    onClick={() => {
-                      setPickerOpen(false);
-                      void toggle(content, !reacted);
-                    }}
-                  >
-                    <span aria-hidden>{pullRequestReactionEmoji(content)}</span>
-                  </button>
-                );
-              })}
+              {model.picker.options.map((option) => (
+                <button
+                  key={option.content}
+                  type="button"
+                  aria-pressed={option.pressed}
+                  aria-label={option.ariaLabel}
+                  className={cn(
+                    "flex size-7 items-center justify-center rounded-md text-base outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                    option.pressed && "bg-primary/10",
+                  )}
+                  onClick={() => {
+                    setPickerOpen(false);
+                    void toggle(option.content);
+                  }}
+                >
+                  <span aria-hidden>{option.emoji}</span>
+                </button>
+              ))}
             </div>
           </PopoverPopup>
         </Popover>

@@ -3,6 +3,7 @@ import {
   type ProviderApprovalDecision,
   type ProviderApprovalOption,
 } from "@t3tools/contracts";
+import { DEFAULT_APPROVAL_OPTIONS, splitApprovalOptions } from "./ComposerPendingApproval.logic";
 import { memo } from "react";
 import { EllipsisIcon, TriangleAlertIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -20,25 +21,13 @@ interface ComposerPendingApprovalActionsProps {
   ) => Promise<unknown>;
 }
 
-const DEFAULT_APPROVAL_OPTIONS = [
-  { decision: "cancel", label: "Cancel" },
-  { decision: "decline", label: "Decline" },
-  { decision: "acceptForSession", label: "Always allow this session" },
-  { decision: "accept", label: "Approve" },
-] satisfies ReadonlyArray<ProviderApprovalOption>;
-
 export const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
   requestId,
   isResponding,
   options = DEFAULT_APPROVAL_OPTIONS,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
-  const primaryOptions = options.filter(
-    (option) => option.decision === "decline" || option.decision === "accept",
-  );
-  const moreOptions = options.filter(
-    (option) => option.decision !== "decline" && option.decision !== "accept",
-  );
+  const { primaryOptions, moreOptions } = splitApprovalOptions(options);
 
   return (
     <>

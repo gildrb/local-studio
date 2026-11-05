@@ -8,10 +8,8 @@ import type {
   AuthSessionState,
 } from "@t3tools/contracts";
 import { EnvironmentHttpCommonError, PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
-import type { EnvironmentHttpCommonError as EnvironmentHttpCommonErrorType } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { HttpClientError } from "effect/unstable/http";
 
 import {
   getPairingTokenFromUrl,
@@ -20,52 +18,11 @@ import {
 
 import { PrimaryEnvironmentHttpClient } from "./httpClient";
 import { runPrimaryHttp } from "../../lib/runtime";
-
-const PrimaryEnvironmentRequestOperation = Schema.Literals([
-  "fetch-session-state",
-  "exchange-bootstrap-credential",
-  "fetch-environment-descriptor",
-  "create-pairing-credential",
-  "list-pairing-links",
-  "revoke-pairing-link",
-  "list-client-sessions",
-  "revoke-client-session",
-  "revoke-other-client-sessions",
-]);
-type PrimaryEnvironmentRequestOperation = typeof PrimaryEnvironmentRequestOperation.Type;
-
-export class PrimaryEnvironmentRequestError extends Schema.TaggedError<PrimaryEnvironmentRequestError>()(
-  "PrimaryEnvironmentRequestError",
-  {
-    operation: PrimaryEnvironmentRequestOperation,
-    status: Schema.Number,
-    pairingLinkId: Schema.optional(Schema.String),
-    sessionId: Schema.optional(Schema.String),
-    cause: Schema.Defect(),
-  },
-) {
-  static fromCause(input: {
-    readonly operation: PrimaryEnvironmentRequestOperation;
-    readonly cause: unknown;
-    readonly pairingLinkId?: string;
-    readonly sessionId?: string;
-  }): PrimaryEnvironmentRequestError {
-    const status = readHttpApiStatus(input.cause) ?? 500;
-    return new PrimaryEnvironmentRequestError({
-      operation: input.operation,
-      status,
-      ...(input.pairingLinkId !== undefined ? { pairingLinkId: input.pairingLinkId } : {}),
-      ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
-      cause: input.cause,
-    });
-  }
-
-  override get message(): string {
-    return `Primary environment request failed during ${this.operation} (HTTP ${this.status}).`;
-  }
-}
-
-const isPrimaryEnvironmentRequestError = Schema.is(PrimaryEnvironmentRequestError);
+import {
+  isPrimaryEnvironmentRequestError,
+  pairingCredentialRequestPayload,
+  PrimaryEnvironmentRequestError,
+} from "./requestError";
 
 export class PrimaryEnvironmentPairingCredentialRejectedError extends Schema.TaggedError<PrimaryEnvironmentPairingCredentialRejectedError>()(
   "PrimaryEnvironmentPairingCredentialRejectedError",
@@ -191,31 +148,6 @@ export async function fetchSessionState(): Promise<AuthSessionState> {
       });
     }
   });
-}
-
-function readHttpApiStatus(error: unknown): number | null {
-  if (isEnvironmentHttpCommonError(error)) {
-    return readEnvironmentHttpErrorStatus(error);
-  }
-  return HttpClientError.isHttpClientError(error) && error.response !== undefined
-    ? error.response.status
-    : null;
-}
-
-function readEnvironmentHttpErrorStatus(error: EnvironmentHttpCommonErrorType): number {
-  switch (error._tag) {
-    case "EnvironmentRequestInvalidError":
-      return 400;
-    case "EnvironmentAuthInvalidError":
-      return 401;
-    case "EnvironmentScopeRequiredError":
-    case "EnvironmentOperationForbiddenError":
-      return 403;
-    case "EnvironmentResourceNotFoundError":
-      return 404;
-    case "EnvironmentInternalError":
-      return 500;
-  }
 }
 
 async function exchangeBootstrapCredential(credential: string): Promise<AuthBrowserSessionResult> {
@@ -354,17 +286,13 @@ export async function createServerPairingCredential(input?: {
   readonly label?: string;
   readonly scopes?: ReadonlyArray<AuthEnvironmentScope>;
 }): Promise<AuthPairingCredentialResult> {
-  const trimmedLabel = input?.label?.trim();
   try {
     return await runPrimaryHttp(
       PrimaryEnvironmentHttpClient.pipe(
         Effect.flatMap((client) =>
           client.auth.pairingCredential({
             headers: {},
-            payload: {
-              ...(trimmedLabel ? { label: trimmedLabel } : {}),
-              ...(input?.scopes ? { scopes: input.scopes } : {}),
-            },
+            payload: pairingCredentialRequestPayload(input),
           }),
         ),
       ),

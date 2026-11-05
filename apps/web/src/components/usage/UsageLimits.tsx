@@ -1,29 +1,16 @@
 import {
   type EnvironmentId,
-  type ProviderConsumeResetCreditOutcome,
   ProviderConsumeResetCreditInput,
   ServerProvider,
   ServerProviderResetCredits,
   ServerProviderUsageWindow,
-  UsageProviderKind,
 } from "@t3tools/contracts";
-import { useAtomValue } from "@effect/atom-react";
-import {
-  elapsedShare,
-  formatDuration,
-  formatResetsIn,
-  type LimitPace,
-  paceOf,
-  remainingPercent,
-} from "@t3tools/shared/usageLimits";
 import { GaugeIcon, TrendingDownIcon, TrendingUpIcon } from "lucide-react";
-import { Fragment, type ReactNode, useState } from "react";
+import { Fragment, useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
-import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { formatUpcomingTimestamp } from "../../timestampFormat";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -35,111 +22,82 @@ import {
 } from "../ui/alert-dialog";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { UsageLimitsPooled } from "./UsageLimitsPooled";
-import { PROVIDER_PRESENTATION } from "./usageProviders";
+import {
+  buildLimitWindowsModel,
+  buildResetCreditsModel,
+  RESET_CREDIT_DIALOG_COPY,
+  resetCreditResultOf,
+  resolveResetCreditStatus,
+  type UsageLimitPaceIcon,
+  type UsageLimitPaceModel,
+  type UsageLimitWindowBarModel,
+} from "./UsageLimits.logic";
 
-const PACE: Record<LimitPace, { readonly label: string; readonly icon: typeof GaugeIcon }> = {
-  ahead: { label: "Ahead of pace: spending faster than the window elapses", icon: TrendingUpIcon },
-  on: { label: "On pace with the window", icon: GaugeIcon },
-  under: { label: "Under pace: headroom left for the rest of the window", icon: TrendingDownIcon },
+const PACE_ICONS: Record<UsageLimitPaceIcon, typeof GaugeIcon> = {
+  gauge: GaugeIcon,
+  "trending-up": TrendingUpIcon,
+  "trending-down": TrendingDownIcon,
 };
 
-/** The series colour the cost chart uses for this driver, so the two views read as one. */
-export function barColor(driver: ServerProvider["driver"]): string {
-  const kind: UsageProviderKind | undefined =
-    driver === "codex" ? "codex" : driver === "claudeAgent" ? "claude" : undefined;
-  return kind ? PROVIDER_PRESENTATION[kind].color : "var(--foreground)";
-}
-
 /** Pace as a glyph with the words on hover. */
-export function PaceIcon({ pace }: { readonly pace: LimitPace }) {
-  const Icon = PACE[pace].icon;
+export function PaceIcon({ pace }: { readonly pace: UsageLimitPaceModel }) {
+  const Icon = PACE_ICONS[pace.icon];
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <span
-            role="img"
-            aria-label={PACE[pace].label}
-            className="inline-flex text-muted-foreground"
-          />
+          <span role="img" aria-label={pace.label} className="inline-flex text-muted-foreground" />
         }
       >
         <Icon className="size-3.5" aria-hidden />
       </TooltipTrigger>
-      <TooltipPopup side="top">{PACE[pace].label}</TooltipPopup>
+      <TooltipPopup side="top">{pace.label}</TooltipPopup>
     </Tooltip>
   );
 }
 
-/**
- * One window as a full-width bar from the moment it opened to its reset.
- * The fill is the share of quota spent; the hairline is how far into the
- * window the clock is, which is also where even spending would have put the
- * fill. Hover for the exact figures and reset time.
- */
 function WindowBar({
   color,
-  window,
-  now,
+  bar,
 }: {
   readonly color: string;
-  readonly window: ServerProviderUsageWindow;
-  readonly now: number;
+  readonly bar: UsageLimitWindowBarModel;
 }) {
-  const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const remaining = remainingPercent(window);
-  const elapsed = elapsedShare(window, now);
-  // The fill is quota left, so the even-spending mark is the time left.
-  const timeLeft = elapsed === null ? null : Math.round((1 - elapsed) * 100);
-  const resetsIn = formatResetsIn(window, now);
-  const resetsAt = window.resetsAt
-    ? formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)
-    : null;
-  const summary = `${window.label}: ${remaining}% left${
-    timeLeft === null ? "" : `, ${timeLeft}% of the window left`
-  }${resetsIn ? `, ${resetsIn}` : ""}`;
-
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <div
             role="img"
-            aria-label={summary}
+            aria-label={bar.ariaLabel}
             tabIndex={0}
             className="relative h-6 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           />
         }
       >
         <div className="absolute inset-x-0 inset-y-1.5 rounded-full bg-muted" />
-        {remaining > 0 ? (
+        {bar.fillWidth !== null ? (
           <div
             className="absolute inset-y-1.5 left-0 rounded-full"
-            style={{ width: `${remaining}%`, backgroundColor: color }}
+            style={{ width: bar.fillWidth, backgroundColor: color }}
           />
         ) : null}
-        {timeLeft !== null ? (
+        {bar.markerLeft !== null ? (
           <span
             aria-hidden
             className="absolute inset-y-0.5 w-px -translate-x-1/2 bg-foreground/60"
-            style={{ left: `${timeLeft}%` }}
+            style={{ left: bar.markerLeft }}
           />
         ) : null}
       </TooltipTrigger>
       <TooltipPopup side="top">
         <div className="flex flex-col gap-0.5">
-          <span className="text-foreground">
-            {remaining}% left{timeLeft !== null ? ` · ${timeLeft}% of the window left` : ""}
-          </span>
-          {timeLeft !== null ? (
-            <span className="text-muted-foreground">The line is where even spending would be.</span>
+          <span className="text-foreground">{bar.tooltipTitle}</span>
+          {bar.tooltipHint !== null ? (
+            <span className="text-muted-foreground">{bar.tooltipHint}</span>
           ) : null}
-          {resetsAt ? (
-            <span className="text-muted-foreground">
-              Resets {resetsAt}
-              {resetsIn ? ` · ${resetsIn}` : ""}
-            </span>
+          {bar.tooltipResets !== null ? (
+            <span className="text-muted-foreground">{bar.tooltipResets}</span>
           ) : null}
         </div>
       </TooltipPopup>
@@ -162,7 +120,8 @@ export function LimitWindows({
   readonly now: number;
   readonly compact?: boolean;
 }) {
-  const color = barColor(driver);
+  const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
+  const model = buildLimitWindowsModel({ driver, windows, nowMs: now, timestampFormat });
   return (
     <div
       className={
@@ -171,41 +130,38 @@ export function LimitWindows({
           : "grid grid-cols-[11rem_minmax(0,1fr)_7rem] gap-x-4 gap-y-1"
       }
     >
-      {windows.map((window) => {
-        const pace = paceOf(window, now);
-        const resetsIn = formatResetsIn(window, now);
-        return (
-          <Fragment key={window.id}>
-            <span className="flex min-w-0 items-center gap-2 text-xs">
-              <span className="truncate text-muted-foreground">{window.label}</span>
-              <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
-                {remainingPercent(window)}% left
-              </span>
+      {model.rows.map((row) => (
+        <Fragment key={row.id}>
+          <span className="flex min-w-0 items-center gap-2 text-xs">
+            <span className="truncate text-muted-foreground">{row.label}</span>
+            <span className="ms-auto shrink-0 font-medium text-foreground tabular-nums">
+              {row.remainingLabel}
             </span>
-            <WindowBar color={color} window={window} now={now} />
-            <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-              {pace ? <PaceIcon pace={pace} /> : null}
-              <span className="ms-auto shrink-0">{resetsIn ?? ""}</span>
-            </span>
-          </Fragment>
-        );
-      })}
+          </span>
+          <WindowBar color={model.color} bar={row.bar} />
+          <span className="flex items-center gap-2 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+            {row.pace ? <PaceIcon pace={row.pace} /> : null}
+            <span className="ms-auto shrink-0">{row.resetsIn}</span>
+          </span>
+        </Fragment>
+      ))}
     </div>
   );
 }
 
-const OUTCOME_TEXT: Record<ProviderConsumeResetCreditOutcome, string> = {
-  reset: "Reset applied. Your windows have cleared.",
-  nothingToReset: "Nothing to reset right now.",
-  noCredit: "No reset credit left.",
-  alreadyRedeemed: "That credit was already redeemed.",
+export type ResetCreditState = {
+  readonly confirming: boolean;
+  readonly setConfirming: (confirming: boolean) => void;
+  readonly busy: boolean;
+  readonly status: string | null;
+  readonly redeem: () => Promise<void>;
 };
 
 /** Everything a redeem needs: where to send it and what to say afterwards. */
 export function useResetCredit(
   environmentId: EnvironmentId,
   input: ProviderConsumeResetCreditInput,
-) {
+): ResetCreditState {
   const consume = useAtomCommand(serverEnvironment.consumeResetCredit, { reportFailure: false });
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -217,15 +173,7 @@ export function useResetCredit(
     setStatus(null);
     const result = await consume({ environmentId, input });
     setBusy(false);
-    if (result._tag === "Success") {
-      setStatus(result.value.warning ?? OUTCOME_TEXT[result.value.outcome]);
-      return;
-    }
-    setStatus(
-      "error" in result.cause && result.cause.error instanceof Error
-        ? result.cause.error.message
-        : "Could not use the reset credit.",
-    );
+    setStatus(resolveResetCreditStatus(resetCreditResultOf(result)));
   };
 
   return { confirming, setConfirming, busy, status, redeem };
@@ -250,36 +198,18 @@ export function ResetCreditDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogPopup>
         <AlertDialogHeader>
-          <AlertDialogTitle>Use a reset credit?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This redeems one credit on your account and clears the current rate-limit windows. It
-            cannot be undone.
-          </AlertDialogDescription>
+          <AlertDialogTitle>{RESET_CREDIT_DIALOG_COPY.title}</AlertDialogTitle>
+          <AlertDialogDescription>{RESET_CREDIT_DIALOG_COPY.description}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button onClick={onConfirm}>Use credit</Button>
+          <AlertDialogClose render={<Button variant="outline" />}>
+            {RESET_CREDIT_DIALOG_COPY.cancelLabel}
+          </AlertDialogClose>
+          <Button onClick={onConfirm}>{RESET_CREDIT_DIALOG_COPY.confirmLabel}</Button>
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>
   );
-}
-
-/** `2 reset credits banked · next expires in 27d 23h`, or the short form for a popover. */
-export function resetCreditsSummary(
-  credits: ServerProviderResetCredits,
-  now: number,
-  compact = false,
-): string {
-  const expiresIn = credits.nextExpiresAt
-    ? formatDuration(Date.parse(credits.nextExpiresAt) - now)
-    : null;
-  if (credits.availableCount === 0) return "No reset credits banked";
-  if (compact)
-    return `${credits.availableCount} banked${expiresIn ? ` · expires in ${expiresIn}` : ""}`;
-  return `${credits.availableCount} ${credits.availableCount === 1 ? "reset credit" : "reset credits"} banked${
-    expiresIn ? ` · next expires in ${expiresIn}` : ""
-  }`;
 }
 
 /** Banked reset credits with the redeem button and its confirm, self-contained. */
@@ -295,16 +225,22 @@ export function ResetCredits({
   readonly now: number;
 }) {
   const { confirming, setConfirming, busy, status, redeem } = useResetCredit(environmentId, input);
-  if (credits.availableCount === 0 && status === null) return null;
+  const model = buildResetCreditsModel({ credits, nowMs: now, busy, status });
+  if (!model.visible) return null;
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-      <span className="tabular-nums">{resetCreditsSummary(credits, now)}</span>
-      {credits.availableCount > 0 ? (
-        <Button size="xs" variant="outline" disabled={busy} onClick={() => setConfirming(true)}>
-          {busy ? "Using…" : "Use reset"}
+      <span className="tabular-nums">{model.summary}</span>
+      {model.button ? (
+        <Button
+          size="xs"
+          variant="outline"
+          disabled={model.button.disabled}
+          onClick={() => setConfirming(true)}
+        >
+          {model.button.label}
         </Button>
       ) : null}
-      {status ? <span className="text-foreground">{status}</span> : null}
+      {model.status ? <span className="text-foreground">{model.status}</span> : null}
       <ResetCreditDialog
         open={confirming}
         onOpenChange={setConfirming}
@@ -312,26 +248,4 @@ export function ResetCredits({
       />
     </div>
   );
-}
-
-/**
- * Subscription quota across every connected environment's providers and hubs,
- * pooled per provider. The page advances `now` on explicit refresh rather than
- * ticking: a live clock would repaint the page for no decision-changing gain.
- */
-export function UsageLimitsSection({
-  selectedEnvironmentIds,
-  now,
-  cursorPrompt,
-}: {
-  readonly selectedEnvironmentIds: ReadonlySet<EnvironmentId> | null;
-  readonly now: number;
-  readonly cursorPrompt?: ReactNode;
-}) {
-  const presentations = useAtomValue(environmentPresentations.presentationsAtom);
-  const selected =
-    selectedEnvironmentIds === null
-      ? presentations
-      : new Map([...presentations].filter(([id]) => selectedEnvironmentIds.has(id)));
-  return <UsageLimitsPooled presentations={selected} now={now} cursorPrompt={cursorPrompt} />;
 }

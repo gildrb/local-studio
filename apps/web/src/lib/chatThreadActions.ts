@@ -69,7 +69,10 @@ export function hasExplicitComposerModelSelection(
 }
 
 export function resolveThreadActionProjectRef(
-  context: ChatThreadActionContext,
+  context: Pick<
+    ChatThreadActionContext,
+    "activeDraftThread" | "activeThread" | "defaultProjectRef"
+  >,
 ): ScopedProjectRef | null {
   if (context.activeThread) {
     return scopeProjectRef(context.activeThread.environmentId, context.activeThread.projectId);

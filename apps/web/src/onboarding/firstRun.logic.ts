@@ -185,3 +185,64 @@ export function resolveHostedFirstRunDecision(input: HostedFirstRunDecisionInput
     ? { decision: "wizard", persistCompletion: false }
     : { decision: "app", persistCompletion: true };
 }
+
+export type FirstRunRecoveryReason = "settings" | "connection";
+
+export type FirstRunGateView =
+  | {
+      readonly kind: "recovery";
+      readonly reason: FirstRunRecoveryReason;
+      readonly retrying: boolean;
+    }
+  | { readonly kind: "blank" }
+  | { readonly kind: "app" };
+
+export function resolveFirstRunGateView(input: {
+  readonly hydrationStatus: string;
+  readonly decision: FirstRunDecision;
+  readonly stalled: boolean;
+}): FirstRunGateView {
+  if (input.hydrationStatus === "failed" || input.hydrationStatus === "retrying") {
+    return {
+      kind: "recovery",
+      reason: "settings",
+      retrying: input.hydrationStatus === "retrying",
+    };
+  }
+  if (input.decision !== "app") {
+    return input.stalled
+      ? { kind: "recovery", reason: "connection", retrying: false }
+      : { kind: "blank" };
+  }
+  return { kind: "app" };
+}
+
+export type FirstRunRecoveryModel = {
+  readonly title: string;
+  readonly description: string;
+  readonly action: {
+    readonly kind: "retrySettings" | "reload";
+    readonly label: string;
+    readonly enabled: boolean;
+    readonly refreshing: boolean;
+  };
+};
+
+export function buildFirstRunRecoveryModel(input: {
+  readonly reason: FirstRunRecoveryReason;
+  readonly retrying: boolean;
+}): FirstRunRecoveryModel {
+  const settings = input.reason === "settings";
+  return {
+    title: settings ? "Could not read settings" : "Still connecting",
+    description: settings
+      ? "Your saved settings could not be loaded."
+      : "T3 Code could not confirm this workspace.",
+    action: {
+      kind: settings ? "retrySettings" : "reload",
+      label: settings ? "Retry" : "Reload",
+      enabled: !input.retrying,
+      refreshing: input.retrying,
+    },
+  };
+}

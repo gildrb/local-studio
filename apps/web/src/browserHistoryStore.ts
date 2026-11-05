@@ -4,10 +4,9 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 
+import { isLocalLoopbackHost, normalizeHostname } from "@t3tools/shared/hostClassification";
 import { normalizePreviewUrl } from "@t3tools/shared/preview";
-import { readPreparedConnection } from "~/state/session";
 
-import { isLocalLoopbackHost, normalizeHostname } from "./browser/browserTargetResolver";
 import { resolveStorage } from "./lib/storage";
 
 export type BrowserHistoryEntry = { url: string; lastVisitedAt: number; title?: string };
@@ -323,13 +322,17 @@ function migratePersistedThreadProjectKeys(
   );
 }
 
-export function recordVisitForThread(ref: ScopedThreadRef, url: string, at?: number): void {
+/** Records a visit; `environmentHostname` folds the environment's own host into loopback aliases. */
+export function recordVisitForThreadOnHost(
+  ref: ScopedThreadRef,
+  url: string,
+  environmentHostname: string | null,
+  at?: number,
+): void {
   const threadKey = scopedThreadKey(ref);
   const state = useBrowserHistoryStore.getState();
   const projectKey = state.projectKeyByThreadKey[threadKey];
   const visitAt = at ?? Date.now();
-  const connection = readPreparedConnection(ref.environmentId);
-  const environmentHostname = connection ? new URL(connection.httpBaseUrl).hostname : null;
   if (!projectKey) {
     useBrowserHistoryStore.setState({
       pendingVisitsByThreadKey: addPendingByThread(state.pendingVisitsByThreadKey, threadKey, {
@@ -374,16 +377,22 @@ export function removeUrlForThread(ref: ScopedThreadRef, url: string): void {
 
 const EMPTY_HISTORY: ReadonlyArray<BrowserHistoryEntry> = [];
 
+export function selectThreadRecentHistory(
+  state: Pick<BrowserHistoryStoreState, "byProjectKey" | "projectKeyByThreadKey">,
+  ref: ScopedThreadRef,
+  limit: number,
+): ReadonlyArray<BrowserHistoryEntry> {
+  const projectKey = state.projectKeyByThreadKey[scopedThreadKey(ref)];
+  const entries = projectKey ? state.byProjectKey[projectKey] : undefined;
+  return entries && entries.length > 0 ? entries.slice(0, limit) : EMPTY_HISTORY;
+}
+
 export function useThreadRecentHistory(
   ref: ScopedThreadRef,
   limit: number,
 ): ReadonlyArray<BrowserHistoryEntry> {
   return useBrowserHistoryStore(
-    useShallow((state) => {
-      const projectKey = state.projectKeyByThreadKey[scopedThreadKey(ref)];
-      const entries = projectKey ? state.byProjectKey[projectKey] : undefined;
-      return entries && entries.length > 0 ? entries.slice(0, limit) : EMPTY_HISTORY;
-    }),
+    useShallow((state) => selectThreadRecentHistory(state, ref, limit)),
   );
 }
 

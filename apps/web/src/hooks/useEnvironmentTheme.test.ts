@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { environmentThemeDefinition, publishedThemeDefinitions } from "./useEnvironmentTheme";
+import { environmentThemeDefinition, publishedThemeDefinitions } from "./useEnvironmentTheme.logic";
 import {
   getDefaultThemeColors,
   getThemeDefinition,

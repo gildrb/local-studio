@@ -1,26 +1,23 @@
 import type { ScopedThreadRef, ThreadPullRequestLink } from "@t3tools/contracts";
-import {
-  resolveThreadPullRequestChains,
-  visibleThreadPullRequests,
-} from "@t3tools/shared/threadPullRequests";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { ArrowUpRightIcon, LinkIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react";
 import { useCallback, useMemo } from "react";
 
 import { writeTextToClipboard } from "~/hooks/useCopyToClipboard";
 import { useOpenPrLink } from "~/lib/openPullRequestLink";
 import { cn } from "~/lib/utils";
+import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { useServerConfigs, useThreadShell } from "~/state/entities";
 import { PullRequestsUnavailableState } from "./PullRequestsUnavailableState";
 import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { formatRelativeTimeLabel } from "~/timestampFormat";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { openLinkPullRequestDialog } from "./LinkPullRequestDialog";
-import { pullRequestListLines, type PullRequestListLine } from "./pullRequestListLines";
+import type { PullRequestListLine } from "./pullRequestListLines";
 import {
   PULL_REQUEST_ROW_CLASS,
   PULL_REQUEST_ROW_NUMBER_CLASS,
@@ -35,14 +32,12 @@ import {
   pullRequestChecksStatePresentation,
 } from "./pullRequestPresentation";
 import { PullRequestGlyph } from "./pullRequestIcons";
-
-const SOURCE_LABELS: Record<ThreadPullRequestLink["source"], string> = {
-  manual: "Linked by you",
-  created: "Created from this thread",
-  agent: "Linked by the agent",
-  stack: "Found in the stack",
-  "stack-dismissed": "Dismissed",
-};
+import {
+  buildThreadPullRequestsPanelModel,
+  threadPullRequestLines,
+  THREAD_PULL_REQUESTS_UNSUPPORTED,
+  type ThreadPullRequestRowModel,
+} from "./ThreadPullRequestsPanel.logic";
 
 function ChecksGlyph({
   state,
@@ -66,15 +61,17 @@ function ChecksGlyph({
 
 function LinkRow({
   line,
+  row,
   threadRef,
   onUnlink,
 }: {
   line: PullRequestListLine;
+  row: ThreadPullRequestRowModel;
   threadRef: ScopedThreadRef;
   onUnlink: (link: ThreadPullRequestLink) => void;
 }) {
   const openPrLink = useOpenPrLink(threadRef);
-  const { link, depth, stack } = line;
+  const { link } = line;
   const snapshot = link.snapshot;
   return (
     <div
@@ -82,12 +79,14 @@ function LinkRow({
       // Each layer steps in under the one it targets. The step is capped: beyond a few layers
       // the indent only says "still in the stack", which the connector line already does, and
       // a sixteen-layer stack would otherwise stair-step off the right edge.
-      style={{ paddingLeft: `${0.5 + Math.min(depth, 3) * 1.25}rem` }}
+      style={{ paddingLeft: `${row.indentRem}rem` }}
     >
-      {depth > 0 ? <span aria-hidden className="-ml-2 h-6 w-px shrink-0 bg-border/70" /> : null}
+      {row.showsConnector ? (
+        <span aria-hidden className="-ml-2 h-6 w-px shrink-0 bg-border/70" />
+      ) : null}
       {snapshot === null ? (
         <PullRequestGlyph.pullRequest
-          aria-label="Waiting for host state"
+          aria-label={row.waitingAriaLabel ?? undefined}
           className="size-4 shrink-0 text-muted-foreground"
         />
       ) : (
@@ -107,16 +106,14 @@ function LinkRow({
           number={
             <Tooltip>
               <TooltipTrigger render={<span className={PULL_REQUEST_ROW_NUMBER_CLASS} />}>
-                #{link.number}
+                {row.numberLabel}
               </TooltipTrigger>
-              <TooltipPopup>
-                {SOURCE_LABELS[link.source]} · {formatRelativeTimeLabel(link.linkedAt)}
-              </TooltipPopup>
+              <TooltipPopup>{row.numberTooltip}</TooltipPopup>
             </Tooltip>
           }
-          title={snapshot?.title ?? link.repository}
+          title={row.title}
           signals={
-            snapshot?.state === "open" ? (
+            row.showsSignals && snapshot !== null ? (
               <>
                 {snapshot.checksState ? <ChecksGlyph state={snapshot.checksState} /> : null}
                 {snapshot.reviewDecision ? (
@@ -137,7 +134,7 @@ function LinkRow({
           }
           meta={
             <>
-              {stack ? (
+              {row.stack ? (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -145,13 +142,9 @@ function LinkRow({
                     }
                   >
                     <PullRequestGlyph.stack aria-hidden className="size-3" />
-                    {stack.size}
+                    {row.stack.sizeLabel}
                   </TooltipTrigger>
-                  <TooltipPopup>
-                    {stack.kind === "native"
-                      ? `GitHub stack of ${stack.size}: merging a layer lands the ones below it.`
-                      : `${stack.size} pull requests chained by base branch.`}
-                  </TooltipPopup>
+                  <TooltipPopup>{row.stack.tooltip}</TooltipPopup>
                 </Tooltip>
               ) : null}
               {snapshot?.author ? (
@@ -167,20 +160,18 @@ function LinkRow({
                       end, which a tail cut would hide. */}
                   <Tooltip>
                     <TooltipTrigger render={<span className="flex min-w-0 max-w-32 font-mono" />}>
-                      <MiddleTruncate value={link.repository} showTitle={false} />
+                      <MiddleTruncate value={row.repository} showTitle={false} />
                     </TooltipTrigger>
-                    <TooltipPopup>{link.repository}</TooltipPopup>
+                    <TooltipPopup>{row.repository}</TooltipPopup>
                   </Tooltip>
                   <PullRequestRowBranches head={snapshot.headBranch} base={snapshot.baseBranch} />
                 </>
               ) : (
-                <span className="truncate font-mono">
-                  {link.host}/{link.repository}
-                </span>
+                <span className="truncate font-mono">{row.hostRepositoryLabel}</span>
               )}
             </>
           }
-          updatedAt={snapshot?.updatedAt}
+          updatedLabel={snapshot?.updatedAt ? formatRelativeTimeLabel(snapshot.updatedAt) : null}
         />
       </a>
       {/* Out of the row's flow, so no row reserves a column for a button only the hovered one
@@ -204,7 +195,7 @@ function LinkRow({
               <Button
                 variant="ghost"
                 size="icon-micro"
-                aria-label={`Actions for #${link.number}`}
+                aria-label={row.actionsAriaLabel}
                 className="relative"
               >
                 <MoreHorizontalIcon className="size-3.5" />
@@ -214,15 +205,15 @@ function LinkRow({
           <MenuPopup align="end" side="bottom">
             <MenuItem onClick={() => void writeTextToClipboard(link.url, "link")}>
               <LinkIcon className="size-3.5" />
-              Copy link
+              {row.copyLabel}
             </MenuItem>
             <MenuItem onClick={(event) => openPrLink(event, link.url, threadRef)}>
               <ArrowUpRightIcon className="size-3.5" />
-              Open
+              {row.openLabel}
             </MenuItem>
             <MenuItem onClick={() => onUnlink(link)}>
               <PullRequestGlyph.unlink className="size-3.5" />
-              {link.source === "stack" ? "Dismiss from thread" : "Unlink from thread"}
+              {row.unlinkLabel}
             </MenuItem>
           </MenuPopup>
         </Menu>
@@ -236,8 +227,8 @@ export function ThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
   if (configs.get(threadRef.environmentId)?.environment.capabilities.threadPullRequests !== true) {
     return (
       <PullRequestsUnavailableState
-        title="Linked pull requests unavailable"
-        error="This environment does not support multiple linked pull requests."
+        title={THREAD_PULL_REQUESTS_UNSUPPORTED.title}
+        error={THREAD_PULL_REQUESTS_UNSUPPORTED.error}
       />
     );
   }
@@ -249,7 +240,7 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
   const openLinkDialog = useCallback(() => openLinkPullRequestDialog(threadRef), [threadRef]);
   const unlink = useAtomCommand(threadEnvironment.unlinkPullRequest, { reportFailure: true });
   const links = useMemo(() => visibleThreadPullRequests(thread?.pullRequests ?? []), [thread]);
-  const lines = useMemo(() => pullRequestListLines(resolveThreadPullRequestChains(links)), [links]);
+  const lines = useMemo(() => threadPullRequestLines(links), [links]);
   const handleUnlink = useCallback(
     (link: ThreadPullRequestLink) => {
       void unlink({
@@ -264,31 +255,17 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
     },
     [threadRef, unlink],
   );
-  const openCount = useMemo(
-    () => links.filter((link) => link.snapshot === null || link.snapshot.state === "open").length,
-    [links],
-  );
-  const lastSynced = useMemo(() => {
-    let latest: string | null = null;
-    for (const link of links) {
-      const at = link.snapshot?.syncedAt;
-      if (at !== undefined && (latest === null || at > latest)) latest = at;
-    }
-    return latest;
-  }, [links]);
+  const model = buildThreadPullRequestsPanelModel({ links, lines, nowMs: Date.now() });
 
-  if (links.length === 0) {
+  if (model.kind === "empty") {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
         <PullRequestGlyph.link aria-hidden className="size-6 text-muted-foreground/60" />
-        <p className="text-sm font-medium">No linked pull requests</p>
-        <p className="max-w-60 text-xs text-muted-foreground">
-          Pull requests the agent opens from this thread land here. Link one yourself from a URL or
-          a number.
-        </p>
+        <p className="text-sm font-medium">{model.title}</p>
+        <p className="max-w-60 text-xs text-muted-foreground">{model.description}</p>
         <Button size="sm" variant="outline" onClick={openLinkDialog}>
           <PlusIcon className="size-3.5" />
-          Link pull request
+          {model.actionLabel}
         </Button>
       </div>
     );
@@ -298,24 +275,25 @@ function EnabledThreadPullRequestsPanel({ threadRef }: { threadRef: ScopedThread
     <div className="flex h-full min-h-0 flex-col">
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col p-1.5">
-          {lines.map((line) => (
-            <LinkRow
-              key={`${line.link.host}/${line.link.repository}#${line.link.number}`}
-              line={line}
-              threadRef={threadRef}
-              onUnlink={handleUnlink}
-            />
-          ))}
+          {lines.map((line, index) => {
+            const row = model.rows[index];
+            return row === undefined ? null : (
+              <LinkRow
+                key={row.key}
+                line={line}
+                row={row}
+                threadRef={threadRef}
+                onUnlink={handleUnlink}
+              />
+            );
+          })}
         </div>
       </ScrollArea>
       <footer className="flex items-center justify-between border-t border-border/60 px-2 py-1.5 text-2xs text-muted-foreground">
-        <span>
-          {openCount} open · {links.length} linked
-          {lastSynced ? ` · synced ${formatRelativeTimeLabel(lastSynced)}` : ""}
-        </span>
+        <span>{model.footerSummary}</span>
         <Button size="xs" variant="ghost" onClick={openLinkDialog}>
           <PlusIcon className="size-3.5" />
-          Link
+          {model.actionLabel}
         </Button>
       </footer>
     </div>

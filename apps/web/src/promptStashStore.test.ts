@@ -5,7 +5,7 @@ import {
   serializeAssistantCitation,
 } from "@t3tools/shared/assistantCitations";
 
-import { removeLocalStorageItem } from "./hooks/useLocalStorage";
+import { removeLocalStorageItem } from "./lib/localStorageItem";
 
 import {
   MAX_STASH_ENTRIES,

@@ -12,8 +12,11 @@ import {
   ComboboxTrigger,
 } from "../ui/combobox";
 import { SelectButton } from "../ui/select";
-
-const DEFAULT_FONT_VALUE = "__default__";
+import {
+  buildFontFamilyPickerModel,
+  type FontFamilyPickerItem,
+  resolveFontFamilyPick,
+} from "./FontFamilyPicker.logic";
 
 function supportsFontEnumeration(): boolean {
   return (
@@ -144,44 +147,32 @@ export function FontFamilyPicker({
     return requireMonospace ? enumeration.families.filter(isMonospaceFamily) : enumeration.families;
   }, [enumeration, requireMonospace]);
 
-  const items = useMemo(() => {
-    const trimmedQuery = query.trim().toLowerCase();
-    const result: string[] = [];
-    if (trimmedQuery.length === 0) result.push(DEFAULT_FONT_VALUE);
-    result.push(
-      ...families.filter(
-        (family) => trimmedQuery.length === 0 || family.toLowerCase().includes(trimmedQuery),
-      ),
-    );
-    return result;
-  }, [query, families]);
-
-  const selectedValue = selectedFamily.length === 0 ? DEFAULT_FONT_VALUE : selectedFamily;
+  const model = useMemo(
+    () => buildFontFamilyPickerModel({ families, query, selectedFamily, defaultFamily }),
+    [families, query, selectedFamily, defaultFamily],
+  );
+  const items = useMemo(() => model.items.map((item) => item.value), [model.items]);
 
   const handlePick = (value: string) => {
     setOpen(false);
-    onSelect(value === DEFAULT_FONT_VALUE ? "" : value);
+    onSelect(resolveFontFamilyPick(value));
   };
 
-  const renderItem = (item: string, index: number) => {
-    const isDefault = item === DEFAULT_FONT_VALUE;
-    const family = isDefault ? defaultFamily : item;
-    return (
-      <ComboboxItem hideIndicator index={index} key={item} value={item}>
-        <div className="flex w-full min-w-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate" style={{ fontFamily: family }}>
-            {family}
-          </span>
-          <span className="flex shrink-0 items-center gap-1.5">
-            {isDefault ? <span className="text-3xs text-muted-foreground/60">default</span> : null}
-            {item === selectedValue ? (
-              <CheckIcon className="size-3.5 text-muted-foreground" />
-            ) : null}
-          </span>
-        </div>
-      </ComboboxItem>
-    );
-  };
+  const renderItem = (item: FontFamilyPickerItem, index: number) => (
+    <ComboboxItem hideIndicator index={index} key={item.value} value={item.value}>
+      <div className="flex w-full min-w-0 items-center justify-between gap-2">
+        <span className="min-w-0 truncate" style={{ fontFamily: item.family }}>
+          {item.family}
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5">
+          {item.isDefault ? (
+            <span className="text-3xs text-muted-foreground/60">{model.defaultBadgeLabel}</span>
+          ) : null}
+          {item.selected ? <CheckIcon className="size-3.5 text-muted-foreground" /> : null}
+        </span>
+      </div>
+    </ComboboxItem>
+  );
 
   return (
     <Combobox
@@ -191,7 +182,7 @@ export function FontFamilyPicker({
       virtualized
       open={open}
       onOpenChange={handleOpenChange}
-      value={selectedValue}
+      value={model.selectedValue}
       onValueChange={(next) => {
         if (typeof next === "string") handlePick(next);
       }}
@@ -203,26 +194,26 @@ export function FontFamilyPicker({
       }}
     >
       <ComboboxTrigger aria-label={ariaLabel} render={<SelectButton size="sm" />}>
-        {selectedFamily.length === 0 ? defaultFamily : selectedFamily}
+        {model.triggerLabel}
       </ComboboxTrigger>
       <ComboboxPopup align="end" className="flex w-72 flex-col">
         <ComboboxSearchInput
-          placeholder="Search fonts…"
+          placeholder={model.searchPlaceholder}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <ComboboxEmpty>No fonts found.</ComboboxEmpty>
+          <ComboboxEmpty>{model.emptyLabel}</ComboboxEmpty>
           <div className="relative min-h-0 max-h-72 w-full flex-1 overflow-hidden">
             <ComboboxListVirtualized>
-              <LegendList<string>
+              <LegendList<FontFamilyPickerItem>
                 ref={listRef}
-                data={items}
-                keyExtractor={(item) => item}
+                data={model.items}
+                keyExtractor={(item) => item.value}
                 renderItem={({ item, index }) => renderItem(item, index)}
                 estimatedItemSize={30}
                 drawDistance={360}
-                style={{ height: Math.min(items.length * 30, 288) }}
+                style={{ height: Math.min(model.items.length * 30, 288) }}
               />
             </ComboboxListVirtualized>
           </div>

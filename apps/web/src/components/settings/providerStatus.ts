@@ -25,6 +25,11 @@ export const PROVIDER_STATUS_STYLES = {
 
 export type ProviderStatusKey = keyof typeof PROVIDER_STATUS_STYLES;
 
+export type ProviderSummary = {
+  readonly headline: string;
+  readonly detail: string | null;
+};
+
 /**
  * Derive the headline + detail copy shown under a provider's name in the
  * settings page. Prefers `provider.message` for server-supplied detail and
@@ -33,7 +38,7 @@ export type ProviderStatusKey = keyof typeof PROVIDER_STATUS_STYLES;
  * driver this build does not ship. A ready provider without account metadata
  * remains available and does not imply an authentication failure.
  */
-export function getProviderSummary(provider: ServerProvider | undefined) {
+export function getProviderSummary(provider: ServerProvider | undefined): ProviderSummary {
   if (!provider) {
     return {
       headline: "Checking provider status",
@@ -82,6 +87,25 @@ export function getProviderSummary(provider: ServerProvider | undefined) {
   return {
     headline: "Available",
     detail: provider.message ?? null,
+  };
+}
+
+export type ProviderStatusModel = {
+  readonly statusKey: ProviderStatusKey;
+  readonly headline: string;
+  readonly detail: string | null;
+};
+
+export function buildProviderStatusModel(input: {
+  readonly enabled: boolean;
+  readonly provider: ServerProvider | undefined;
+}): ProviderStatusModel {
+  if (!input.enabled) {
+    return { statusKey: "disabled", headline: "Disabled", detail: null };
+  }
+  return {
+    statusKey: input.provider?.status ?? "warning",
+    ...getProviderSummary(input.provider),
   };
 }
 

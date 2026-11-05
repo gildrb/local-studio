@@ -79,7 +79,7 @@ import {
   useComposerDraftStore,
   DraftId,
 } from "./composerDraftStore";
-import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
+import { removeLocalStorageItem, setLocalStorageItem } from "./lib/localStorageItem";
 import { insertInlineContextReference } from "./lib/composerContextReferences";
 import { terminalContextReference } from "./lib/composerContextRecords";
 import {

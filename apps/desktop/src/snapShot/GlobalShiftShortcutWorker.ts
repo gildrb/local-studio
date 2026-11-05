@@ -3,9 +3,9 @@
 // crashed FFI call cannot take the main process with it. Mirrors the macOS
 // poller: sample both physical keys at 20 Hz, fire on the rising edge.
 import { SNAP_SHOT_MODIFIERS, type SnapShotModifier } from "@t3tools/contracts";
+import { WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS } from "@t3tools/shared/snapShot/snapShot";
 
 import { loadWindowsForegroundApi } from "../electron/WindowsForeground.ts";
-import { WINDOWS_MODIFIER_PAIR_VIRTUAL_KEYS } from "./snapShot.ts";
 
 const POLL_INTERVAL_MS = 50;
 

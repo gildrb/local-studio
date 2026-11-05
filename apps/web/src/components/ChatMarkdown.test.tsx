@@ -59,11 +59,12 @@ vi.mock("~/lib/openPullRequestLink", () => ({
   useOpenChangeRequestLink: () => vi.fn(),
 }));
 
-import ChatMarkdown, {
+import ChatMarkdown from "./ChatMarkdown";
+import {
   canUseMarkdownFileShellActions,
   hasMarkdownFilePrimaryAction,
   shouldUseMarkdownFileBrowserPrimaryAction,
-} from "./ChatMarkdown";
+} from "./chatMarkdown.logic";
 
 function codeButton(renderer: ReactTestRenderer, label: string) {
   const button = renderer.root

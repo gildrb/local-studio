@@ -1,9 +1,8 @@
-import { getFiletypeFromFileName } from "@pierre/diffs";
 import type { ProjectContentMatch } from "@t3tools/contracts";
 import { memo, Suspense, use, useMemo, type CSSProperties } from "react";
 
 import { resolveDiffThemeName } from "~/lib/diffRendering";
-import { getSyntaxHighlighterPromise } from "~/lib/syntaxHighlighting";
+import { getSyntaxHighlighterPromise, resolveSyntaxLanguage } from "~/lib/syntaxHighlighting";
 
 import { RenderErrorBoundary } from "../RenderErrorBoundary";
 
@@ -173,7 +172,7 @@ export const HighlightedSearchLine = memo(function HighlightedSearchLine(props: 
       <Suspense fallback={fallback}>
         <SyntaxHighlightedTokens
           line={props.match.lineContent}
-          language={getFiletypeFromFileName(props.path)}
+          language={resolveSyntaxLanguage(props.path)}
           ranges={ranges}
           theme={props.theme}
         />

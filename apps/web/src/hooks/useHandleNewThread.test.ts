@@ -135,6 +135,7 @@ vi.mock("../composerDraftStore", () => {
   return {
     composerDraftHasUserContent: () => false,
     markPromotedDraftThreadByRef: vi.fn(),
+    newDraftId: () => "draft-delayed",
     useComposerDraftStore,
   };
 });
@@ -147,7 +148,6 @@ vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFile: () => testState.projectFileRead,
 }));
 vi.mock("../lib/utils", () => ({
-  newDraftId: () => "draft-delayed",
   newThreadId: () => "thread-delayed",
 }));
 vi.mock("../logicalProject", () => ({
@@ -174,8 +174,10 @@ vi.mock("../state/server", () => ({
   primaryServerSettingsAtom: "primary-settings",
 }));
 vi.mock("../threadRoutes", () => ({ resolveThreadRouteTarget: () => null }));
-vi.mock("../uiStateStore", () => ({
+vi.mock("../uiState.logic", () => ({
   legacyProjectCwdPreferenceKey: () => "remote-project",
+}));
+vi.mock("../uiStateStore", () => ({
   useUiStateStore: () => [],
 }));
 vi.mock("./useSettings", () => ({ useClientSettings: () => ({}) }));

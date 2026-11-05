@@ -51,11 +51,14 @@ const STUB_BROWSER_DEFAULTS = {
 };
 
 vi.mock("~/browserHistoryStore", () => ({
-  recordVisitForThread: mocks.recordVisitForThread,
   setTitleForThreadUrl: vi.fn(),
   removeUrlForThread: vi.fn(),
   BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT: 50,
   useThreadRecentHistory: () => EMPTY_HISTORY,
+}));
+
+vi.mock("~/browserHistoryVisits", () => ({
+  recordVisitForThread: mocks.recordVisitForThread,
 }));
 
 vi.mock("~/state/session", async (importOriginal) => ({

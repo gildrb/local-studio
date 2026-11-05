@@ -1,8 +1,6 @@
 import type {
-  AnnotationSide,
   CodeViewDiffItem,
   CodeViewItem,
-  DiffLineAnnotation,
   FileDiffMetadata,
   SelectedLineRange,
 } from "@pierre/diffs";
@@ -12,64 +10,20 @@ import { useCallback, useMemo, useState, type ReactNode, type Ref } from "react"
 
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { fnv1a32 } from "~/lib/diffRendering";
-import {
-  buildDiffReviewComment,
-  restoreDiffReviewCommentRange,
-  type ReviewCommentContext,
-} from "~/reviewCommentContext";
+import { buildDiffReviewComment, type ReviewCommentContext } from "~/reviewCommentContext";
 
 import { nextFileCommentId } from "../files/fileCommentAnnotations";
+import {
+  buildDiffCommentDraftAnnotation,
+  buildPersistedDiffCommentAnnotations,
+  type DiffCommentAnnotationGroup,
+  type DiffCommentLineAnnotation,
+} from "./AnnotatableCodeView.logic";
 import { DiffCommentAnnotation } from "./DiffCommentAnnotation";
 import { StyledDiffCodeView, type StyledDiffCodeViewOptions } from "./StyledDiffCodeView";
 
-interface DiffCommentAnnotationEntry {
-  id: string;
-  kind: "draft" | "comment";
-  range: SelectedLineRange;
-  rangeLabel: string;
-  text: string;
-}
-
-interface DiffCommentAnnotationGroup {
-  entries: DiffCommentAnnotationEntry[];
-}
-
-type DiffCommentLineAnnotation = DiffLineAnnotation<DiffCommentAnnotationGroup>;
 export type AnnotatableCodeViewHandle = CodeViewHandle<DiffCommentAnnotationGroup>;
 const EMPTY_REVIEW_COMMENTS: ReadonlyArray<ReviewCommentContext> = [];
-
-function annotationSide(range: SelectedLineRange): AnnotationSide {
-  return (range.endSide ?? range.side) === "deletions" ? "deletions" : "additions";
-}
-
-function appendAnnotationEntry(
-  annotations: ReadonlyArray<DiffCommentLineAnnotation>,
-  range: SelectedLineRange,
-  entry: DiffCommentAnnotationEntry,
-): DiffCommentLineAnnotation[] {
-  const side = annotationSide(range);
-  const annotationIndex = annotations.findIndex(
-    (annotation) => annotation.side === side && annotation.lineNumber === range.end,
-  );
-  if (annotationIndex < 0) {
-    return [
-      ...annotations,
-      {
-        side,
-        lineNumber: range.end,
-        metadata: { entries: [entry] },
-      },
-    ];
-  }
-  return annotations.map((annotation, index) =>
-    index === annotationIndex
-      ? {
-          ...annotation,
-          metadata: { entries: [...annotation.metadata.entries, entry] },
-        }
-      : annotation,
-  );
-}
 
 interface AnnotatableCodeViewProps {
   codeViewKey: string;
@@ -135,24 +89,12 @@ export function AnnotatableCodeView({
   const items = useMemo<CodeViewDiffItem<DiffCommentAnnotationGroup>[]>(
     () =>
       files.map(({ fileDiff, filePath, fileKey, fileVersion, collapsed }) => {
-        const persisted = reviewComments
-          .filter(
-            (comment) =>
-              comment.sectionId === sectionId &&
-              comment.filePath === filePath &&
-              (comment.fenceLanguage ?? "diff") === "diff",
-          )
-          .reduce<DiffCommentLineAnnotation[]>((annotations, comment) => {
-            const range = restoreDiffReviewCommentRange(fileDiff, comment);
-            if (!range) return annotations;
-            return appendAnnotationEntry(annotations, range, {
-              id: comment.id,
-              kind: "comment",
-              range,
-              rangeLabel: comment.rangeLabel,
-              text: comment.text,
-            });
-          }, []);
+        const persisted = buildPersistedDiffCommentAnnotations({
+          reviewComments,
+          sectionId,
+          filePath,
+          fileDiff,
+        });
         const annotations =
           draft?.fileKey === fileKey ? [...persisted, draft.annotation] : persisted;
         return {
@@ -219,28 +161,17 @@ export function AnnotatableCodeView({
       if (item.type !== "diff") return;
       const file = filesByKey.get(item.id);
       if (!file) return;
-      const id = nextFileCommentId();
-      const comment = buildDiffReviewComment({
-        id,
+      const annotation = buildDiffCommentDraftAnnotation({
+        id: nextFileCommentId(),
         sectionId,
         sectionTitle,
         filePath: file.filePath,
         fileDiff: file.fileDiff,
         range,
-        text: "",
       });
-      if (!comment) return;
+      if (!annotation) return;
       setDraftText("");
-      setDraft({
-        fileKey: item.id,
-        annotation: {
-          side: annotationSide(range),
-          lineNumber: range.end,
-          metadata: {
-            entries: [{ id, kind: "draft", range, rangeLabel: comment.rangeLabel, text: "" }],
-          },
-        },
-      });
+      setDraft({ fileKey: item.id, annotation });
     },
     [filesByKey, sectionId, sectionTitle],
   );

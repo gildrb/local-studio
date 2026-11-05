@@ -6,7 +6,7 @@ import {
 
 import { resolveDiscoveredServerUrl } from "~/browser/browserTargetResolver";
 import type { BrowserSettingsReadError, OpenPreviewMutation } from "~/browser/openFileInPreview";
-import { recordVisitForThread } from "~/browserHistoryStore";
+import { recordVisitForThread } from "~/browserHistoryVisits";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { openPreviewSession } from "./openPreviewSession";
 

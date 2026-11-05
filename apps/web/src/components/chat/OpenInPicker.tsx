@@ -1,13 +1,7 @@
-import {
-  buildRemoteOpenUrl,
-  EditorId,
-  type EnvironmentId,
-  type ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+import type { EditorId, EnvironmentId, ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
-import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
+import { isOpenFavoriteEditorShortcut } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
-import { editorLabelForPlatform } from "../../editorLabels";
 import {
   openRemoteEditorUrl,
   useRemoteCapableEditors,
@@ -56,139 +50,54 @@ import {
   RustRoverIcon,
   WebStormIcon,
 } from "../JetBrainsIcons";
-import { cn, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
+import { cn } from "~/lib/utils";
 import { shellEnvironment } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
+import {
+  buildOpenInToolbarModel,
+  resolveOpenInEditorIntent,
+  resolveOpenInEffectiveEditors,
+  resolveOpenInOptionModels,
+  runOpenInEditorIntent,
+  type OpenInIconId,
+  type OpenInIconKind,
+} from "./OpenInPicker.logic";
 
-type OpenInOption = {
-  label: string;
-  Icon: Icon;
-  value: EditorId;
-  kind: "brand" | "generic";
+const OPEN_IN_ICONS: Record<OpenInIconId, Icon> = {
+  cursor: CursorIcon,
+  trae: TraeIcon,
+  kiro: KiroIcon,
+  vscode: VisualStudioCode,
+  "vscode-insiders": VisualStudioCodeInsiders,
+  vscodium: VSCodium,
+  zed: Zed,
+  antigravity: AntigravityIcon,
+  idea: IntelliJIdeaIcon,
+  aqua: AquaIcon,
+  clion: CLionIcon,
+  datagrip: DataGripIcon,
+  dataspell: DataSpellIcon,
+  goland: GoLandIcon,
+  phpstorm: PhpStormIcon,
+  pycharm: PyCharmIcon,
+  rider: RiderIcon,
+  rubymine: RubyMineIcon,
+  rustrover: RustRoverIcon,
+  webstorm: WebStormIcon,
+  finder: FinderIcon,
+  "file-explorer": FileExplorerIcon,
+  "folder-closed": FolderClosedIcon,
 };
 
-export const resolveOpenInOptions = (
-  platform: string,
-  availableEditors: ReadonlyArray<EditorId>,
-) => {
-  const baseOptions: ReadonlyArray<Omit<OpenInOption, "label">> = [
-    {
-      Icon: CursorIcon,
-      value: "cursor",
-      kind: "brand",
-    },
-    {
-      Icon: TraeIcon,
-      value: "trae",
-      kind: "brand",
-    },
-    {
-      Icon: KiroIcon,
-      value: "kiro",
-      kind: "brand",
-    },
-    {
-      Icon: VisualStudioCode,
-      value: "vscode",
-      kind: "brand",
-    },
-    {
-      Icon: VisualStudioCodeInsiders,
-      value: "vscode-insiders",
-      kind: "brand",
-    },
-    {
-      Icon: VSCodium,
-      value: "vscodium",
-      kind: "brand",
-    },
-    {
-      Icon: Zed,
-      value: "zed",
-      kind: "brand",
-    },
-    {
-      Icon: AntigravityIcon,
-      value: "antigravity",
-      kind: "brand",
-    },
-    {
-      Icon: IntelliJIdeaIcon,
-      value: "idea",
-      kind: "brand",
-    },
-    {
-      Icon: AquaIcon,
-      value: "aqua",
-      kind: "brand",
-    },
-    {
-      Icon: CLionIcon,
-      value: "clion",
-      kind: "brand",
-    },
-    {
-      Icon: DataGripIcon,
-      value: "datagrip",
-      kind: "brand",
-    },
-    {
-      Icon: DataSpellIcon,
-      value: "dataspell",
-      kind: "brand",
-    },
-    {
-      Icon: GoLandIcon,
-      value: "goland",
-      kind: "brand",
-    },
-    {
-      Icon: PhpStormIcon,
-      value: "phpstorm",
-      kind: "brand",
-    },
-    {
-      Icon: PyCharmIcon,
-      value: "pycharm",
-      kind: "brand",
-    },
-    {
-      Icon: RiderIcon,
-      value: "rider",
-      kind: "brand",
-    },
-    {
-      Icon: RubyMineIcon,
-      value: "rubymine",
-      kind: "brand",
-    },
-    {
-      Icon: RustRoverIcon,
-      value: "rustrover",
-      kind: "brand",
-    },
-    {
-      Icon: WebStormIcon,
-      value: "webstorm",
-      kind: "brand",
-    },
-    {
-      Icon: isMacPlatform(platform)
-        ? FinderIcon
-        : isWindowsPlatform(platform)
-          ? FileExplorerIcon
-          : FolderClosedIcon,
-      value: "file-manager",
-      kind: isMacPlatform(platform) || isWindowsPlatform(platform) ? "brand" : "generic",
-    },
-  ];
-  const availableEditorSet = new Set(availableEditors);
-  return baseOptions
-    .filter((option) => availableEditorSet.has(option.value))
-    .map((option) => ({ ...option, label: editorLabelForPlatform(option.value, platform) }));
-};
+export const resolveOpenInOptions = (platform: string, availableEditors: ReadonlyArray<EditorId>) =>
+  resolveOpenInOptionModels(platform, availableEditors).map(({ value, label, icon, kind }) => ({
+    label,
+    Icon: OPEN_IN_ICONS[icon],
+    value,
+    kind,
+  }));
 
-function getOpenInIconClass(kind: OpenInOption["kind"]) {
+function getOpenInIconClass(kind: OpenInIconKind) {
   return cn(kind === "brand" ? "text-foreground opacity-100" : "text-muted-foreground");
 }
 
@@ -213,49 +122,52 @@ export const OpenInPicker = memo(function OpenInPicker({
   const remote = useRemoteOpenState(environmentId);
   const remoteCapableEditors = useRemoteCapableEditors();
   const [remoteHintSeen, markRemoteHintSeen] = useRemoteOpenHint();
-  const environmentLabel = useEnvironment(environmentId)?.label ?? "this machine";
+  const environmentLabel = useEnvironment(environmentId)?.label ?? null;
   // Remote mode ignores the server's PATH probe: what matters is what runs on
   // the viewing machine, which only the desktop app can probe.
-  const effectiveEditors = remote.mode === "local-exec" ? availableEditors : remoteCapableEditors;
+  const effectiveEditors = resolveOpenInEffectiveEditors({
+    remoteMode: remote.mode,
+    availableEditors,
+    remoteCapableEditors,
+  });
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(effectiveEditors);
-  const options = useMemo(
-    () => resolveOpenInOptions(navigator.platform, effectiveEditors),
-    [effectiveEditors],
+  const model = useMemo(
+    () =>
+      buildOpenInToolbarModel({
+        platform: navigator.platform,
+        effectiveEditors,
+        preferredEditor,
+        openInCwd,
+        remoteMode: remote.mode,
+        remoteHintSeen,
+        environmentLabel,
+        keybindings,
+      }),
+    [
+      effectiveEditors,
+      environmentLabel,
+      keybindings,
+      openInCwd,
+      preferredEditor,
+      remote.mode,
+      remoteHintSeen,
+    ],
   );
-  const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;
+  const primaryOption = model.primary;
+  const PrimaryIcon = primaryOption ? OPEN_IN_ICONS[primaryOption.icon] : null;
 
   const openInEditor = useCallback(
-    (editorId: EditorId | null) => {
-      if (!openInCwd) return;
-      const editor = editorId ?? preferredEditor;
-      if (!editor) return;
-      if (remote.mode === "remote-unavailable") return;
-      if (remote.mode === "remote-links") {
-        const url = buildRemoteOpenUrl({
-          editor,
-          host: remote.host.host,
-          absolutePath: openInCwd,
-        });
-        if (url === undefined) return;
-        // Only record hint-seen/preferred when the shell actually accepted
-        // the URL (an older desktop build can refuse the editor scheme).
-        void openRemoteEditorUrl(url).then((opened) => {
-          if (!opened) return;
-          markRemoteHintSeen();
-          setPreferredEditor(editor);
-        });
-        return;
-      }
-      const result = openInEditorMutation({
-        environmentId,
-        input: {
-          cwd: openInCwd,
-          editor,
+    (editorId: EditorId | null) =>
+      runOpenInEditorIntent(
+        resolveOpenInEditorIntent({ editorId, preferredEditor, openInCwd, remote }),
+        {
+          openRemoteUrl: openRemoteEditorUrl,
+          openLocal: ({ editor, cwd }) =>
+            openInEditorMutation({ environmentId, input: { cwd, editor } }),
+          markRemoteHintSeen,
+          setPreferredEditor,
         },
-      });
-      setPreferredEditor(editor);
-      return result;
-    },
+      ),
     [
       environmentId,
       markRemoteHintSeen,
@@ -265,11 +177,6 @@ export const OpenInPicker = memo(function OpenInPicker({
       remote,
       setPreferredEditor,
     ],
-  );
-
-  const openFavoriteEditorShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "editor.openFavorite"),
-    [keybindings],
   );
 
   useEffect(() => {
@@ -288,60 +195,53 @@ export const OpenInPicker = memo(function OpenInPicker({
 
   const editorItems = (
     <>
-      {remote.mode === "remote-unavailable" ? (
-        <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
-          No SSH route to {environmentLabel}
-        </MenuItem>
-      ) : (
-        <>
-          {options.length === 0 && (
-            <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
-              No installed editors found
-            </MenuItem>
-          )}
-          {options.map(({ label, Icon, value, kind }) => (
+      {model.menuItems.map((item) => {
+        if (item.kind === "notice") {
+          return (
             <MenuItem
+              key={item.id}
               density={presentation === "menu" ? "touch" : "default"}
-              key={value}
-              onClick={() => openInEditor(value)}
+              disabled
             >
-              <Icon aria-hidden="true" className={getOpenInIconClass(kind)} />
-              <MenuItemLabel>{label}</MenuItemLabel>
-              {value === preferredEditor && openFavoriteEditorShortcutLabel && (
-                <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
-              )}
+              {item.label}
             </MenuItem>
-          ))}
-          {remote.mode === "remote-links" && !remoteHintSeen && (
-            <MenuItem density={presentation === "menu" ? "touch" : "default"} disabled>
-              Opens over SSH. Needs your key on {environmentLabel}
-            </MenuItem>
-          )}
-        </>
-      )}
+          );
+        }
+        const ItemIcon = OPEN_IN_ICONS[item.icon];
+        return (
+          <MenuItem
+            density={presentation === "menu" ? "touch" : "default"}
+            key={item.id}
+            onClick={() => openInEditor(item.id)}
+          >
+            <ItemIcon aria-hidden="true" className={getOpenInIconClass(item.iconKind)} />
+            <MenuItemLabel>{item.label}</MenuItemLabel>
+            {item.shortcutLabel && <MenuShortcut>{item.shortcutLabel}</MenuShortcut>}
+          </MenuItem>
+        );
+      })}
     </>
   );
   if (presentation === "menu") {
     return (
       <>
-        {primaryOption && (
+        {primaryOption && PrimaryIcon && (
           <MenuItem
             density={presentation === "menu" ? "touch" : "default"}
-
-            disabled={!openInCwd || remote.mode === "remote-unavailable"}
+            disabled={model.primaryMenuItemDisabled}
             onClick={() => openInEditor(preferredEditor)}
           >
-            <primaryOption.Icon className={cn("size-4", getOpenInIconClass(primaryOption.kind))} />
-            <MenuItemLabel>Open in {primaryOption.label}</MenuItemLabel>
-            {openFavoriteEditorShortcutLabel && (
-              <MenuShortcut>{openFavoriteEditorShortcutLabel}</MenuShortcut>
+            <PrimaryIcon className={cn("size-4", getOpenInIconClass(primaryOption.kind))} />
+            <MenuItemLabel>{model.primaryMenuLabel}</MenuItemLabel>
+            {model.favoriteShortcutLabel && (
+              <MenuShortcut>{model.favoriteShortcutLabel}</MenuShortcut>
             )}
           </MenuItem>
         )}
         <MenuSub>
           <MenuSubTrigger density="touch">
             <SquareArrowOutUpRightIcon className="size-4" />
-            <MenuItemLabel>Open in…</MenuItemLabel>
+            <MenuItemLabel>{model.submenuLabel}</MenuItemLabel>
           </MenuSubTrigger>
           <MenuSubPopup>{editorItems}</MenuSubPopup>
         </MenuSub>
@@ -350,16 +250,16 @@ export const OpenInPicker = memo(function OpenInPicker({
   }
 
   return (
-    <Group aria-label="Open in editor">
+    <Group aria-label={model.groupAriaLabel}>
       <Button
-        aria-label={compact ? "Open file in preferred editor" : undefined}
+        aria-label={compact ? model.compactAriaLabel : undefined}
         size="xs"
         variant="outline"
-        disabled={!preferredEditor || !openInCwd || remote.mode === "remote-unavailable"}
+        disabled={model.primaryButtonDisabled}
         onClick={() => openInEditor(preferredEditor)}
       >
-        {primaryOption?.Icon && (
-          <primaryOption.Icon
+        {primaryOption && PrimaryIcon && (
+          <PrimaryIcon
             aria-hidden="true"
             className={cn("size-3.5", getOpenInIconClass(primaryOption.kind))}
           />
@@ -371,13 +271,15 @@ export const OpenInPicker = memo(function OpenInPicker({
               : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
           }
         >
-          Open
+          {model.primaryButtonLabel}
         </span>
       </Button>
       <GroupSeparator {...(!compact ? { className: "hidden @3xl/header-actions:block" } : {})} />
       <Menu>
         <MenuTrigger
-          render={<Button aria-label="Choose editor" size="icon-xs" variant="outline" />}
+          render={
+            <Button aria-label={model.chooseEditorAriaLabel} size="icon-xs" variant="outline" />
+          }
         >
           <ChevronDownIcon aria-hidden="true" className="size-4" />
         </MenuTrigger>

@@ -1,4 +1,8 @@
-import type { BrowserImportFailureReason, BrowserImportSource } from "@t3tools/contracts";
+import {
+  BROWSER_IMPORT_FAILURE_COPY,
+  type BrowserImportFailureReason,
+  type BrowserImportSource,
+} from "@t3tools/contracts";
 
 export interface WizardTargetProfile {
   readonly id: string;
@@ -171,4 +175,322 @@ export function formatSkippedDomains(domains: ReadonlyArray<string>): string {
   if (domains.length === 1) return domains[0]!;
   if (domains.length <= 3) return `${domains.slice(0, -1).join(", ")} and ${domains.at(-1)}`;
   return `${domains.slice(0, 3).join(", ")} and ${domains.length - 3} more`;
+}
+
+export const WIZARD_TARGET_UNAVAILABLE_MESSAGE =
+  "That profile is no longer available. Choose where to import these cookies.";
+
+export const WIZARD_FAILED_STEP: WizardStep = { step: "blocked", reason: "readFailed" };
+
+export const FULL_DISK_ACCESS_OPEN_FAILED_MESSAGE =
+  "Could not open System Settings. Try Allow again.";
+
+export type WizardImportDecision =
+  | { readonly kind: "ignore" }
+  | {
+      readonly kind: "targetUnavailable";
+      readonly targetError: string;
+      readonly step: WizardStep;
+    }
+  | { readonly kind: "start"; readonly target: WizardTarget; readonly step: WizardStep };
+
+export function resolveWizardImport(input: {
+  readonly importInFlight: boolean;
+  readonly selection: WizardTargetSelection;
+  readonly newProfileId: string;
+  readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
+}): WizardImportDecision {
+  if (input.importInFlight) return { kind: "ignore" };
+  const target = resolveWizardTarget(input.selection, input.newProfileId, input.targetProfiles);
+  if (target === undefined) {
+    return {
+      kind: "targetUnavailable",
+      targetError: WIZARD_TARGET_UNAVAILABLE_MESSAGE,
+      step: { step: "configure" },
+    };
+  }
+  return { kind: "start", target, step: { step: "importing" } };
+}
+
+export function isImportSourceReadable(source: BrowserImportSource | undefined): boolean {
+  return source !== undefined && source.unavailable === undefined;
+}
+
+export type WizardTileModel = {
+  readonly id: string;
+  readonly title: string;
+  readonly subtitle: string | null;
+  readonly selected: boolean;
+};
+
+export type WizardTargetTileModel = WizardTileModel & {
+  readonly selection: WizardTargetSelection;
+};
+
+export type WizardQuitStepModel = {
+  readonly kind: "quit";
+  readonly title: string;
+  readonly description: string;
+  readonly cancelLabel: string;
+  readonly confirmLabel: string;
+};
+
+export type WizardFullDiskAccessStepModel = {
+  readonly kind: "fullDiskAccess";
+  readonly title: string;
+  readonly description: string;
+  readonly permission: {
+    readonly id: "fullDiskAccess";
+    readonly icon: "hard-drive";
+    readonly title: string;
+    readonly description: string;
+  };
+  readonly stillRequired: boolean;
+  readonly onGranted: "import" | "recheck";
+  readonly cancelLabel: string;
+  readonly continueLabel: string;
+};
+
+export type WizardConfigureStepModel = {
+  readonly kind: "configure";
+  readonly title: string;
+  readonly description: string;
+  readonly fromLabel: string;
+  readonly intoLabel: string;
+  readonly sourceProfiles: ReadonlyArray<WizardTileModel>;
+  readonly targets: ReadonlyArray<WizardTargetTileModel>;
+  readonly feedback: string | null;
+  readonly cancelLabel: string;
+  readonly importLabel: string;
+  readonly importDisabled: boolean;
+};
+
+export type WizardImportingStepModel = {
+  readonly kind: "importing";
+  readonly title: string;
+  readonly description: string;
+  readonly progressLabel: string;
+};
+
+export type WizardCheckingStepModel = {
+  readonly kind: "checking";
+  readonly title: string;
+  readonly description: string;
+  readonly progressLabel: string;
+};
+
+export type WizardDoneStepModel = {
+  readonly kind: "done";
+  readonly title: string;
+  readonly description: string;
+  readonly skipped: { readonly label: string; readonly domains: string } | null;
+  readonly doneLabel: string;
+};
+
+export type WizardBlockedStepModel = {
+  readonly kind: "blocked";
+  readonly title: string;
+  readonly description: string;
+  readonly closeLabel: string;
+  readonly retryLabel: string | null;
+};
+
+export type WizardProgressStepModel = WizardImportingStepModel | WizardCheckingStepModel;
+
+export type WizardStepModel =
+  | WizardQuitStepModel
+  | WizardFullDiskAccessStepModel
+  | WizardConfigureStepModel
+  | WizardImportingStepModel
+  | WizardCheckingStepModel
+  | WizardDoneStepModel
+  | WizardBlockedStepModel;
+
+export type BrowserImportWizardModelInput = {
+  readonly step: WizardStep;
+  readonly source: BrowserImportSource;
+  readonly destinationEnvironmentName: string;
+  readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
+  readonly canCreateProfile: boolean;
+  readonly sourceProfileDirectory: string;
+  readonly target: WizardTargetSelection;
+  readonly targetError: string | null;
+};
+
+export type BrowserImportWizardModel = {
+  readonly closeable: boolean;
+  readonly step: WizardStepModel;
+};
+
+function cookieCount(count: number): string {
+  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
+}
+
+function buildConfigureStepModel(input: BrowserImportWizardModelInput): WizardConfigureStepModel {
+  const { source, target, targetProfiles, canCreateProfile } = input;
+  const targetMissing =
+    target.kind === "existing" &&
+    !targetProfiles.some((profile) => profile.id === target.profileId);
+  const targetUncreatable = target.kind === "new" && !canCreateProfile;
+  const newTarget: ReadonlyArray<WizardTargetTileModel> = canCreateProfile
+    ? [
+        {
+          id: "new",
+          title: "New profile",
+          subtitle: "Created for these cookies",
+          selected: target.kind === "new",
+          selection: { kind: "new" },
+        },
+      ]
+    : [];
+  return {
+    kind: "configure",
+    title: `Import from ${source.name}`,
+    description: `Choose which cookies to import for ${input.destinationEnvironmentName}.`,
+    fromLabel: "From",
+    intoLabel: "Into",
+    sourceProfiles: source.profiles.map((profile) => ({
+      id: profile.directory,
+      title: profile.name,
+      subtitle:
+        profile.cookieCount === undefined
+          ? null
+          : profile.cookieCount === 0
+            ? "no cookies"
+            : cookieCount(profile.cookieCount),
+      selected: input.sourceProfileDirectory === profile.directory,
+    })),
+    targets: [
+      ...newTarget,
+      ...targetProfiles.map((profile) => ({
+        id: profile.id,
+        title: profile.name,
+        subtitle: "Existing profile",
+        selected: target.kind === "existing" && target.profileId === profile.id,
+        selection: { kind: "existing" as const, profileId: profile.id },
+      })),
+    ],
+    feedback:
+      input.targetError ??
+      (targetMissing
+        ? WIZARD_TARGET_UNAVAILABLE_MESSAGE
+        : targetUncreatable
+          ? "You've reached the profile limit. Choose an existing profile to import into."
+          : null),
+    cancelLabel: "Cancel",
+    importLabel: "Import",
+    importDisabled: input.sourceProfileDirectory === "" || targetMissing || targetUncreatable,
+  };
+}
+
+function buildStepModel(input: BrowserImportWizardModelInput): WizardStepModel {
+  const { step, source, destinationEnvironmentName } = input;
+  switch (step.step) {
+    case "quit":
+      return {
+        kind: "quit",
+        title: `Quit ${source.name} to import`,
+        description: `${source.name} is open, so its cookies can’t be read yet. Quit it, then continue.`,
+        cancelLabel: "Cancel",
+        confirmLabel: "I’ve quit it",
+      };
+    case "fullDiskAccess":
+      return {
+        kind: "fullDiskAccess",
+        title: `Let T3 Code read ${source.name}’s cookies`,
+        description: `To import cookies from ${source.name}, T3 Code needs Full Disk Access. Turn it on in System Settings, then come back to finish the import — you can revoke it again once the import is done.`,
+        permission: {
+          id: "fullDiskAccess",
+          icon: "hard-drive",
+          title: "Full Disk Access",
+          description: `Read ${source.name}'s cookies for this import.`,
+        },
+        stillRequired: step.checked === true,
+        onGranted: step.resume === "import" ? "import" : "recheck",
+        cancelLabel: "Cancel",
+        continueLabel: "Continue",
+      };
+    case "importing":
+      return {
+        kind: "importing",
+        title: "Importing cookies",
+        description: "This may take a moment.",
+        progressLabel: "Importing…",
+      };
+    case "checking":
+      return {
+        kind: "checking",
+        title: `Checking ${source.name}`,
+        description:
+          step.check === "fullDiskAccess"
+            ? "Checking Full Disk Access."
+            : "Checking whether the browser has closed.",
+        progressLabel: step.check === "fullDiskAccess" ? "Checking access…" : "Checking…",
+      };
+    case "done":
+      return {
+        kind: "done",
+        title:
+          step.imported > 0
+            ? `Imported ${cookieCount(step.imported)}`
+            : step.skipped > 0
+              ? `Skipped ${cookieCount(step.skipped)}`
+              : "No cookies found",
+        description:
+          step.imported > 0
+            ? `Added to ${step.targetName} for ${destinationEnvironmentName}.${step.skipped > 0 ? ` ${cookieCount(step.skipped)} skipped.` : ""}`
+            : step.skipped > 0
+              ? `No cookies were imported for ${destinationEnvironmentName}.`
+              : `There were no cookies to import for ${destinationEnvironmentName}.`,
+        skipped:
+          step.skippedDomains.length > 0
+            ? { label: "Skipped", domains: formatSkippedDomains(step.skippedDomains) }
+            : null,
+        doneLabel: "Done",
+      };
+    case "blocked":
+      return {
+        kind: "blocked",
+        title: `Couldn’t import from ${source.name}`,
+        description: BROWSER_IMPORT_FAILURE_COPY[step.reason],
+        closeLabel: "Close",
+        retryLabel: isRetryableReason(step.reason) ? "Try again" : null,
+      };
+    case "configure":
+      return buildConfigureStepModel(input);
+  }
+}
+
+export function buildBrowserImportWizardModel(
+  input: BrowserImportWizardModelInput,
+): BrowserImportWizardModel {
+  return { closeable: canCloseWizard(input.step), step: buildStepModel(input) };
+}
+
+export type FullDiskAccessStatusModelInput = {
+  readonly ready: boolean;
+  readonly stillRequired: boolean;
+  readonly openingError: string | null;
+  readonly permissionError: string | null;
+};
+
+export type FullDiskAccessStatusModel = {
+  readonly notice: string | null;
+  readonly hint: string | null;
+};
+
+export function buildFullDiskAccessStatusModel(
+  input: FullDiskAccessStatusModelInput,
+): FullDiskAccessStatusModel {
+  return {
+    notice:
+      input.openingError || input.permissionError
+        ? (input.openingError ?? input.permissionError)
+        : null,
+    hint: input.ready
+      ? null
+      : input.stillRequired
+        ? "Access is still required. Quit and reopen T3 Code if you just allowed it, then retry the import."
+        : "If access doesn't update after you allow it, quit and reopen T3 Code, then retry the import.",
+  };
 }

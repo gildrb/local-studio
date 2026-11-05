@@ -1,14 +1,14 @@
 import { useState } from "react";
 
-import {
-  hasDesktopNotifications,
-  hasNotificationSound,
-  NOTIFICATION_MODE_LABELS,
-  unlockNotificationAudio,
-} from "../../threadNotifications";
+import { unlockNotificationAudio } from "../../threadNotifications";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  buildNotificationSettingsModel,
+  resolveNotificationModeChange,
+  resolveNotificationPermissionResult,
+  type NotificationPermissionOutcome,
+} from "./NotificationSettings.logic";
 import { SettingsRow } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
 import { useScopedSettings, useUpdateScopedSettings } from "./useScopedSettings";
 
 export function NotificationSettings() {
@@ -16,63 +16,58 @@ export function NotificationSettings() {
   const updateSettings = useUpdateScopedSettings();
   const [permissionMessage, setPermissionMessage] = useState<string | null>(null);
   const [requesting, setRequesting] = useState(false);
+  const model = buildNotificationSettingsModel({ mode, permissionMessage, requesting });
 
   return (
     <SettingsRow
-      {...searchableSetting("thread-notifications")}
-      description={
-        permissionMessage ??
-        "System alerts when a thread finishes, fails, or needs input or approval. Applies to this device while T3 Code is open."
-      }
+      id={model.anchorId}
+      title={model.title}
+      description={model.description}
       control={
         <Select
-          value={mode}
-          disabled={requesting}
+          value={model.value}
+          disabled={model.disabled}
           onValueChange={async (value) => {
-            if (
-              value !== "off" &&
-              value !== "notifications" &&
-              value !== "sound" &&
-              value !== "notifications-and-sound"
-            )
-              return;
+            const change = resolveNotificationModeChange({
+              value,
+              notificationApiAvailable: typeof Notification !== "undefined",
+              isSecureContext: window.isSecureContext,
+            });
+            if (change.kind === "ignore") return;
             setPermissionMessage(null);
-            if (hasNotificationSound(value)) unlockNotificationAudio();
-            if (hasDesktopNotifications(value)) {
-              if (typeof Notification === "undefined" || !window.isSecureContext) {
-                setPermissionMessage(
-                  "Notifications need a supported browser over HTTPS, or the desktop app. Sound only is still available.",
-                );
-                return;
-              }
-              setRequesting(true);
-              try {
-                const permission = await Notification.requestPermission();
-                if (permission !== "granted") {
-                  setPermissionMessage(
-                    "Allow notifications in your browser or system settings, then choose this option again. Sound only is still available.",
-                  );
-                  return;
-                }
-              } catch {
-                setPermissionMessage(
-                  "Notifications are unavailable in this browser. Sound only is still available.",
-                );
-                return;
-              } finally {
-                setRequesting(false);
-              }
+            if (change.unlockAudio) unlockNotificationAudio();
+            if (change.kind === "unsupported") {
+              setPermissionMessage(change.message);
+              return;
             }
-            updateSettings({ notificationMode: value });
+            if (change.kind === "apply") {
+              updateSettings(change.patch);
+              return;
+            }
+            setRequesting(true);
+            let outcome: NotificationPermissionOutcome;
+            try {
+              outcome = await Notification.requestPermission();
+            } catch {
+              outcome = "error";
+            } finally {
+              setRequesting(false);
+            }
+            const decision = resolveNotificationPermissionResult({ mode: change.mode, outcome });
+            if (decision.kind === "message") {
+              setPermissionMessage(decision.message);
+              return;
+            }
+            updateSettings(decision.patch);
           }}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label="Thread notifications">
-            <SelectValue>{NOTIFICATION_MODE_LABELS[mode]}</SelectValue>
+          <SelectTrigger size="sm" className="w-full sm:w-56" aria-label={model.ariaLabel}>
+            <SelectValue>{model.valueLabel}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            {Object.entries(NOTIFICATION_MODE_LABELS).map(([value, label]) => (
-              <SelectItem key={value} hideIndicator value={value}>
-                {label}
+            {model.options.map((option) => (
+              <SelectItem key={option.value} hideIndicator value={option.value}>
+                {option.label}
               </SelectItem>
             ))}
           </SelectPopup>

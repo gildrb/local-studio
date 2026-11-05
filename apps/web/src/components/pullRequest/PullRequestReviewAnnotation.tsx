@@ -34,6 +34,7 @@ import { PullRequestMarkdown } from "./PullRequestMarkdown";
 import { PullRequestMarkdownEditor } from "./PullRequestMarkdownEditor";
 import { PullRequestReactionBar } from "./PullRequestReactions";
 import type { PendingReviewComment } from "./pullRequestReviewStore";
+import { buildPullRequestReviewThreadCardModel } from "./PullRequestReviewAnnotation.logic";
 
 const CARD_CLASS =
   "mx-3 my-2 rounded-xl border border-border/70 bg-background p-3 text-sm shadow-sm";
@@ -145,10 +146,19 @@ export function ReviewThreadCard({
   >(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const currentPage = loadedPage?.threadId === thread.id ? loadedPage : null;
-  const comments = mergePullRequestThreadComments(thread.comments, currentPage?.comments ?? []);
-  const nextCommentsCursor =
-    currentPage === null ? (thread.nextCommentsCursor ?? null) : currentPage.nextCursor;
-  const commentCount = thread.commentCount ?? comments.length;
+  const model = buildPullRequestReviewThreadCardModel({
+    thread,
+    loadedPage: currentPage,
+    pending,
+    fixPending: fixPending === true,
+    fixLabel,
+    canFix: onFix !== undefined,
+    canResolve,
+    canReply,
+    loadingMore,
+  });
+  const comments = model.comments;
+  const nextCommentsCursor = model.nextCursor;
 
   const saveEdit = async (commentId: string, body: string) => {
     if (savingEdit) return;
@@ -219,7 +229,7 @@ export function ReviewThreadCard({
       onPointerDown={(event) => event.stopPropagation()}
     >
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {thread.isResolved ? (
+        {model.resolved ? (
           <CheckCircle2Icon className="size-3.5 text-success-foreground" />
         ) : (
           <CircleIcon className="size-3.5" />
@@ -230,31 +240,30 @@ export function ReviewThreadCard({
           aria-expanded={expanded}
           onClick={() => setExpanded((current) => !current)}
         >
-          {thread.isResolved ? "Resolved" : "Open"} · {commentCount}{" "}
-          {commentCount === 1 ? "comment" : "comments"}
+          {model.statusLabel}
         </button>
-        {thread.isOutdated ? <span>outdated</span> : null}
-        {onFix ? (
+        {model.outdatedLabel !== null ? <span>{model.outdatedLabel}</span> : null}
+        {onFix && model.fix !== null ? (
           <Button
             size="xs"
             variant="ghost"
             className="ml-auto"
-            disabled={pending || fixPending}
+            disabled={model.fix.disabled}
             onClick={onFix}
           >
             <HammerIcon className="size-3" />
-            {fixPending ? "Preparing..." : fixLabel}
+            {model.fix.label}
           </Button>
         ) : null}
-        {canResolve ? (
+        {model.resolve !== null ? (
           <Button
             size="xs"
             variant="ghost"
             className={onFix ? undefined : "ml-auto"}
-            disabled={pending}
+            disabled={model.resolve.disabled}
             onClick={onToggleResolved}
           >
-            {thread.isResolved ? "Unresolve" : "Resolve"}
+            {model.resolve.label}
           </Button>
         ) : null}
       </div>
@@ -283,7 +292,7 @@ export function ReviewThreadCard({
                     value={comment.body}
                     cwd={workspaceRoot}
                     environmentId={environmentId}
-                    label="Edit comment"
+                    label={model.editLabel}
                     saving={savingEdit}
                     onSave={(body) => void saveEdit(comment.id, body)}
                     onCancel={() => setEditingId(null)}
@@ -298,7 +307,7 @@ export function ReviewThreadCard({
                     />
                     {canEditComment(comment) ? (
                       <PullRequestEditButton
-                        aria-label="Edit comment"
+                        aria-label={model.editLabel}
                         onClick={() => setEditingId(comment.id)}
                       />
                     ) : null}
@@ -307,28 +316,28 @@ export function ReviewThreadCard({
               </article>
             ))}
           </div>
-          {nextCommentsCursor !== null ? (
+          {model.loadMore !== null ? (
             <div className="mt-2">
               <Button
                 size="xs"
                 variant="ghost"
-                disabled={loadingMore}
+                disabled={model.loadMore.disabled}
                 onClick={() => void loadMore()}
               >
-                {loadingMore ? "Loading..." : "Load more comments"}
+                {model.loadMore.label}
               </Button>
             </div>
           ) : null}
 
-          {canReply ? (
+          {model.reply !== null ? (
             replying ? (
               <div className="mt-2">
                 <Textarea
                   autoFocus
                   size="sm"
                   value={reply}
-                  placeholder="Reply"
-                  aria-label="Reply to this conversation"
+                  placeholder={model.reply.placeholder}
+                  aria-label={model.reply.ariaLabel}
                   onChange={(event) => setReply(event.target.value)}
                   onKeyDown={submitKeys({
                     value: reply,
@@ -339,20 +348,20 @@ export function ReviewThreadCard({
                 />
                 <div className="mt-2 flex justify-end gap-2">
                   <Button size="xs" variant="ghost" onClick={() => setReplying(false)}>
-                    Cancel
+                    {model.reply.cancelLabel}
                   </Button>
                   <Button
                     size="xs"
-                    disabled={pending || reply.trim().length === 0}
+                    disabled={model.reply.disabled || reply.trim().length === 0}
                     onClick={() => void send()}
                   >
-                    Reply
+                    {model.reply.label}
                   </Button>
                 </div>
               </div>
             ) : (
               <Button size="xs" variant="ghost" className="mt-2" onClick={() => setReplying(true)}>
-                Reply
+                {model.reply.label}
               </Button>
             )
           ) : null}

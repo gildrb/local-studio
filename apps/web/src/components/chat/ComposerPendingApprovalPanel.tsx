@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { type PendingApproval } from "../../session-logic";
 import { cn } from "~/lib/utils";
+import { describePendingApproval } from "./ComposerPendingApproval.logic";
 
 interface ComposerPendingApprovalPanelProps {
   approval: PendingApproval;
@@ -13,27 +14,10 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
   pendingCount,
   className,
 }: ComposerPendingApprovalPanelProps) {
-  const Detail = approval.requestKind === "mcp-elicitation" ? "span" : "code";
-  const fallbackLabel =
-    approval.requestKind === "mcp-elicitation"
-      ? "App access approval"
-      : approval.requestKind === "command"
-        ? "Command approval"
-        : approval.requestKind === "file-read"
-          ? "File read approval"
-          : approval.requestKind === "permission"
-            ? "App permission approval"
-            : "File change approval";
-  const detailAriaLabel =
-    approval.requestKind === "mcp-elicitation"
-      ? "App access request"
-      : approval.requestKind === "command"
-        ? "Command"
-        : approval.requestKind === "file-read"
-          ? "File to read"
-          : approval.requestKind === "permission"
-            ? "Permission request"
-            : "File change";
+  const copy = describePendingApproval(approval.requestKind);
+  const Detail = copy.detailFormat === "prose" ? "span" : "code";
+  const fallbackLabel = copy.label;
+  const detailAriaLabel = copy.detailAriaLabel;
 
   return (
     <span
@@ -52,7 +36,7 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
         aria-label={detailAriaLabel}
         className={cn(
           "block max-h-20 w-full min-w-0 overflow-auto text-xs text-foreground [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70 [&::-webkit-scrollbar]:h-1.5",
-          approval.requestKind === "mcp-elicitation"
+          copy.detailFormat === "prose"
             ? "whitespace-pre-wrap font-sans wrap-break-word"
             : "whitespace-pre font-mono",
         )}

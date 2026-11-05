@@ -28,10 +28,8 @@ import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
 import {
-  resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
   workEntryViewedImagePath,
-  summarizeToolGroup,
   omitSupersededLifecycleMarkers,
 } from "@t3tools/client-runtime/work-log/presentation";
 import { resolveWorkGroupScrollAnchor } from "@t3tools/client-runtime/work-log/scroll-anchor";
@@ -85,14 +83,11 @@ import {
   deriveTimelineEntries,
   selectMessageImageResources,
   workEntryDisplayIndicatesToolFailure,
-  workEntrySignalsSevereFailure,
-  workLogEntryIsToolLike,
 } from "../../session-logic";
 import {
   type ChatMessage,
   type ChatFileAttachment,
   type ChatImageAttachment,
-  isFileAttachment,
   isImageAttachment,
   isVideoAttachment,
   type TurnDiffSummary,
@@ -106,7 +101,6 @@ import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Root, RootContent } from "mdast";
 import {
   BotIcon,
   BoxIcon,
@@ -144,11 +138,11 @@ import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import { getVirtualizedScrollFadeClassName } from "../ui/scroll-area";
 import {
-  buildAttachmentVideoAsset,
   buildAttachmentVideoPreview,
   buildExpandedImagePreview,
   ExpandedImagePreview,
 } from "./ExpandedImagePreview";
+import { buildAttachmentVideoAsset } from "./expandedMedia.logic";
 import {
   SNAP_SHOT_ATTACHMENT_FRAME_CLASS,
   SnapShotAttachmentDetails,
@@ -182,7 +176,6 @@ import {
   deriveUnsettledTurnId,
   type MessagesTimelineRowsProjection,
   liveWorkEntryLabel,
-  workEntryIsActiveTurnActivity,
   resolveAssistantMessageCopyState,
   resolveTimelineIsAtEnd,
   resolveTimelineMinimapHasPersistentGutter,
@@ -196,15 +189,25 @@ import {
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   shouldPreserveAssistantLineBreaks,
-  toolGroupAction,
-  workEntryDisplayLabel,
   workEntryIsVisibleInGroup,
+  buildActivityGroupHeaderModel,
+  remarkThoughtPreview,
+  formatWorkingTimerNow,
+  buildPlainWorkEntryRowModel,
+  toolGroupSummaryIconName,
+  toolIconAcceptsTint,
+  workEntryIconName,
+  type WorkEntryIconName,
+  type WorkEntryRowHeadingTone,
+  type WorkEntryRowIconTone,
   worktreeSetupAgentStarted,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestTurn,
   type WorkGroupScrollAnchor,
+  timelineRowBottomPadding,
+  type TimelineRowBottomPadding,
 } from "./MessagesTimeline.logic";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -229,10 +232,13 @@ import {
   reviewCommentContextLabel,
   selectedMessageContextFragment,
 } from "~/lib/composerContextRecords";
+import { formatComposerContextReference } from "@t3tools/shared/composerContextReferences";
 import {
-  collectComposerContextReferences,
-  formatComposerContextReference,
-} from "@t3tools/shared/composerContextReferences";
+  COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM,
+  deriveUserMessageAttachments,
+  resolvePreviewAnnotationImage,
+  shouldCollapseUserMessage,
+} from "./userMessage.logic";
 import {
   COMPOSER_CONTEXT_CLIPBOARD_MIME,
   encodeComposerContextClipboardHtml,
@@ -1681,34 +1687,19 @@ function TimelineMinimapNavigationButton({
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
 type TimelineRow = MessagesTimelineRow;
 
-const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
-  const isExpandedToolGroup = row.kind === "work" && row.isExpandedToolGroup;
-  const isExpandedToolGroupHeader =
-    (row.kind === "work-toggle" && row.expanded) || (row.kind === "work-live" && row.expanded);
+const TIMELINE_ROW_BOTTOM_PADDING_CLASS: Record<TimelineRowBottomPadding, string> = {
+  0: "pb-0",
+  4: "pb-1",
+  6: "pb-1.5",
+  8: "pb-2",
+  16: "pb-4",
+};
 
+const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow }) {
   return (
     <div
       className={cn(
-        // Commentary (non-terminal assistant) rows carry no metadata row, so
-        // they sit closer to the work that follows them.
-        isExpandedToolGroup
-          ? "pb-1"
-          : isExpandedToolGroupHeader
-            ? "pb-0"
-            : row.kind === "turn-fold" || row.kind === "working"
-              ? "pb-1.5"
-              : (row.kind === "message" &&
-                    row.message.role === "assistant" &&
-                    !row.showAssistantMeta) ||
-                  (row.kind === "message" && row.message.role === "reasoning") ||
-                  row.kind === "work" ||
-                  row.kind === "work-live" ||
-                  row.kind === "work-toggle" ||
-                  row.kind === "activity-group" ||
-                  row.kind === "thinking" ||
-                  row.kind === "worktree-setup"
-                ? "pb-2"
-                : "pb-4",
+        TIMELINE_ROW_BOTTOM_PADDING_CLASS[timelineRowBottomPadding(row)],
         (row.kind === "message" && row.message.role === "assistant") ||
           row.kind === "assistant-meta"
           ? "group/assistant"
@@ -1971,44 +1962,26 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
     );
     return projectPreviews(row.message, (attachment) => urlsById.get(attachment.id));
   }, [previewUrls, projectPreviews, resources, row.message]);
-  // The attachment union has an open member, so guards (not literal type
-  // comparisons) split it. Unknown types render as inert rows below the files.
-  const userImages = useMemo(
-    () => (messageWithPreviews.attachments ?? []).filter(isImageAttachment),
-    [messageWithPreviews.attachments],
-  );
-  const userFiles = useMemo(
-    () => (row.message.attachments ?? []).filter(isFileAttachment),
-    [row.message.attachments],
-  );
-  const userVideos = userFiles.filter(isVideoAttachment);
-  const otherUserFiles = userFiles.filter((file) => !isVideoAttachment(file));
-  const unknownAttachments = (row.message.attachments ?? []).filter(
-    (attachment) => !isImageAttachment(attachment) && !isFileAttachment(attachment),
-  );
   const resolvedContext = useMemo(() => resolveUserMessageContext(row.message), [row.message]);
-  const previewImages = useMemo(
-    () => userImages.filter((image) => image.name.startsWith("preview-annotation-")),
-    [userImages],
+  const {
+    userImages,
+    userFiles,
+    userVideos,
+    regularImages,
+    previewImages,
+    unchippedFiles,
+    unknownAttachments,
+    annotationRecordIds,
+  } = useMemo(
+    () =>
+      deriveUserMessageAttachments({
+        attachments: row.message.attachments,
+        previewAttachments: messageWithPreviews.attachments,
+        context: resolvedContext,
+      }),
+    [messageWithPreviews.attachments, resolvedContext, row.message.attachments],
   );
   const revertTurnCount = row.revertTurnCount;
-  // A file with a chip in the prose needs no standalone row. Media is the exception: the
-  // thumbnail is the only way to actually see it, so it shows whether or not it has a chip.
-  const chippedAttachmentIds = new Set(
-    collectComposerContextReferences(resolvedContext.text).flatMap((occurrence) => {
-      const record = asKnownContextRecord(resolvedContext.recordsById.get(occurrence.contextId));
-      return record?.kind === "file" || record?.kind === "image" ? [record.attachmentId] : [];
-    }),
-  );
-  const regularImages = userImages.filter((image) => !image.name.startsWith("preview-annotation-"));
-  const unchippedFiles = otherUserFiles.filter((file) => !chippedAttachmentIds.has(file.id));
-  const annotationRecordIds = useMemo(
-    () =>
-      resolvedContext.records
-        .filter((record) => record.kind === "preview-annotation")
-        .map((record) => record.contextId),
-    [resolvedContext.records],
-  );
   const contextClipboardFragment =
     resolvedContext.records.length === 0
       ? null
@@ -2261,28 +2234,6 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         </div>
       </div>
     </div>
-  );
-}
-
-export function resolvePreviewAnnotationImage(input: {
-  record: Extract<KnownComposerContextRecord, { kind: "preview-annotation" }>;
-  recordsById: ReadonlyMap<string, ComposerContextRecord>;
-  userImages: ReadonlyArray<ChatImageAttachment>;
-  previewImages: ReadonlyArray<ChatImageAttachment>;
-  annotationRecordIds: ReadonlyArray<string>;
-}): ChatImageAttachment | null {
-  const screenshotRecord = input.record.screenshotContextId
-    ? asKnownContextRecord(input.recordsById.get(input.record.screenshotContextId))
-    : undefined;
-  return (
-    (screenshotRecord?.kind === "image"
-      ? input.userImages.find((image) => image.id === screenshotRecord.attachmentId)
-      : undefined) ??
-    input.previewImages.find(
-      (image) => image.name === `preview-annotation-${input.record.annotationId}.png`,
-    ) ??
-    input.previewImages[input.annotationRecordIds.indexOf(input.record.contextId)] ??
-    null
   );
 }
 
@@ -2613,37 +2564,8 @@ function ActivityGroupTimelineRow({
   row: Extract<TimelineRow, { kind: "activity-group" }>;
 }) {
   const ctx = use(TimelineRowCtx);
-  const work = omitSupersededLifecycleMarkers(
-    row.entries.flatMap((entry) =>
-      entry.kind === "work" && workEntryIsVisibleInGroup(entry.entry, row.active)
-        ? [entry.entry]
-        : [],
-    ),
-    (entry) => entry,
-  );
-  const thoughtCount = row.entries.filter((entry) => entry.kind === "message").length;
-  const lastThoughtIndex = row.entries.findLastIndex((entry) => entry.kind === "message");
-  const trailingWork = omitSupersededLifecycleMarkers(
-    row.entries
-      .slice(lastThoughtIndex + 1)
-      .flatMap((entry) =>
-        entry.kind === "work" && workEntryIsVisibleInGroup(entry.entry, row.active)
-          ? [entry.entry]
-          : [],
-      ),
-    (entry) => entry,
-  );
-  const liveWork = trailingWork.findLast(workEntryIsActiveTurnActivity) ?? trailingWork.at(-1);
-  const thinking = row.active && liveWork === undefined;
-  const iconWork = row.active ? liveWork : work.at(-1);
-  const failed = iconWork !== undefined && workEntryDisplayIndicatesToolFailure(iconWork);
-  const label = row.active
-    ? liveWork
-      ? liveWorkEntryLabel(liveWork, ctx.workspaceRoot, true)
-      : "Thinking"
-    : work.length > 0
-      ? summarizeToolGroup(work)
-      : `Thought${thoughtCount > 1 ? ` (×${thoughtCount})` : ""}`;
+  const header = buildActivityGroupHeaderModel(row, ctx.workspaceRoot);
+  const { label, failed, thinking } = header;
   const details: ReactNode[] = [];
   if (row.expanded) {
     for (let index = 0; index < row.entries.length; index += 1) {
@@ -2675,7 +2597,7 @@ function ActivityGroupTimelineRow({
             anchorKey={row.id}
             messages={messages}
             live={row.active && index === row.entries.length - 1}
-            showHeader={work.length > 0}
+            showHeader={header.visibleWorkCount > 0}
           />,
         );
       }
@@ -2692,8 +2614,8 @@ function ActivityGroupTimelineRow({
       >
         <LiveActivityRow
           label={label}
-          iconName={iconWork ? workEntryIconName(iconWork) : "brain"}
-          toolIcon={iconWork?.toolIcon ?? iconWork?.toolSource?.icon}
+          iconName={header.iconName}
+          toolIcon={header.toolIcon}
           failed={failed}
           active={row.active}
           shimmer={thinking}
@@ -2714,28 +2636,6 @@ function ThinkingTimelineRow() {
       )}
     </div>
   );
-}
-
-function remarkThoughtPreview(fallback: string) {
-  return (tree: Root) => {
-    const plainText = (node: Root | RootContent): string => {
-      if (node.type === "html" || node.type === "definition") return "";
-      if ("alt" in node) return node.alt ?? "";
-      if ("value" in node) return node.value;
-      if ("children" in node) {
-        const separator = ["root", "blockquote", "list", "listItem", "table", "tableRow"].includes(
-          node.type,
-        )
-          ? " "
-          : "";
-        return node.children.map(plainText).join(separator);
-      }
-      return node.type === "break" ? " " : "";
-    };
-    tree.children = [
-      { type: "text", value: plainText(tree).replace(/\s+/g, " ").trim() || fallback },
-    ];
-  };
 }
 
 /**
@@ -3152,15 +3052,6 @@ function ActivityShimmerOverlay({ children }: { children: ReactNode }) {
 
 const failedToolIconClassName = "text-tool-error-icon/40";
 
-/** Image icons and the gradient computer-use mark cannot take a currentColor
- *  tint, so failed rows using them get a trailing x instead. */
-function toolIconAcceptsTint(
-  iconName: WorkEntryIconName,
-  toolIcon: ToolActivityIcon | undefined,
-): boolean {
-  return toolIcon === undefined && iconName !== "computer";
-}
-
 function LiveActivityRow({
   label,
   iconName,
@@ -3298,43 +3189,6 @@ function LiveWorkEntryTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "
       />
     </button>
   );
-}
-
-function toolGroupSummaryIconName(
-  kind: Extract<TimelineRow, { kind: "work-toggle" }>["summaryKind"],
-): WorkEntryIconName {
-  switch (kind) {
-    case "pull-request":
-    case "link-pr":
-    case "unlink-pr":
-    case "list-prs":
-      return "pull-request";
-    case "read":
-      return "eye";
-    case "edit":
-      return "square-pen";
-    case "command":
-      return "terminal";
-    case "browser":
-      return "browser";
-    case "device":
-      return "device";
-    case "search":
-      return "globe";
-    case "code-search":
-      return "search";
-    case "other":
-      return "wrench";
-    case "dynamic-tool":
-      return "hammer";
-    case "agent-tool":
-      return "bot";
-    case "tone-tool":
-      return "zap";
-    case "update":
-    case "mixed":
-      return "hammer";
-  }
 }
 
 function WorkGroupToggleTimelineRow({
@@ -3918,21 +3772,7 @@ function UserMessageContextReferenceChip(props: {
   });
 }
 
-const MAX_COLLAPSED_USER_MESSAGE_LINES = 8;
-const MAX_COLLAPSED_USER_MESSAGE_LENGTH = 600;
-const COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM = 1.75;
 const COLLAPSED_USER_MESSAGE_FADE_MASK = `linear-gradient(to bottom, black calc(100% - ${COLLAPSED_USER_MESSAGE_FADE_HEIGHT_REM}rem), transparent)`;
-
-function shouldCollapseUserMessage(text: string): boolean {
-  if (text.trim().length === 0) {
-    return false;
-  }
-
-  return (
-    text.length > MAX_COLLAPSED_USER_MESSAGE_LENGTH ||
-    text.split("\n").length > MAX_COLLAPSED_USER_MESSAGE_LINES
-  );
-}
 
 const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(props: {
   text: string;
@@ -4110,49 +3950,20 @@ function useStableRows(rows: MessagesTimelineRow[], identity: string): MessagesT
   }, [identity, rows]);
 }
 
-// ---------------------------------------------------------------------------
-// Pure helpers
-// ---------------------------------------------------------------------------
+const WORK_ENTRY_ICON_TONE_CLASS_NAME: Record<WorkEntryRowIconTone, string> = {
+  warning: "text-warning",
+  destructive: "text-destructive",
+  failed: failedToolIconClassName,
+  "icon-muted": "text-icon-muted",
+  foreground: "text-foreground",
+};
 
-function formatWorkingTimer(startIso: string, endIso: string): string | null {
-  const startedAtMs = Date.parse(startIso);
-  const endedAtMs = Date.parse(endIso);
-  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
-    return null;
-  }
-
-  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
-  if (elapsedSeconds < 60) {
-    return `${elapsedSeconds}s`;
-  }
-
-  return formatDuration(elapsedSeconds * 1_000);
-}
-
-function formatWorkingTimerNow(startIso: string): string {
-  return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
-}
-
-type WorkEntryIconName =
-  | "bot"
-  | "brain"
-  | "browser"
-  | "check"
-  | "circle-alert"
-  | "computer"
-  | "device"
-  | "eye"
-  | "globe"
-  | "hammer"
-  | "message-circle"
-  | "search"
-  | "square-pen"
-  | "terminal"
-  | "pull-request"
-  | "t3-code"
-  | "wrench"
-  | "x"
-  | "zap";
+const WORK_ENTRY_HEADING_TONE_CLASS_NAME: Record<WorkEntryRowHeadingTone, string> = {
+  warning: "font-medium text-warning",
+  destructive: "font-medium text-destructive",
+  "secondary-label": "text-secondary-label",
+  "foreground-80": "text-foreground/80",
+};
 
 function BrowserAppIcon({ className }: { className: string }) {
   return (
@@ -4370,125 +4181,8 @@ function WorkEntryIcon({ name, className }: { name: WorkEntryIconName; className
   }
 }
 
-function workToneIcon(tone: TimelineWorkEntry["tone"]): {
-  iconName: WorkEntryIconName;
-  className: string;
-} {
-  if (tone === "error") {
-    return {
-      iconName: "circle-alert",
-      className: "text-foreground",
-    };
-  }
-  if (tone === "thinking") {
-    return {
-      iconName: "brain",
-      className: "text-icon-muted",
-    };
-  }
-  if (tone === "info") {
-    return {
-      iconName: "check",
-      className: "text-icon-muted",
-    };
-  }
-  return {
-    iconName: "zap",
-    className: "text-foreground",
-  };
-}
-
-function workEntryRawCommand(
-  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
-): string | null {
-  const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
-    return null;
-  }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
-}
-
-function buildToolCallExpandedBody(
-  workEntry: TimelineWorkEntry,
-  workspaceRoot: string | undefined,
-  visibleLabel: string,
-  viewedImagePath: string | null,
-): string | null {
-  const blocks: string[] = [];
-  const seen = new Set<string>([visibleLabel.trim()]);
-  const addBlock = (value: string | null | undefined) => {
-    const text = value?.trim();
-    if (!text || seen.has(text)) return;
-    seen.add(text);
-    blocks.push(text);
-  };
-  if (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) {
-    addBlock(`MCP call\n${JSON.stringify(workEntry.toolData, null, 2)}`);
-  }
-  const command = workEntry.command?.trim();
-  const raw = workEntryRawCommand(workEntry);
-  if (command === visibleLabel.trim()) {
-    seen.add(command);
-  } else {
-    addBlock(raw ?? command);
-  }
-  const detail = workEntry.detail?.trim();
-  if (detail !== viewedImagePath?.trim()) {
-    addBlock(detail);
-  }
-  const viewedImagePaths = new Set(
-    viewedImagePath
-      ? [viewedImagePath.trim(), formatWorkspaceRelativePath(viewedImagePath, workspaceRoot)]
-      : [],
-  );
-  const changedFiles = (workEntry.changedFiles ?? []).flatMap((filePath) => {
-    const formattedPath = formatWorkspaceRelativePath(filePath, workspaceRoot);
-    return viewedImagePaths.has(filePath) ||
-      viewedImagePaths.has(formattedPath) ||
-      filePath.trim() === detail ||
-      formattedPath === detail
-      ? []
-      : [formattedPath];
-  });
-  if (changedFiles.length > 0) {
-    addBlock([...new Set(changedFiles)].join("\n"));
-  }
-  return blocks.length > 0 ? blocks.join("\n\n") : null;
-}
-
 const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
-
-function workEntryIconName(workEntry: TimelineWorkEntry): WorkEntryIconName {
-  if (
-    workEntry.questionAnswer ||
-    workEntry.sourceActivityKind === "user-input.requested" ||
-    workEntry.sourceActivityKind === "user-input.resolved"
-  ) {
-    return "message-circle";
-  }
-  if (workEntry.toolSurface) return workEntry.toolSurface;
-  const toolPresentation = resolveWorkEntryToolPresentation(workEntry);
-  if (toolPresentation) return toolPresentation.icon;
-  const action = toolGroupAction(workEntry);
-  if (action !== "other") return toolGroupSummaryIconName(action);
-
-  switch (workEntry.itemType) {
-    case "mcp_tool_call":
-      return "wrench";
-    case "dynamic_tool_call":
-      return "hammer";
-    case "collab_agent_tool_call":
-      return "bot";
-  }
-
-  // Subagent lifecycle rows (grouped by taskId) get agent identity chrome.
-  if (workEntry.taskId) {
-    return "bot";
-  }
-
-  return workToneIcon(workEntry.tone).iconName;
-}
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
@@ -4746,30 +4440,6 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
     }
     setExpanded(next);
   };
-  const iconConfig = workToneIcon(workEntry.tone);
-  const showWarningIndicator = workEntry.sourceActivityKind === "runtime.warning";
-  const showFailedIndicator = workEntryDisplayIndicatesToolFailure(workEntry);
-  const showDestructiveRowStyle =
-    showFailedIndicator &&
-    (workEntrySignalsSevereFailure(workEntry) || !workLogEntryIsToolLike(workEntry));
-  const entryIconName =
-    showWarningIndicator || showDestructiveRowStyle ? "circle-alert" : workEntryIconName(workEntry);
-  const entryToolIcon =
-    showWarningIndicator || showDestructiveRowStyle
-      ? undefined
-      : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
-  // The question is the row's identity: a generic "User input submitted"
-  // label buries what was asked, so lead with the question text and keep the
-  // answer as the trailing preview.
-  const questionHeading = workEntry.questionAnswer
-    ? getQuestionTextPreview(workEntry.questionAnswer)
-    : "";
-  const previewText =
-    displayLabel ?? (questionHeading || workEntryDisplayLabel(workEntry, workspaceRoot));
-  const answerPreview =
-    workEntry.questionAnswer && hasQuestionAnswer(workEntry.questionAnswer)
-      ? getQuestionAnswerPreview(workEntry.questionAnswer)
-      : null;
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
@@ -4778,49 +4448,28 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           workspaceRoot,
         })
       : null;
-  const canExpand =
-    Boolean(workEntry.questionAnswer) ||
-    (showFailedIndicator && previewText.trim().length > 0) ||
-    (workEntry.itemType === "mcp_tool_call" && workEntry.toolData !== undefined) ||
-    Boolean(
-      workEntryRawCommand(workEntry) ||
-      workEntry.command?.trim() ||
-      workEntry.detail?.trim() ||
-      workEntry.changedFiles?.length ||
-      viewedImage,
-    );
-  const expandedBody = expanded
-    ? buildToolCallExpandedBody(
-        workEntry,
-        workspaceRoot,
-        previewText,
-        viewedImage ? viewedImagePath : null,
-      )
-    : null;
-  // Reserve destructive row styling for severe failures, not routine tool errors.
+  const model = buildPlainWorkEntryRowModel({
+    workEntry,
+    workspaceRoot,
+    displayLabel,
+    viewedImagePath: viewedImage ? viewedImagePath : null,
+    expanded,
+  });
+  const {
+    previewText,
+    answerPreview,
+    showFailedIndicator,
+    entryIconName,
+    entryToolIcon,
+    canExpand,
+    expandedBody,
+    accessibleDisplayText,
+  } = model;
   const iconWrapperClass = cn(
     "flex size-6 shrink-0 items-center justify-center",
-    showWarningIndicator
-      ? "text-warning"
-      : showDestructiveRowStyle
-        ? "text-destructive"
-        : showFailedIndicator
-          ? failedToolIconClassName
-          : workEntry.tone === "tool"
-            ? "text-icon-muted"
-            : iconConfig.className,
+    WORK_ENTRY_ICON_TONE_CLASS_NAME[model.iconTone],
   );
-  const headingClass = showWarningIndicator
-    ? "font-medium text-warning"
-    : showDestructiveRowStyle
-      ? "font-medium text-destructive"
-      : workLogEntryIsToolLike(workEntry)
-        ? "text-secondary-label"
-        : "text-foreground/80";
-  const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
-  const accessibleDisplayText = showFailedIndicator
-    ? `${accessiblePreview}, tool call failed`
-    : accessiblePreview;
+  const headingClass = WORK_ENTRY_HEADING_TONE_CLASS_NAME[model.headingTone];
   const rowToggleProps = canExpand
     ? {
         role: "button" as const,
@@ -4879,11 +4528,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
                 <span
                   className={cn(
                     "min-w-0 truncate",
-                    !expanded &&
-                      workEntry.questionAnswer &&
-                      hasQuestionAnswer(workEntry.questionAnswer)
-                      ? "text-foreground"
-                      : "text-muted-foreground",
+                    model.answerHighlighted ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
                   {answerPreview}
@@ -4891,9 +4536,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
               ) : null}
             </p>
           </div>
-          {showFailedIndicator &&
-          !showDestructiveRowStyle &&
-          !toolIconAcceptsTint(entryIconName, entryToolIcon) ? (
+          {model.showTrailingFailureMark ? (
             <XIcon aria-hidden className={cn("size-3 shrink-0", failedToolIconClassName)} />
           ) : null}
           <TimelineRowTimestamp createdAt={workEntry.createdAt} timestampFormat={timestampFormat} />

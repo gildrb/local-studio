@@ -2,7 +2,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { ScaleIcon } from "lucide-react";
 import { memo, useMemo } from "react";
 
-import type { EnvironmentOption } from "./BranchToolbar.logic";
+import { resolveEnvironmentSelectItems, type EnvironmentOption } from "./BranchToolbar.logic";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
@@ -41,15 +41,12 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   }, [availableEnvironments, environmentId]);
 
   const environmentItems = useMemo(
-    () => [
-      ...(onAutoEnvironment
-        ? [{ value: "auto", label: autoEnvironmentLabel ?? "Auto balance" }]
-        : []),
-      ...availableEnvironments.map((env) => ({
-        value: env.environmentId,
-        label: env.label,
-      })),
-    ],
+    () =>
+      resolveEnvironmentSelectItems({
+        availableEnvironments,
+        autoEnvironmentLabel,
+        canAutoEnvironment: onAutoEnvironment !== undefined,
+      }),
     [availableEnvironments, autoEnvironmentLabel, onAutoEnvironment],
   );
 

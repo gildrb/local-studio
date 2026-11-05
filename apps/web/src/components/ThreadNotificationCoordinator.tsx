@@ -16,11 +16,14 @@ import { environmentShell } from "../state/shell";
 import {
   hasDesktopNotifications,
   hasNotificationSound,
+  resolveThreadNotificationEvents,
+  type ThreadNotificationMemory,
+} from "../threadNotifications.logic";
+import {
   playNotificationSound,
   setNotificationBadge,
   unlockNotificationAudio,
 } from "../threadNotifications";
-import { resolveSidebarThreadStatus } from "./Sidebar.logic";
 import { toastManager } from "./ui/toast";
 
 export function ThreadNotificationCoordinator() {
@@ -103,48 +106,18 @@ function EnvironmentNotifications({
   const { environmentId: activeEnvironmentId, threadId: activeThreadId } = useParams({
     strict: false,
   });
-  const previous = useRef(
-    new Map<ThreadId, { attention: string | null; completion: number | null }>(),
-  );
+  const previous = useRef<ReadonlyMap<ThreadId, ThreadNotificationMemory>>(new Map());
 
   useEffect(() => {
     if (shell.status !== "live" || Option.isNone(shell.snapshot)) {
-      previous.current.clear();
+      previous.current = new Map();
       return;
     }
-    const next = new Map<ThreadId, { attention: string | null; completion: number | null }>();
-    for (const thread of shell.snapshot.value.threads) {
-      let status = resolveSidebarThreadStatus(thread);
-      if (status === "ready" && thread.latestTurn?.state === "error") status = "failed";
-      const prior = previous.current.get(thread.id);
-      const attention =
-        status === "input" || status === "approval" || status === "failed"
-          ? `${thread.latestTurn?.turnId ?? ""}:${status}`
-          : null;
-      const completedAt = Date.parse(thread.latestTurn?.completedAt ?? "");
-      const completion =
-        status === "ready" &&
-        thread.latestTurn?.state === "completed" &&
-        Number.isFinite(completedAt)
-          ? completedAt
-          : (prior?.completion ?? null);
-      next.set(thread.id, { attention, completion });
-      if (!prior || thread.archivedAt !== null) continue;
-      const kind =
-        attention && attention !== prior.attention
-          ? "input"
-          : completion !== null && (prior.completion === null || completion > prior.completion)
-            ? "completion"
-            : null;
-      if (!kind) continue;
-      const title =
-        kind === "completion"
-          ? "Thread completed"
-          : status === "approval"
-            ? "Approval needed"
-            : status === "failed"
-              ? "Thread failed"
-              : "Input needed";
+    const { next, events } = resolveThreadNotificationEvents(
+      previous.current,
+      shell.snapshot.value.threads,
+    );
+    for (const { threadId, threadTitle, kind, status, title, toastType } of events) {
       if (hasNotificationSound(mode)) {
         void playNotificationSound(kind, () =>
           hasNotificationSound(getClientSettings().notificationMode),
@@ -154,12 +127,12 @@ function EnvironmentNotifications({
         inAppNotificationsEnabled &&
         document.visibilityState === "visible" &&
         document.hasFocus() &&
-        (activeEnvironmentId !== environmentId || activeThreadId !== thread.id)
+        (activeEnvironmentId !== environmentId || activeThreadId !== threadId)
       ) {
         const toastId = toastManager.add({
-          type: kind === "completion" ? "success" : status === "failed" ? "error" : "warning",
+          type: toastType,
           title,
-          description: thread.title,
+          description: threadTitle,
           data: {
             hideCopyButton: true,
             leadingIcon:
@@ -179,7 +152,7 @@ function EnvironmentNotifications({
               toastManager.close(toastId);
               void navigate({
                 to: "/$environmentId/$threadId",
-                params: { environmentId, threadId: thread.id },
+                params: { environmentId, threadId },
               });
             },
           },
@@ -195,8 +168,8 @@ function EnvironmentNotifications({
         continue;
       try {
         const notification = new Notification(title, {
-          body: thread.title,
-          tag: `${environmentId}:${thread.id}`,
+          body: threadTitle,
+          tag: `${environmentId}:${threadId}`,
           silent: true,
         });
         onNotification(environmentId, notification);
@@ -205,7 +178,7 @@ function EnvironmentNotifications({
           window.focus();
           void navigate({
             to: "/$environmentId/$threadId",
-            params: { environmentId, threadId: thread.id },
+            params: { environmentId, threadId },
           });
         });
       } catch {

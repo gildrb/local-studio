@@ -138,6 +138,11 @@ export function setSnapShotAnimationDestination(
         : {}),
     })
     .catch(() => undefined);
+  trackSnapShotAnimationDestination(id, request);
+}
+
+/** Records a host's in-flight destination handoff so delivery can wait for its landing. */
+export function trackSnapShotAnimationDestination(id: string, request: Promise<void>): void {
   destinationRequests.set(id, request);
 }
 

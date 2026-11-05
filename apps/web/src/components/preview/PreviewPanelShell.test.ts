@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { getPreviewPanelMaxWidth } from "./PreviewPanelShell";
+import { getPreviewPanelMaxWidth } from "./PreviewPanelShell.logic";
 
 describe("getPreviewPanelMaxWidth", () => {
   it("allows the panel to use 70% of an ultra-wide viewport without a pixel ceiling", () => {

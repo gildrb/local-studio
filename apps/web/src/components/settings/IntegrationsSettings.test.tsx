@@ -56,7 +56,7 @@ vi.mock("./SettingsScopeContext", () => ({
 }));
 
 import { IntegrationsSettingsPanel } from "./IntegrationsSettings";
-import { platformSetupStatus } from "../device/DeviceSetup";
+import { platformSetupStatus } from "../device/DeviceSetup.logic";
 
 let renderer: ReactTestRenderer | undefined;
 

@@ -358,6 +358,14 @@
     "./codexAuthHandoff": {
       "types": "./src/codexAuthHandoff.ts",
       "import": "./src/codexAuthHandoff.ts"
+    },
+    "./desktopEntry": {
+      "types": "./src/desktopEntry.ts",
+      "import": "./src/desktopEntry.ts"
+    },
+    "./snapShot/*": {
+      "types": "./src/snapShot/*.ts",
+      "import": "./src/snapShot/*.ts"
     }
   },
   "scripts": {
@@ -365,9 +373,11 @@
     "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
+    "@crowecawcaw/xa11y": "0.13.0",
     "@noble/curves": "catalog:",
     "@noble/hashes": "catalog:",
     "@t3tools/contracts": "workspace:*",
+    "dbus-next": "0.10.2",
     "effect": "catalog:",
     "jose": "catalog:",
     "yaml": "catalog:"

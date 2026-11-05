@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { changeRequestWebUrl, resolveLinkPullRequestInput } from "./LinkPullRequestDialog";
+import { changeRequestWebUrl, resolveLinkPullRequestInput } from "./LinkPullRequestDialog.logic";
 
 const project = {
   host: "github.com",

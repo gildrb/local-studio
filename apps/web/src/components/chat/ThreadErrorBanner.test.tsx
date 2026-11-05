@@ -1,13 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
+import { ThreadErrorBanner } from "./ThreadErrorBanner";
 import {
   dismissThreadErrorBannerForSession,
   getThreadErrorBannerKey,
   isThreadErrorBannerDismissedForSession,
   shouldShowThreadErrorBanner,
-  ThreadErrorBanner,
-} from "./ThreadErrorBanner";
+} from "./ThreadErrorBanner.logic";
 
 describe("ThreadErrorBanner", () => {
   it("stays hidden after its current error is dismissed", () => {

@@ -1,25 +1,42 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import type { Project, Thread } from "../types";
 import {
   buildBrowseGroups,
   buildCommandPaletteProjectMetadata,
-  buildProjectActionItems,
-  buildThreadActionItems,
-  buildLinkedThreadActionItems,
+  buildLinkedThreadEntries,
+  buildProjectSearchEntries,
+  buildThreadEntries,
   enumerateCommandPaletteItems,
   filterPinnedBrowseEntries,
   filterCommandPaletteGroups,
   reduceCommandPaletteUiState,
+  resolveCommandPaletteItem,
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
+  type CommandPaletteResolveContext,
 } from "./CommandPalette.logic";
 
+const RESOLVE_CONTEXT: CommandPaletteResolveContext = {
+  threads: [],
+  sidebarThreadSortOrder: "updated_at",
+  contextualProjectRef: null,
+  appearanceMode: "system",
+  pathname: "/",
+  browse: {
+    query: "~/",
+    directoryPath: "~/",
+    parentPath: null,
+    pinnedCloneDirectoryName: "",
+    platform: "MacIntel",
+  },
+};
+
 describe("linked pull request thread navigation", () => {
-  it("keeps archived relations searchable and routes them through the PR environment", async () => {
+  it("keeps archived relations searchable and routes them through the PR environment", () => {
     const environmentId = EnvironmentId.make("remote");
     const id = ThreadId.make("archived-thread");
-    const runThread = vi.fn(async () => {});
     const query = "https://github.com/acme/web/pull/42";
     const linkedThreads = {
       environmentId,
@@ -41,7 +58,7 @@ describe("linked pull request thread navigation", () => {
       },
     );
     expect(state.openIntent).toEqual({ kind: "search", query, linkedThreads });
-    const items = buildLinkedThreadActionItems({ ...linkedThreads, query, icon: null, runThread });
+    const items = buildLinkedThreadEntries({ ...linkedThreads, query });
     const groups = filterCommandPaletteGroups({
       activeGroups: [],
       query,
@@ -52,8 +69,13 @@ describe("linked pull request thread navigation", () => {
     });
     expect(groups.flatMap((group) => group.items)).toEqual(items);
     expect(items[0]?.description).toBe("Archived thread");
-    await items[0]?.run();
-    expect(runThread).toHaveBeenCalledWith({ environmentId, id });
+    const [item] = items;
+    if (!item) throw new Error("Expected a linked thread item");
+    expect(resolveCommandPaletteItem(item, RESOLVE_CONTEXT)).toEqual({
+      kind: "run",
+      keepOpen: false,
+      command: { kind: "navigate-thread", environmentId, threadId: id },
+    });
   });
 });
 
@@ -279,9 +301,9 @@ describe("enumerateCommandPaletteItems", () => {
       value: `project-${index + 1}`,
       searchTerms: [],
       title: `Project ${index + 1}`,
-      icon: null,
+      icon: { kind: "glyph" as const, glyph: "folder" as const },
       shortcutCommand: "chat.new" as const,
-      run: async () => undefined,
+      intent: { kind: "open-settings" as const },
     }));
 
     expect(enumerateCommandPaletteItems(items).map((item) => item.shortcutCommand)).toEqual([
@@ -344,35 +366,41 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
   };
 }
 
-describe("buildProjectActionItems", () => {
+describe("buildProjectSearchEntries", () => {
   it("shows the grouped display name but keeps the real title for icons", () => {
     const project = makeProject({ title: "fleet", workspaceRoot: "/Users/theo/Code/p/fleet" });
-    const iconTitles: string[] = [];
-    const [item] = buildProjectActionItems({
-      projects: [{ ...project, displayName: "t3dotgg/fleet" }],
-      valuePrefix: "project",
-      icon: (candidate) => {
-        iconTitles.push(candidate.title);
-        return null;
-      },
-      runProject: async () => undefined,
+    const [item] = buildProjectSearchEntries({
+      pickerEntries: [
+        {
+          group: {
+            displayName: "t3dotgg/fleet",
+            memberProjects: [project],
+            memberProjectRefs: [{ environmentId: project.environmentId, projectId: project.id }],
+          },
+          targetProject: project,
+        },
+      ],
+      locationByEnvironmentId: new Map(),
     });
 
     expect(item?.title).toBe("t3dotgg/fleet");
     expect(item?.searchTerms).toEqual(
       expect.arrayContaining(["t3dotgg/fleet", "fleet", "/Users/theo/Code/p/fleet"]),
     );
-    expect(iconTitles).toEqual(["fleet"]);
+    expect(item?.icon).toEqual({
+      kind: "project",
+      project: expect.objectContaining({ title: "fleet" }),
+    });
   });
 });
 
-describe("buildThreadActionItems", () => {
+describe("buildThreadEntries", () => {
   it("orders threads by most recent activity and formats timestamps from updatedAt", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-25T12:00:00.000Z"));
 
     try {
-      const items = buildThreadActionItems({
+      const items = buildThreadEntries({
         threads: [
           makeThread({
             id: ThreadId.make("thread-older"),
@@ -388,8 +416,6 @@ describe("buildThreadActionItems", () => {
         ],
         projectTitleById: new Map([[PROJECT_ID, "Project"]]),
         sortOrder: "updated_at",
-        icon: null,
-        runThread: async (_thread) => undefined,
       });
 
       expect(items.map((item) => item.value)).toEqual([
@@ -404,7 +430,7 @@ describe("buildThreadActionItems", () => {
   });
 
   it("ranks thread title matches ahead of contextual project-name matches", () => {
-    const threadItems = buildThreadActionItems({
+    const threadItems = buildThreadEntries({
       threads: [
         makeThread({
           id: ThreadId.make("thread-context-match"),
@@ -420,8 +446,6 @@ describe("buildThreadActionItems", () => {
       ],
       projectTitleById: new Map([[PROJECT_ID, "Project"]]),
       sortOrder: "updated_at",
-      icon: null,
-      runThread: async (_thread) => undefined,
     });
 
     const groups = filterCommandPaletteGroups({
@@ -461,16 +485,19 @@ describe("buildThreadActionItems", () => {
         updatedAt: "2026-03-25T00:00:00.000Z",
       }),
     ];
-    const items = buildThreadActionItems({
+    const items = buildThreadEntries({
       threads,
       projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
       sortOrder: "created_at",
-      icon: null,
-      getContentMatch: (thread) =>
-        thread.id === ThreadId.make("recent-content")
-          ? { source: "user", snippet: "Please check Convex", query: "convex" }
-          : undefined,
-      runThread: async () => undefined,
+      contentMatchByKey: new Map([
+        [
+          threadSearchMatchKey({
+            environmentId: LOCAL_ENVIRONMENT_ID,
+            threadId: ThreadId.make("recent-content"),
+          }),
+          { source: "user" as const, snippet: "Please check Convex", query: "convex" },
+        ],
+      ]),
     });
 
     const groups = filterCommandPaletteGroups({
@@ -610,17 +637,23 @@ describe("buildThreadActionItems", () => {
   });
 
   it("keeps message excerpts searchable without replacing thread metadata", () => {
-    const [item] = buildThreadActionItems({
+    const [item] = buildThreadEntries({
       threads: [makeThread({ branch: "feat/search" })],
       projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
       sortOrder: "updated_at",
-      icon: null,
-      getContentMatch: () => ({
-        source: "assistant",
-        snippet: "The relay reconnect is now bounded.",
-        query: "reconnect",
-      }),
-      runThread: async (_thread) => undefined,
+      contentMatchByKey: new Map([
+        [
+          threadSearchMatchKey({
+            environmentId: LOCAL_ENVIRONMENT_ID,
+            threadId: ThreadId.make("thread-1"),
+          }),
+          {
+            source: "assistant" as const,
+            snippet: "The relay reconnect is now bounded.",
+            query: "reconnect",
+          },
+        ],
+      ]),
     });
 
     expect(item?.searchTerms).toContain("The relay reconnect is now bounded.");
@@ -643,12 +676,10 @@ describe("buildThreadActionItems", () => {
       title: "Fix thread-alpha-1234 flakes",
       updatedAt: "2026-03-04T00:00:00.000Z",
     });
-    const items = buildThreadActionItems({
+    const items = buildThreadEntries({
       threads: [idThread, titleThread],
       projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
       sortOrder: "updated_at",
-      icon: null,
-      runThread: async (_thread) => undefined,
     });
 
     const groups = filterCommandPaletteGroups({
@@ -666,22 +697,23 @@ describe("buildThreadActionItems", () => {
     ]);
   });
 
-  it("prefers renderDescription when provided", () => {
-    const [item] = buildThreadActionItems({
+  it("describes threads with a structured subtitle", () => {
+    const [item] = buildThreadEntries({
       threads: [makeThread({ branch: "feat/search", worktreePath: "/tmp/wt" })],
       projectTitleById: new Map([[PROJECT_ID, "T3 Code"]]),
       sortOrder: "updated_at",
-      icon: null,
-      renderDescription: (thread, { projectTitle }) =>
-        `${projectTitle}:${thread.branch}:${thread.worktreePath ? "wt" : "local"}`,
-      runThread: async (_thread) => undefined,
     });
 
-    expect(item?.description).toBe("T3 Code:feat/search:wt");
+    expect(item?.subtitle).toMatchObject({
+      kind: "thread",
+      projectTitle: "T3 Code",
+      branch: "feat/search",
+      worktreePath: "/tmp/wt",
+    });
   });
 
   it("filters archived threads out of thread search items", () => {
-    const items = buildThreadActionItems({
+    const items = buildThreadEntries({
       threads: [
         makeThread({
           id: ThreadId.make("thread-active"),
@@ -698,8 +730,6 @@ describe("buildThreadActionItems", () => {
       ],
       projectTitleById: new Map([[PROJECT_ID, "Project"]]),
       sortOrder: "updated_at",
-      icon: null,
-      runThread: async (_thread) => undefined,
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
@@ -707,40 +737,27 @@ describe("buildThreadActionItems", () => {
 });
 
 describe("buildBrowseGroups", () => {
-  it("waits for asynchronous browse navigation actions", async () => {
-    let finishNavigation: (() => void) | undefined;
-    const browseTo = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          finishNavigation = resolve;
-        }),
-    );
+  it("routes directory picks through browse navigation and keeps the palette open", () => {
     const groups = buildBrowseGroups({
       browseEntries: [{ name: "Downloads", fullPath: "/Users/test/Downloads" }],
       browseQuery: "~/",
       canBrowseUp: false,
-      upIcon: null,
-      directoryIcon: null,
-      browseUp: vi.fn(),
-      browseTo,
     });
     const item = groups[0]?.items[0];
     if (!item || item.kind !== "action") {
       throw new Error("Expected a browse action");
     }
 
-    let actionSettled = false;
-    const action = item.run().then(() => {
-      actionSettled = true;
+    expect(item.intent).toEqual({ kind: "browse-to", name: "Downloads" });
+    expect(resolveCommandPaletteItem(item, RESOLVE_CONTEXT)).toEqual({
+      kind: "run",
+      keepOpen: true,
+      command: {
+        kind: "browse",
+        nextQuery: expect.stringContaining("Downloads"),
+        prefetchPath: expect.stringContaining("Downloads"),
+      },
     });
-    await Promise.resolve();
-
-    expect(browseTo).toHaveBeenCalledWith("Downloads");
-    expect(actionSettled).toBe(false);
-
-    finishNavigation?.();
-    await action;
-    expect(actionSettled).toBe(true);
   });
 });
 
@@ -786,7 +803,7 @@ it.each([
   "pingdotgg/t3code#10839",
   "https://github.com/pingdotgg/t3code/pull/10839",
 ])("finds linked threads from PR query %s", (query) => {
-  const items = buildThreadActionItems({
+  const items = buildThreadEntries({
     threads: [
       makeThread({
         title: "Implementation",
@@ -807,8 +824,6 @@ it.each([
     ],
     projectTitleById: new Map(),
     sortOrder: "updated_at",
-    icon: null,
-    runThread: async () => undefined,
   });
   const groups = filterCommandPaletteGroups({
     activeGroups: [],

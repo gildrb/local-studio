@@ -12,10 +12,14 @@ import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "../files/f
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import {
+  buildDiffFileTreeHeaderModel,
   buildDiffFileTreeUpdates,
   compareDiffFileTreeEntries,
   collectDirectoryPaths,
   diffFileTreePositions,
+  resolveDiffFileTreeRowClick,
+  resolveDiffFileTreeSelectionChange,
+  resolveDiffFileTreeToggleAllDirectories,
   type DiffFileTreeEntry,
 } from "./diffFileTree.logic";
 
@@ -90,8 +94,8 @@ export function DiffFileTree({
     icons: T3_PIERRE_ICONS,
     onSelectionChange: (selectedPaths) => {
       if (syncingSelectionRef.current) return;
-      const path = selectedPaths.at(-1)?.replace(/\/$/, "");
-      if (path && filePathsRef.current.has(path)) onSelectFileRef.current(path);
+      const intent = resolveDiffFileTreeSelectionChange(selectedPaths, filePathsRef.current);
+      if (intent.kind === "select-file") onSelectFileRef.current(intent.path);
     },
     paths: [],
     search: false,
@@ -163,16 +167,23 @@ export function DiffFileTree({
     // `paths` is a dependency so a file that arrives after it was asked for is still revealed.
   }, [model, paths, revealRequestId, selectedPath]);
 
+  const header = buildDiffFileTreeHeaderModel({
+    fileCount: entries.length,
+    directoryCount: directoryPaths.length,
+    allDirectoriesExpanded,
+  });
+  const toggleAllDirectories = header.toggleAllDirectories;
+
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col bg-background", className)}>
       <div
         className="flex h-10 min-h-10 shrink-0 items-center gap-1 border-b border-border/60 bg-background px-2 text-xs text-muted-foreground in-data-[preview-panel-mode=inline]:mb-3 in-data-[preview-panel-mode=inline]:h-7 in-data-[preview-panel-mode=inline]:min-h-7 in-data-[preview-panel-mode=inline]:border-b-transparent"
         data-surface-subheader
       >
-        <span className="px-1 font-medium text-foreground">Files</span>
-        <span className="ml-auto tabular-nums">{entries.length}</span>
+        <span className="px-1 font-medium text-foreground">{header.title}</span>
+        <span className="ml-auto tabular-nums">{header.fileCount}</span>
         {headerAccessory}
-        {directoryPaths.length > 0 ? (
+        {toggleAllDirectories ? (
           <Tooltip>
             <TooltipTrigger
               render={
@@ -180,24 +191,23 @@ export function DiffFileTree({
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label={
-                    allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"
-                  }
-                  onClick={() =>
-                    setAllDirectoriesExpanded(model, directoryPaths, !allDirectoriesExpanded)
-                  }
+                  aria-label={toggleAllDirectories.ariaLabel}
+                  onClick={() => {
+                    const intent = resolveDiffFileTreeToggleAllDirectories(
+                      toggleAllDirectories.expanded,
+                    );
+                    setAllDirectoriesExpanded(model, directoryPaths, intent.expanded);
+                  }}
                 />
               }
             >
-              {allDirectoriesExpanded ? (
+              {toggleAllDirectories.icon === "chevrons-down-up" ? (
                 <ChevronsDownUpIcon className="size-3.5" />
               ) : (
                 <ChevronsUpDownIcon className="size-3.5" />
               )}
             </TooltipTrigger>
-            <TooltipPopup>
-              {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
-            </TooltipPopup>
+            <TooltipPopup>{toggleAllDirectories.tooltip}</TooltipPopup>
           </Tooltip>
         ) : null}
       </div>
@@ -205,27 +215,28 @@ export function DiffFileTree({
         model={model}
         aria-label={ariaLabel}
         onClickCapture={(event) => {
-          if (
+          const isPlainPrimaryClick = !(
             event.defaultPrevented ||
             event.button !== 0 ||
             event.ctrlKey ||
             event.metaKey ||
             event.shiftKey ||
             event.altKey
-          ) {
-            return;
-          }
+          );
+          if (!isPlainPrimaryClick) return;
           // Pierre does not emit a selection change for its sole selected row.
           // Read selection before the row handles the click so new selections reveal only once.
-          const selected = model.getSelectedPaths();
-          const path = selected.length === 1 ? selected[0] : undefined;
-          if (!path || !filePathsRef.current.has(path)) return;
-          const clickedSelectedRow = event.nativeEvent
-            .composedPath()
-            .some(
-              (node) => node instanceof HTMLElement && node.getAttribute("data-item-path") === path,
-            );
-          if (clickedSelectedRow) onSelectFileRef.current(path);
+          const intent = resolveDiffFileTreeRowClick({
+            isPlainPrimaryClick,
+            selectedPaths: model.getSelectedPaths(),
+            filePaths: filePathsRef.current,
+            clickedItemPaths: event.nativeEvent.composedPath().flatMap((node) => {
+              const itemPath =
+                node instanceof HTMLElement ? node.getAttribute("data-item-path") : null;
+              return itemPath === null ? [] : [itemPath];
+            }),
+          });
+          if (intent.kind === "select-file") onSelectFileRef.current(intent.path);
         }}
         className="min-h-0 flex-1 overflow-hidden"
         style={pierreTreeStyle(resolvedTheme)}

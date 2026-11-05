@@ -14,8 +14,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   DEFAULT_SERVER_SETTINGS,
   type EnvironmentId,
-  ServerSettings,
-  type ServerSettingsPatch,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import {
   type ClientSettingsPatch,
@@ -25,11 +24,6 @@ import {
   type UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import {
-  filterSharedServerPatch,
-  splitSharedServerPatch,
-  supportsSharedSettingsSync,
-} from "@t3tools/client-runtime/state/shared-settings";
 import { ensureLocalApi } from "~/localApi";
 import {
   getThemeDefinition,
@@ -38,17 +32,17 @@ import {
   subscribeToThemePreview,
   themeAllowsSidebarArtwork,
 } from "~/themePalette";
-import * as Struct from "effect/Struct";
 import { toastManager } from "~/components/ui/toast";
 import { isHostedStaticApp } from "~/hostedPairing";
 import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
 import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { useTheme } from "./useTheme";
+import { mergeEnvironmentSettings } from "../settingsMerge";
+import { resolveEnvironmentIdentificationMode } from "../components/SidebarStageBackdrop.logic";
+import { planSettingsTargetUpdate, type UnifiedSettingsPatch } from "./settingsTarget.logic";
 
 const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
-
-type UnifiedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
 
 const clientSettingsListeners = new Set<() => void>();
 const clientSettingsHydrationListeners = new Set<() => void>();
@@ -229,29 +223,6 @@ export async function persistClientSettingsUpdate(
   });
 }
 
-// ── Key sets for routing patches ─────────────────────────────────────
-
-const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields));
-
-function splitPatch(patch: UnifiedSettingsPatch): {
-  serverPatch: ServerSettingsPatch;
-  clientPatch: ClientSettingsPatch;
-} {
-  const serverPatch: Record<string, unknown> = {};
-  const clientPatch: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(patch)) {
-    if (SERVER_SETTINGS_KEYS.has(key)) {
-      serverPatch[key] = value;
-    } else {
-      clientPatch[key] = value;
-    }
-  }
-  return {
-    serverPatch: serverPatch as ServerSettingsPatch,
-    clientPatch: clientPatch as ClientSettingsPatch,
-  };
-}
-
 // ── Hooks ────────────────────────────────────────────────────────────
 
 /**
@@ -300,15 +271,6 @@ function useClientSettingsValue(): ClientSettings {
   );
 }
 
-export function mergeEnvironmentSettings(
-  serverSettings: ServerSettings,
-  clientSettings: ClientSettings,
-): UnifiedSettings {
-  // Decode drops retired client keys, but older untyped persistence adapters
-  // can still return them. Server-owned values must always win.
-  return { ...clientSettings, ...serverSettings };
-}
-
 function useMergedSettings<T>(
   serverSettings: ServerSettings,
   selector: ((settings: UnifiedSettings) => T) | undefined,
@@ -328,21 +290,6 @@ export function useClientSettings<T = ClientSettings>(
 ): T {
   const settings = useClientSettingsValue();
   return useMemo(() => (selector ? selector(settings) : (settings as T)), [selector, settings]);
-}
-
-export function resolveEnvironmentIdentificationMode(input: {
-  mode: EnvironmentIdentificationMode;
-  settingsHydrated: boolean;
-  paletteThemeActive?: boolean;
-  paletteThemeAllowsArtwork?: boolean;
-}): EnvironmentIdentificationMode {
-  // Avoid briefly rendering the default artwork before a persisted pill/none choice loads.
-  if (!input.settingsHydrated) return "none";
-  // Artwork palettes are maintained for built-ins only. Keep an explicit
-  // "none", but use the theme-aware pill for user-controlled palettes.
-  return input.paletteThemeActive && !input.paletteThemeAllowsArtwork && input.mode === "artwork"
-    ? "pill"
-    : input.mode;
 }
 
 export function useEnvironmentIdentificationMode(): EnvironmentIdentificationMode {
@@ -395,9 +342,6 @@ export function usePrimarySettings<T = UnifiedSettings>(
   return useMergedSettings(useAtomValue(primaryServerSettingsAtom), selector);
 }
 
-export const PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE =
-  "This setting is saved on a server, and the hosted app is not anchored to one. Change it from the desktop app or from the server's own address.";
-
 /**
  * Whether primary-scoped server settings have a server to live on. The
  * hosted app connects to every environment as a remote, so it has no primary:
@@ -426,63 +370,23 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
   const { environments } = useEnvironments();
   const updateSettings = useCallback(
     (patch: UnifiedSettingsPatch) => {
-      const { serverPatch, clientPatch } = splitPatch(patch);
-
-      if (Object.keys(serverPatch).length > 0) {
-        const { sharedPatch, localPatch } = splitSharedServerPatch(serverPatch);
-        // Dropping the write silently leaves the control looking saved.
-        const warnUnsaved = (description = PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE) =>
-          toastManager.add({
-            type: "warning",
-            title: "Setting not saved",
-            description,
-          });
-        if (Object.keys(localPatch).length > 0) {
-          if (environmentId) {
-            void persistServerSettings({
-              environmentId,
-              input: { patch: localPatch },
-            });
-          } else {
-            warnUnsaved();
-          }
-        }
-        if (Object.keys(sharedPatch).length > 0) {
-          const sourceSettings = environments.find(
-            (target) => target.environmentId === environmentId,
-          )?.serverConfig?.settings;
-          const targets = new Set(
-            environments.filter(supportsSharedSettingsSync).map((target) => target.environmentId),
-          );
-          if (environmentId) {
-            targets.add(environmentId);
-          }
-          let wroteToTarget = false;
-          for (const targetId of targets) {
-            const target = environments.find((candidate) => candidate.environmentId === targetId);
-            const targetPatch = filterSharedServerPatch(
-              sharedPatch,
-              target?.serverConfig?.environment.capabilities,
-              target?.serverConfig?.settings,
-              sourceSettings,
-              targetId === environmentId,
-            );
-            if (Object.keys(targetPatch).length === 0) continue;
-            wroteToTarget = true;
-            void persistServerSettings({
-              environmentId: targetId,
-              input: { patch: targetPatch },
-            });
-          }
-          if (!wroteToTarget) {
-            warnUnsaved(
-              targets.size > 0 ? "Update older servers to save this setting." : undefined,
-            );
-          }
-        }
+      const plan = planSettingsTargetUpdate({ environmentId, environments, patch });
+      // Dropping the write silently leaves the control looking saved.
+      for (const description of plan.unsavedWarnings) {
+        toastManager.add({
+          type: "warning",
+          title: "Setting not saved",
+          description,
+        });
       }
-      if (Object.keys(clientPatch).length > 0) {
-        void persistClientSettingsPatch(clientPatch);
+      for (const write of plan.serverWrites) {
+        void persistServerSettings({
+          environmentId: write.environmentId,
+          input: { patch: write.patch },
+        });
+      }
+      if (plan.clientPatch !== null) {
+        void persistClientSettingsPatch(plan.clientPatch);
       }
     },
     [environmentId, environments, persistServerSettings],

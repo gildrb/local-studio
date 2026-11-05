@@ -18,8 +18,12 @@ import {
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { AddUsageLimitSourceDialog } from "./AddUsageLimitSourceDialog";
-import { searchableSetting } from "./settingsSearch";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  buildUsageProviderSettingsModel,
+  resolveUsageProviderSettingsChange,
+  type UsageProviderHubRow,
+} from "./UsageProviderSettings.logic";
 
 /** Hub management follows the selected device and access rules of provider settings. */
 export function UsageProviderSettings({
@@ -46,14 +50,25 @@ export function UsageProviderSettings({
     .platform;
   const [adding, setAdding] = useState(false);
   const [updatingCursor, setUpdatingCursor] = useState(false);
-  const entries = Object.entries(sources);
+  const model = buildUsageProviderSettingsModel({
+    sources,
+    cursorKeychainUsageEnabled,
+    platformOs: platform?.os ?? null,
+    readOnly,
+    updatingCursor,
+    adding,
+  });
 
   const setCursorUsageEnabled = async (enabled: boolean) => {
+    const decision = resolveUsageProviderSettingsChange({
+      kind: "set-cursor-keychain-usage",
+      enabled,
+    });
     setUpdatingCursor(true);
     try {
       const result = await updateCursorSettings({
         environmentId,
-        input: { patch: { cursorKeychainUsageEnabled: enabled } },
+        input: { patch: decision.patch },
       });
       if (result._tag === "Success") {
         await refreshProviders({ environmentId, input: {} });
@@ -63,63 +78,56 @@ export function UsageProviderSettings({
     }
   };
 
+  const removeHub = (id: string) => {
+    updateSettings(resolveUsageProviderSettingsChange({ kind: "remove-hub", id }).patch);
+  };
+
   return (
     <>
       <SettingsSection
-        {...searchableSetting("usage-providers")}
+        {...model.section}
         headerAction={
-          !readOnly ? (
+          model.addAction ? (
             <Button size="xs" variant="outline" onClick={() => setAdding(true)}>
               <PlusIcon className="size-3" aria-hidden />
-              Add hub
+              {model.addAction.label}
             </Button>
           ) : null
         }
       >
-        {platform?.os === "darwin" ? (
+        {model.cursorKeychainRow ? (
           <SettingsRow
-            id="cursor-keychain-usage"
-            title="Cursor account usage"
-            description="Read your existing Cursor CLI login from macOS Keychain to show account history and monthly limits. macOS may ask you to allow access."
+            id={model.cursorKeychainRow.id}
+            title={model.cursorKeychainRow.title}
+            description={model.cursorKeychainRow.description}
             control={
               <Switch
-                aria-label="Cursor account usage"
-                checked={cursorKeychainUsageEnabled}
-                disabled={readOnly || updatingCursor}
+                aria-label={model.cursorKeychainRow.ariaLabel}
+                checked={model.cursorKeychainRow.value}
+                disabled={model.cursorKeychainRow.disabled}
                 onCheckedChange={(enabled) => void setCursorUsageEnabled(enabled)}
               />
             }
           />
         ) : null}
-        {entries.length === 0 ? (
-          <SettingsRow title="No hubs configured." />
+        {model.emptyLabel !== null ? (
+          <SettingsRow title={model.emptyLabel} />
         ) : (
-          entries.map(([id, source]) => {
-            const label = source.label?.trim() || source.url;
-            return (
-              <SettingsRow
-                key={id}
-                title={label}
-                description={
-                  <span className="break-all">
-                    CLI Proxy{source.enabled ? "" : " · Disabled"}
-                    {label !== source.url ? ` · ${source.url}` : ""}
-                  </span>
-                }
-                control={
-                  !readOnly ? (
-                    <RemoveUsageProviderButton
-                      label={label}
-                      onConfirm={() => updateSettings({ usageLimitSources: { [id]: null } })}
-                    />
-                  ) : null
-                }
-              />
-            );
-          })
+          model.hubs.map((hub) => (
+            <SettingsRow
+              key={hub.id}
+              title={hub.label}
+              description={<span className="break-all">{hub.description}</span>}
+              control={
+                hub.removable ? (
+                  <RemoveUsageProviderButton hub={hub} onConfirm={() => removeHub(hub.id)} />
+                ) : null
+              }
+            />
+          ))
         )}
       </SettingsSection>
-      {adding && !readOnly ? (
+      {model.showAddDialog ? (
         <AddUsageLimitSourceDialog
           open
           onOpenChange={setAdding}
@@ -133,30 +141,28 @@ export function UsageProviderSettings({
 
 /** Removing a hub deletes its stored management key, so it requires confirmation. */
 function RemoveUsageProviderButton({
-  label,
+  hub,
   onConfirm,
 }: {
-  readonly label: string;
+  readonly hub: UsageProviderHubRow;
   readonly onConfirm: () => void;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <Button size="xs" variant="ghost" onClick={() => setOpen(true)}>
-        Remove
+        {hub.removeLabel}
       </Button>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove {label}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The hub's management key is deleted from this server. Its accounts leave the Limits
-              view; the hub itself is untouched. Add it again with the URL and key to bring them
-              back.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{hub.removeConfirmation.title}</AlertDialogTitle>
+            <AlertDialogDescription>{hub.removeConfirmation.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              {hub.removeConfirmation.cancelLabel}
+            </AlertDialogClose>
             <Button
               variant="destructive"
               onClick={() => {
@@ -164,7 +170,7 @@ function RemoveUsageProviderButton({
                 onConfirm();
               }}
             >
-              Remove hub
+              {hub.removeConfirmation.confirmLabel}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

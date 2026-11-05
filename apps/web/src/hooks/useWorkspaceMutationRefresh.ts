@@ -35,6 +35,17 @@ export function latestWorkspaceMutationId(
   return null;
 }
 
+/** Changes whenever files on disk may have changed: a mutating tool finished or a turn checkpointed. */
+export function threadWorkspaceMutationId(input: {
+  readonly activities: ReadonlyArray<OrchestrationThreadActivity>;
+  readonly latestCheckpointCompletedAt: string | null;
+}): string | null {
+  const activityId = latestWorkspaceMutationId(input.activities);
+  return activityId === null && input.latestCheckpointCompletedAt === null
+    ? null
+    : JSON.stringify([activityId, input.latestCheckpointCompletedAt]);
+}
+
 export function workspaceMutationRefreshToken(
   resourceKey: string,
   mutationId: string | null,

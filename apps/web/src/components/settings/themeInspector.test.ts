@@ -4,7 +4,7 @@ import {
   changedThemePaintKinds,
   themeRoleFromUtilityClass,
   type ThemePaintSnapshot,
-} from "./themeInspector";
+} from "./themeInspector.logic";
 
 const WHITE_PAINT: ThemePaintSnapshot = {
   background: "rgb(255, 255, 255)\nnone",

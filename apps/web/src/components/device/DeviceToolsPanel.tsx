@@ -1,5 +1,5 @@
 import type { DeviceHubAccess } from "@t3tools/client-runtime/state/deviceHubAccess";
-import type { DevicePermission, DeviceSummary, DeviceTextSize } from "@t3tools/contracts";
+import type { DevicePermission, DeviceSummary } from "@t3tools/contracts";
 import { ChevronDown, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
@@ -19,61 +19,15 @@ import { Toggle, ToggleGroup } from "~/components/ui/toggle-group";
 import { cn } from "~/lib/utils";
 import type { DeviceControls } from "./useDeviceControls";
 import { type DeviceEventLogEntry, subscribeDeviceEventLog } from "./deviceHubApi";
-
-const TEXT_SIZES: ReadonlyArray<{ value: DeviceTextSize; label: string }> = [
-  { value: "small", label: "Small" },
-  { value: "default", label: "Default" },
-  { value: "large", label: "Large" },
-  { value: "extra-large", label: "Extra large" },
-];
-
-const COLOR_FILTERS = [
-  { value: "none", label: "None" },
-  { value: "grayscale", label: "Grayscale" },
-  { value: "red-green", label: "Red / green (protanopia)" },
-  { value: "green-red", label: "Green / red (deuteranopia)" },
-  { value: "blue-yellow", label: "Blue / yellow (tritanopia)" },
-] as const;
-
-const ORIENTATIONS = [
-  { value: "portrait", label: "Portrait" },
-  { value: "landscape_left", label: "Landscape left" },
-  { value: "portrait_upside_down", label: "Upside down" },
-  { value: "landscape_right", label: "Landscape right" },
-] as const;
-
-const IOS_PERMISSIONS: ReadonlyArray<{ value: DevicePermission; label: string }> = [
-  { value: "camera", label: "Camera" },
-  { value: "microphone", label: "Microphone" },
-  { value: "photos", label: "Photos" },
-  { value: "contacts", label: "Contacts" },
-  { value: "calendar", label: "Calendar" },
-  { value: "reminders", label: "Reminders" },
-  { value: "location", label: "Location" },
-  { value: "notifications", label: "Notifications" },
-  { value: "motion", label: "Motion" },
-  { value: "media-library", label: "Media library" },
-  { value: "faceid", label: "Face ID" },
-];
-
-const ANDROID_PERMISSIONS: ReadonlyArray<{ value: DevicePermission; label: string }> = [
-  { value: "camera", label: "Camera" },
-  { value: "microphone", label: "Microphone" },
-  { value: "photos", label: "Photos" },
-  { value: "contacts", label: "Contacts" },
-  { value: "calendar", label: "Calendar" },
-  { value: "location", label: "Location" },
-  { value: "notifications", label: "Notifications" },
-  { value: "motion", label: "Physical activity" },
-];
-
-const LOCATION_PRESETS = [
-  { label: "San Francisco", latitude: 37.7749, longitude: -122.4194 },
-  { label: "New York", latitude: 40.7128, longitude: -74.006 },
-  { label: "London", latitude: 51.5074, longitude: -0.1278 },
-  { label: "Stockholm", latitude: 59.3293, longitude: 18.0686 },
-  { label: "Tokyo", latitude: 35.6762, longitude: 139.6503 },
-] as const;
+import {
+  DEVICE_COLOR_FILTERS,
+  DEVICE_LOCATION_PRESETS,
+  DEVICE_ORIENTATIONS,
+  DEVICE_TEXT_SIZES,
+  devicePermissions,
+  mergeDeviceEventLog,
+  parseDeviceLocation,
+} from "./DeviceToolsPanel.logic";
 
 /**
  * The Tools drawer for one open device: current settings read from the device,
@@ -189,7 +143,7 @@ export function DeviceToolsPanel(props: {
             <ChoiceSelect
               ariaLabel="Text size"
               value={settings?.textSize ?? null}
-              options={TEXT_SIZES}
+              options={DEVICE_TEXT_SIZES}
               disabled={disabled}
               onChange={(value) => act({ type: "setTextSize", value })}
             />
@@ -216,7 +170,7 @@ export function DeviceToolsPanel(props: {
                 <ChoiceSelect
                   ariaLabel="Color filter"
                   value={settings?.colorFilter ?? null}
-                  options={COLOR_FILTERS}
+                  options={DEVICE_COLOR_FILTERS}
                   disabled={disabled}
                   onChange={(value) => act({ type: "setColorFilter", value })}
                 />
@@ -228,7 +182,7 @@ export function DeviceToolsPanel(props: {
                 ariaLabel="Orientation"
                 value={null}
                 placeholder="Rotate to…"
-                options={ORIENTATIONS}
+                options={DEVICE_ORIENTATIONS}
                 disabled={disabled}
                 onChange={(value) => act({ type: "setOrientation", value })}
               />
@@ -299,7 +253,7 @@ export function DeviceToolsPanel(props: {
         />
 
         <PermissionsSection
-          permissions={isIos ? IOS_PERMISSIONS : ANDROID_PERMISSIONS}
+          permissions={devicePermissions(device.platform)}
           canReset={isIos}
           defaultAppId={foregroundApp?.id ?? ""}
           disabled={disabled}
@@ -455,12 +409,7 @@ function LocationSection(props: {
 }) {
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
-  const parsed = { latitude: Number(latitude), longitude: Number(longitude) };
-  const valid =
-    latitude.trim() !== "" &&
-    longitude.trim() !== "" &&
-    Math.abs(parsed.latitude) <= 90 &&
-    Math.abs(parsed.longitude) <= 180;
+  const parsed = parseDeviceLocation(latitude, longitude);
   return (
     <Section title="Location">
       <div className="flex gap-1.5">
@@ -490,7 +439,7 @@ function LocationSection(props: {
           value={null}
           disabled={props.disabled}
           onValueChange={(value) => {
-            const preset = LOCATION_PRESETS.find((candidate) => candidate.label === value);
+            const preset = DEVICE_LOCATION_PRESETS.find((candidate) => candidate.label === value);
             if (!preset) return;
             setLatitude(String(preset.latitude));
             setLongitude(String(preset.longitude));
@@ -503,7 +452,7 @@ function LocationSection(props: {
             </SelectValue>
           </SelectTrigger>
           <SelectPopup align="start" alignItemWithTrigger={false}>
-            {LOCATION_PRESETS.map((preset) => (
+            {DEVICE_LOCATION_PRESETS.map((preset) => (
               <SelectItem key={preset.label} value={preset.label}>
                 {preset.label}
               </SelectItem>
@@ -513,8 +462,10 @@ function LocationSection(props: {
         <Button
           size="xs"
           variant="outline"
-          disabled={props.disabled || !valid}
-          onClick={() => void props.onSet(parsed.latitude, parsed.longitude)}
+          disabled={props.disabled || parsed === null}
+          onClick={() => {
+            if (parsed) void props.onSet(parsed.latitude, parsed.longitude);
+          }}
         >
           Set
         </Button>
@@ -605,8 +556,6 @@ function PermissionsSection(props: {
   );
 }
 
-const EVENT_LOG_LIMIT = 100;
-
 function EventLogSection(props: {
   readonly access: DeviceHubAccess;
   readonly device: DeviceSummary;
@@ -620,8 +569,7 @@ function EventLogSection(props: {
       { access: props.access, platform: props.device.platform, deviceId: props.device.id },
       (incoming, reset) => {
         setEntries((current) => {
-          const merged = reset ? [...incoming] : [...current, ...incoming];
-          return merged.length > EVENT_LOG_LIMIT ? merged.slice(-EVENT_LOG_LIMIT) : merged;
+          return mergeDeviceEventLog(current, incoming, reset);
         });
       },
     );

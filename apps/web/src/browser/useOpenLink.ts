@@ -5,7 +5,7 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { useCallback } from "react";
 
-import { recordVisitForThread } from "~/browserHistoryStore";
+import { recordVisitForThread } from "~/browserHistoryVisits";
 import { readLocalApi } from "~/localApi";
 import { previewEnvironment } from "~/state/preview";
 import { useAtomCommand } from "~/state/use-atom-command";

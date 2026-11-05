@@ -17,11 +17,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   BROWSER_HISTORY_MAX_ENTRIES_PER_PROJECT,
-  recordVisitForThread,
   removeUrlForThread,
   setTitleForThreadUrl,
   useThreadRecentHistory,
 } from "~/browserHistoryStore";
+import { recordVisitForThread } from "~/browserHistoryVisits";
 import { type ComposerImageAttachment, useComposerDraftStore } from "~/composerDraftStore";
 import { capturePreviewAnnotationScreenshot } from "~/lib/previewAnnotation";
 import { ensureLocalApi } from "~/localApi";

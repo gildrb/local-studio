@@ -1,75 +1,20 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
-import { isThemeColor, themeColorToHex, type ThemeColorRole } from "../../themePalette";
+import type { ThemeColorRole } from "../../themePalette";
 import { cn } from "../../lib/utils";
 import { hexToHsv, hsvToHex, type HsvColor } from "../../lib/color";
 import { ColorHueSlider, ColorSaturationValuePlane } from "../ui/color-picker";
 import { Input } from "../ui/input";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-export function getThemeRoleLabel(role: ThemeColorRole): string {
-  const labels: Partial<Record<ThemeColorRole, string>> = {
-    canvas: "Background",
-    toolbar: "Toolbar background",
-    toolbarForeground: "Toolbar text",
-    toolbarBorder: "Toolbar border",
-    toolbarControl: "Toolbar control",
-    toolbarControlForeground: "Toolbar control text",
-    toolbarControlHover: "Toolbar control hover",
-    accent: "Accent color",
-    errorForeground: "Error text",
-    errorSurface: "Error background",
-    warningForeground: "Warning text",
-    warningSurface: "Warning background",
-    updateForeground: "Update text",
-    updateSurface: "Update background",
-  };
-  const label = labels[role];
-  if (label) return label;
-  return role.replace(/([A-Z])/g, " $1").replace(/^./, (character) => character.toUpperCase());
-}
-
-/**
- * The picker remains an sRGB/hex adapter over the OKLCH palette engine. Alpha
- * is preserved separately and re-attached on commit so adjusting hue or
- * brightness cannot change transparency.
- */
-function themePickerAlphaSuffix(value: string): string {
-  const normalized = themeColorToHex(value) ?? "";
-  const alpha = normalized.length === 9 ? normalized.slice(7) : "";
-  return alpha === "ff" ? "" : alpha;
-}
-
-function normalizeThemePickerColor(value: string): string {
-  return (themeColorToHex(value) ?? "#000000").slice(0, 7);
-}
-
-function themeHexToRgb(hex: string) {
-  const numeric = Number.parseInt(normalizeThemePickerColor(hex).slice(1), 16);
-  return [numeric >> 16, (numeric >> 8) & 255, numeric & 255] as const;
-}
-
-function themeRgbToHex(value: string): string | null {
-  const normalized = value
-    .trim()
-    .replace(/^rgb\(\s*/i, "")
-    .replace(/\s*\)$/, "");
-  const channels = normalized
-    .split(/[,\s]+/)
-    .filter(Boolean)
-    .map(Number);
-  if (
-    channels.length !== 3 ||
-    channels.some((channel) => !Number.isInteger(channel) || channel < 0 || channel > 255)
-  ) {
-    return null;
-  }
-
-  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
-}
-
-function themeRgbValue(hex: string) {
-  return themeHexToRgb(hex).join(", ");
-}
+import {
+  buildThemeColorFieldModel,
+  buildThemeColorPickerModel,
+  isThemePickerHexInput,
+  normalizeThemePickerColor,
+  themePickerAlphaSuffix,
+  themeRgbToHex,
+  themeRgbValue,
+} from "./ThemeColorPicker.logic";
 
 function ThemeColorPickerPanel({
   label,
@@ -88,6 +33,7 @@ function ThemeColorPickerPanel({
   const isEditingTextRef = useRef(false);
   const currentColor = hsvToHex(hsv.h, hsv.s, hsv.v);
   const currentRgb = themeRgbValue(currentColor);
+  const model = buildThemeColorPickerModel(label);
 
   useEffect(() => {
     // While a text field is focused, the incoming value may be the guided
@@ -148,7 +94,7 @@ function ThemeColorPickerPanel({
 
   const handleHexChange = (nextValue: string) => {
     setHexDraft(nextValue);
-    if (!/^#[0-9a-f]{6}$/i.test(nextValue)) return;
+    if (!isThemePickerHexInput(nextValue)) return;
     const nextHsv = hexToHsv(nextValue);
     setHsv(nextHsv);
     setRgbDraft(themeRgbValue(nextValue));
@@ -171,7 +117,7 @@ function ThemeColorPickerPanel({
       <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
         <div className="min-w-0">
           <p className="truncate text-xs font-semibold text-foreground">{label}</p>
-          <p className="text-2xs text-muted-foreground">Choose a color</p>
+          <p className="text-2xs text-muted-foreground">{model.subtitle}</p>
         </div>
         <span
           className="size-7 shrink-0 rounded-full shadow-sm"
@@ -186,7 +132,7 @@ function ThemeColorPickerPanel({
           onInteractionEnd={flushPendingCommit}
         />
         <ColorHueSlider
-          label={`${label} hue`}
+          label={model.hueLabel}
           value={hsv.h}
           onChange={(h) => commitHsv({ ...hsv, h })}
           onInteractionEnd={flushPendingCommit}
@@ -194,7 +140,7 @@ function ThemeColorPickerPanel({
         <div className="grid grid-cols-[1fr_1.2fr] gap-2">
           <label className="grid min-w-0 gap-1">
             <span className="px-1 text-3xs font-semibold uppercase tracking-widest text-muted-foreground">
-              HEX
+              {model.hexLabel}
             </span>
             <span className="flex min-w-0 items-center gap-2 rounded-lg border border-input bg-background px-2 focus-within:border-ring">
               <span
@@ -202,7 +148,7 @@ function ThemeColorPickerPanel({
                 style={{ backgroundColor: currentColor }}
               />
               <input
-                aria-label={`${label} picker hex value`}
+                aria-label={model.hexAriaLabel}
                 className="h-8 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
                 onBlur={() => {
                   isEditingTextRef.current = false;
@@ -220,11 +166,11 @@ function ThemeColorPickerPanel({
           </label>
           <label className="grid min-w-0 gap-1">
             <span className="px-1 text-3xs font-semibold uppercase tracking-widest text-muted-foreground">
-              RGB
+              {model.rgbLabel}
             </span>
             <span className="flex min-w-0 items-center rounded-lg border border-input bg-background px-2 focus-within:border-ring">
               <input
-                aria-label={`${label} picker RGB value`}
+                aria-label={model.rgbAriaLabel}
                 className="h-8 min-w-0 flex-1 bg-transparent font-mono text-xs text-foreground outline-none"
                 onBlur={() => {
                   isEditingTextRef.current = false;
@@ -257,6 +203,7 @@ function ThemeColorPicker({
   onChange: (value: string) => void;
   onInteract?: () => void;
 }) {
+  const model = buildThemeColorPickerModel(label);
   return (
     <Popover>
       <Tooltip>
@@ -265,7 +212,7 @@ function ThemeColorPicker({
             <PopoverTrigger
               render={
                 <button
-                  aria-label={`Choose ${label} color`}
+                  aria-label={model.triggerAriaLabel}
                   className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-full border border-foreground/30 transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   onFocus={onInteract}
                   onPointerDown={onInteract}
@@ -280,7 +227,7 @@ function ThemeColorPicker({
             />
           }
         />
-        <TooltipPopup side="top">{`Choose ${label} color`}</TooltipPopup>
+        <TooltipPopup side="top">{model.triggerTooltip}</TooltipPopup>
       </Tooltip>
       <PopoverPopup
         align="end"
@@ -312,12 +259,8 @@ export const ThemeColorField = memo(function ThemeColorField({
   selected?: boolean;
   label?: string;
 }) {
-  const label = customLabel ?? getThemeRoleLabel(role);
-  const isColorValue = isThemeColor(value);
-  const swatchValue = isColorValue ? value : "#000000";
-  const editorValue = value.trim().toLowerCase().startsWith("oklch(")
-    ? (themeColorToHex(value) ?? value)
-    : value;
+  const model = buildThemeColorFieldModel({ role, value, selected, label: customLabel });
+  const label = model.label;
 
   return (
     <div
@@ -331,7 +274,7 @@ export const ThemeColorField = memo(function ThemeColorField({
         <TooltipTrigger
           render={
             <button
-              aria-label={`${selected ? "Hide" : "Show"} ${label} usage`}
+              aria-label={model.toggleAriaLabel}
               aria-pressed={selected}
               className="flex min-w-0 flex-1 cursor-pointer items-center rounded-md text-left text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => onToggleSelected?.(role)}
@@ -341,27 +284,27 @@ export const ThemeColorField = memo(function ThemeColorField({
             </button>
           }
         />
-        <TooltipPopup side="top">{`${selected ? "Hide" : "Show"} where ${label} is used`}</TooltipPopup>
+        <TooltipPopup side="top">{model.toggleTooltip}</TooltipPopup>
       </Tooltip>
       <div className="ml-auto flex shrink-0 items-center gap-2">
         <ThemeColorPicker
           label={label}
           onChange={(nextValue) => onChange(role, nextValue)}
           onInteract={() => onSelect?.(role)}
-          value={swatchValue}
+          value={model.swatchValue}
         />
         <Input
-          aria-invalid={!isColorValue}
-          aria-label={`${label} hex value`}
+          aria-invalid={!model.valid}
+          aria-label={model.hexAriaLabel}
           className="w-28 shrink-0"
           font="mono"
-          id={`${role}-hex`}
+          id={model.inputId}
           nativeInput
           onChange={(event) => onChange(role, event.currentTarget.value)}
           onFocus={() => onSelect?.(role)}
           onPointerDown={() => onSelect?.(role)}
           size="compact"
-          value={editorValue}
+          value={model.editorValue}
         />
       </div>
     </div>

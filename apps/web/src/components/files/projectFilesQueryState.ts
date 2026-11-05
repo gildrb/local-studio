@@ -14,7 +14,11 @@ import { useCallback } from "react";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { useProjectPathSearch } from "~/state/queries";
-import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+
+import {
+  confirmOptimisticProjectFile,
+  writeOptimisticProjectFile,
+} from "./projectFileOptimistic.logic";
 
 const EMPTY_PROJECT_FILE_PATH = "";
 const EMPTY_PROJECT_FILE_QUERY_ATOM = Atom.make(
@@ -69,15 +73,15 @@ export function setProjectFileQueryData(
   relativePath: string,
   contents: string,
 ): void {
-  appAtomRegistry.set(optimisticFileAtom(environmentId, cwd, relativePath), {
-    confirmedAgainst: undefined,
-    data: {
-      relativePath,
-      contents,
-      byteLength: new TextEncoder().encode(contents).byteLength,
-      truncated: false,
+  writeOptimisticProjectFile(
+    appAtomRegistry,
+    {
+      optimistic: optimisticFileAtom(environmentId, cwd, relativePath),
+      query: getProjectFileQueryAtom(environmentId, cwd, relativePath),
     },
-  });
+    relativePath,
+    contents,
+  );
 }
 
 export function getOptimisticProjectFileQueryData(
@@ -94,26 +98,14 @@ export function confirmProjectFileQueryData(
   relativePath: string,
   contents: string,
 ): boolean {
-  const atom = optimisticFileAtom(environmentId, cwd, relativePath);
-  const optimisticFile = appAtomRegistry.get(atom);
-  if (optimisticFile?.data.contents !== contents) return false;
-
-  const queryAtom = getProjectFileQueryAtom(environmentId, cwd, relativePath);
-  const confirmed = {
-    ...optimisticFile,
-    confirmedAgainst: appAtomRegistry.get(queryAtom),
-  };
-  appAtomRegistry.set(atom, confirmed);
-  appAtomRegistry.refresh(queryAtom);
-  void executeAtomQuery(appAtomRegistry, queryAtom, {
-    reportDefect: false,
-    reportFailure: false,
-  }).then((result) => {
-    if (result._tag === "Success" && appAtomRegistry.get(atom) === confirmed) {
-      appAtomRegistry.set(atom, null);
-    }
-  });
-  return true;
+  return confirmOptimisticProjectFile(
+    appAtomRegistry,
+    {
+      optimistic: optimisticFileAtom(environmentId, cwd, relativePath),
+      query: getProjectFileQueryAtom(environmentId, cwd, relativePath),
+    },
+    contents,
+  );
 }
 
 export function resolveProjectFileQueryData(

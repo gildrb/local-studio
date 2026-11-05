@@ -2,14 +2,16 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   changeRequestRepositoryUrl,
-  findProjectForChangeRequest,
-  findProjectOnChangeRequestHost,
   gitHubPullRequestBrowserUrl,
   matchesLinkedPullRequestUrl,
   parseChangeRequestUrl,
   pullRequestCandidateUrlFromReferenceAutolink,
   shouldOpenPullRequestExternally,
 } from "./openPullRequestLink";
+import {
+  findProjectForChangeRequest,
+  findProjectOnChangeRequestHost,
+} from "./changeRequestProjects";
 import { ProjectId, type RepositoryIdentity } from "@t3tools/contracts";
 import { normalizeGitRemoteUrl } from "@t3tools/shared/git";
 

@@ -10,6 +10,12 @@ import {
 } from "lucide-react";
 import type { PullRequestState } from "@t3tools/contracts";
 
+import {
+  PULL_REQUEST_STATE_MODELS,
+  type PullRequestGlyphId,
+  type PullRequestStateModel,
+} from "./pullRequestPresentation.logic";
+
 export const PullRequestGlyph = {
   pullRequest: GitPullRequestArrowIcon,
   reopen: GitPullRequestArrowIcon,
@@ -20,7 +26,7 @@ export const PullRequestGlyph = {
   stack: LayersIcon,
   link: Link2Icon,
   unlink: Unlink2Icon,
-} as const;
+} as const satisfies Record<PullRequestGlyphId, unknown>;
 
 export type PullRequestGlyphIcon = (typeof PullRequestGlyph)[keyof typeof PullRequestGlyph];
 
@@ -30,25 +36,17 @@ export interface PullRequestStatePresentation {
   readonly Icon: PullRequestGlyphIcon;
 }
 
+function statePresentation(model: PullRequestStateModel): PullRequestStatePresentation {
+  return {
+    label: model.label,
+    toneClassName: model.toneClassName,
+    Icon: PullRequestGlyph[model.icon],
+  };
+}
+
 export const PULL_REQUEST_STATE_PRESENTATION = {
-  open: {
-    label: "Open",
-    toneClassName: "text-emerald-600 dark:text-emerald-300/90",
-    Icon: PullRequestGlyph.pullRequest,
-  },
-  draft: {
-    label: "Draft",
-    toneClassName: "text-zinc-500 dark:text-zinc-400/80",
-    Icon: PullRequestGlyph.draft,
-  },
-  closed: {
-    label: "Closed",
-    toneClassName: "text-red-600 dark:text-red-300/90",
-    Icon: PullRequestGlyph.closed,
-  },
-  merged: {
-    label: "Merged",
-    toneClassName: "text-violet-600 dark:text-violet-300/90",
-    Icon: PullRequestGlyph.merged,
-  },
+  open: statePresentation(PULL_REQUEST_STATE_MODELS.open),
+  draft: statePresentation(PULL_REQUEST_STATE_MODELS.draft),
+  closed: statePresentation(PULL_REQUEST_STATE_MODELS.closed),
+  merged: statePresentation(PULL_REQUEST_STATE_MODELS.merged),
 } as const satisfies Record<PullRequestState | "draft", PullRequestStatePresentation>;

@@ -11,17 +11,19 @@ import { ChevronLeftIcon, ChevronRightIcon, ImageIcon, TextIcon, XIcon } from "l
 import { Button } from "../ui/button";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import type { ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePreview";
+import {
+  expandedImageFailureMessage,
+  expandedMediaCaption,
+  expandedMediaContentsLabel,
+} from "./expandedMedia.logic";
 import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";
 import { useAssetUrlRefresh, useAssetUrlState } from "../../assets/assetUrls";
 import { OpenMediaLink } from "../media/OpenMediaLink";
 import { MediaActions, type MediaActionSource } from "../media/MediaActions";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
 import { isContextMenuOpen } from "../../contextMenuFallback";
-import {
-  SnapShotAccessibilityData,
-  SnapShotContentsButton,
-  snapShotAccessibilityDetails,
-} from "./SnapShotAttachmentDetails";
+import { SnapShotAccessibilityData, SnapShotContentsButton } from "./SnapShotAttachmentDetails";
+import { snapShotAccessibilityDetails } from "./SnapShotAttachmentDetails.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ZoomableImage, type ZoomableImageHandle } from "./ZoomableImage";
 import { composerFloatingLayerProps } from "./composerEventScope";
@@ -160,11 +162,10 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   const accessibilityDetails = item.source ? snapShotAccessibilityDetails(item.source) : undefined;
   const showingAccessibilityDetails =
     Boolean(accessibilityDetails) && accessibilityDetailsSrc === item.src;
-  const contentsLabel = showingAccessibilityDetails
-    ? "Show screenshot"
-    : accessibilityDetails?.format === "json"
-      ? "Show accessibility JSON"
-      : "Show extracted text";
+  const contentsLabel = expandedMediaContentsLabel(
+    showingAccessibilityDetails,
+    accessibilityDetails?.format,
+  );
   const ContentsIcon = showingAccessibilityDetails ? ImageIcon : TextIcon;
 
   return (
@@ -224,11 +225,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
               ) : null
             ) : item.src === null || failedImageSrc === item.src ? (
               <ExpandedMediaFailure>
-                <p>
-                  {openOriginalLink
-                    ? "This image could not be loaded."
-                    : "Image unavailable. The file may have been moved or deleted."}
-                </p>
+                <p>{expandedImageFailureMessage(openOriginalLink !== null)}</p>
                 {openOriginalLink}
               </ExpandedMediaFailure>
             ) : (
@@ -242,8 +239,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
             )}
             <div className="mt-2 flex max-w-[var(--media-width)] items-center justify-center gap-1.5 text-xs text-white/80">
               <span className="truncate" aria-live="polite" aria-atomic="true">
-                {item.name}
-                {preview.images.length > 1 ? ` (${index + 1}/${preview.images.length})` : ""}
+                {expandedMediaCaption(item.name, index, preview.images.length)}
               </span>
               {accessibilityDetails && item.source ? (
                 <Tooltip>

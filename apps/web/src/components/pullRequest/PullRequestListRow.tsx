@@ -6,7 +6,6 @@ import type {
 import type { ReactNode } from "react";
 
 import { cn } from "~/lib/utils";
-import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -15,6 +14,7 @@ import {
   PullRequestConflictGlyph,
   PullRequestStateGlyph,
 } from "./pullRequestPresentation";
+import { pullRequestActorLogin, pullRequestActorTooltip } from "./pullRequestPresentation.logic";
 
 /**
  * The one row shape both pull request lists share: the full page and a thread's linked panel.
@@ -80,7 +80,7 @@ export function PullRequestRowLines({
   signals,
   meta,
   metaClassName,
-  updatedAt,
+  updatedLabel,
 }: {
   /** The `#n` reference, already wrapped in whatever tooltip or menu the caller wants on it. */
   number: ReactNode;
@@ -92,7 +92,7 @@ export function PullRequestRowLines({
   /** Left of the second line: author, then repository and labels or the branches. */
   meta?: ReactNode;
   metaClassName?: string;
-  updatedAt?: string | null | undefined;
+  updatedLabel?: string | null | undefined;
 }) {
   return (
     <span className="min-w-0 flex-1">
@@ -113,10 +113,8 @@ export function PullRequestRowLines({
         )}
       >
         {meta}
-        {updatedAt ? (
-          <span className="ml-auto shrink-0 whitespace-nowrap tabular-nums">
-            {formatRelativeTimeLabel(updatedAt)}
-          </span>
+        {updatedLabel !== null && updatedLabel !== undefined ? (
+          <span className="ml-auto shrink-0 whitespace-nowrap tabular-nums">{updatedLabel}</span>
         ) : null}
       </span>
     </span>
@@ -133,7 +131,7 @@ export function PullRequestRowAuthor({
   className?: string;
   labelClassName?: string;
 }) {
-  const login = actor?.login ?? "ghost";
+  const login = pullRequestActorLogin(actor);
   return (
     <Tooltip>
       <TooltipTrigger
@@ -142,9 +140,7 @@ export function PullRequestRowAuthor({
         <PullRequestActorAvatar actor={actor} className="size-3.5" />
         <span className={cn("truncate", labelClassName)}>{login}</span>
       </TooltipTrigger>
-      <TooltipPopup side="top">
-        {actor?.name && actor.name !== login ? `${actor.name} (@${login})` : login}
-      </TooltipPopup>
+      <TooltipPopup side="top">{pullRequestActorTooltip(actor)}</TooltipPopup>
     </Tooltip>
   );
 }

@@ -1,8 +1,6 @@
-import { mediaKindFromPath } from "@t3tools/shared/filePreview";
 import { mediaUrlReference } from "@t3tools/client-runtime/media-reference";
 import type { ExpandedImageItem, ExpandedImagePreview } from "./ExpandedImagePreview";
-import { resolveExternalWebLinkHost } from "./externalLinkContextMenu";
-import { resolveProtocolRelativeMediaUrl } from "../media/mediaContent";
+import { markdownGalleryEntry } from "./markdownImageGallery.logic";
 
 // Weak keys retain resolved media actions only while the rendered image is reachable.
 export const markdownImageItems = new WeakMap<Element, ExpandedImageItem>();
@@ -19,24 +17,25 @@ export function markdownImageGallery(
     const registered = markdownImageItems.get(image);
     if (!registered) continue;
     const link = image.closest("a");
-    const href = link?.getAttribute("href") ?? "";
-    if (link && mediaKindFromPath(href) !== "image") continue;
-    const linkedSource =
-      resolveExternalWebLinkHost(href) !== null ? resolveProtocolRelativeMediaUrl(href) : null;
-    const reference = mediaUrlReference(href);
-    const item = linkedSource
-      ? {
-          ...registered,
-          src: linkedSource,
-          originalUrl: href,
-          actionsSource: {
-            kind: "image" as const,
-            name: registered.name,
+    const href = link ? (link.getAttribute("href") ?? "") : null;
+    const entry = markdownGalleryEntry(href);
+    if (!entry.included) continue;
+    const linkedSource = entry.linkedSource;
+    const reference = mediaUrlReference(href ?? "");
+    const item =
+      linkedSource && href !== null
+        ? {
+            ...registered,
             src: linkedSource,
-            ...(reference ? { reference } : {}),
-          },
-        }
-      : registered;
+            originalUrl: href,
+            actionsSource: {
+              kind: "image" as const,
+              name: registered.name,
+              src: linkedSource,
+              ...(reference ? { reference } : {}),
+            },
+          }
+        : registered;
     if (
       image === element ||
       (!markdownImageItems.has(element) && index < 0 && item.src === selected.src)

@@ -18,6 +18,7 @@ import { openCommandPalette } from "../../commandPaletteBus";
 import { Button } from "../ui/button";
 import { PullRequestListGhost } from "./PullRequestGhosts";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "../ui/empty";
+import type { PullRequestListEmptyModel } from "./PullRequestsPage.logic";
 
 /**
  * Drawn at the weight of the icons beside it rather than as an illustration with its own
@@ -67,91 +68,60 @@ function BranchMark({ joined }: { joined: boolean }) {
 }
 
 export function PullRequestListEmptyState({
-  query,
-  filtered,
-  searching,
-  hasProjects,
-  canLoadMore,
-  loadingMore,
-  refreshing,
+  empty,
   onClearQuery,
   onLoadMore,
   onRefresh,
 }: {
-  /** The text being searched for, so the reader is told what was searched rather than guessing. */
-  query: string;
-  /** True when a state, involvement or project filter is narrowing the list. */
-  filtered: boolean;
-  /** A search is in flight; the rows on screen are the previous answer. */
-  searching: boolean;
-  /**
-   * Whether this environment holds a project at all. The list is assembled from the projects'
-   * remotes, so without one there is no host to ask and no filter or search that could help.
-   */
-  hasProjects: boolean;
-  canLoadMore: boolean;
-  loadingMore: boolean;
-  /** A re-read of the hosts is already running, from here or from the header. */
-  refreshing: boolean;
+  empty: PullRequestListEmptyModel;
   onClearQuery: () => void;
   onLoadMore: () => void;
   onRefresh: () => void;
 }) {
   // Ahead of the search and the filters, because neither can produce a row until a project does.
-  if (!hasProjects) {
+  if (empty.kind === "no-projects") {
     return (
       <Empty>
         <BranchMark joined={false} />
         <EmptyHeader>
-          <EmptyTitle>No projects in this workspace</EmptyTitle>
-          <EmptyDescription>
-            Add a project, and the pull requests from its repository appear here.
-          </EmptyDescription>
+          <EmptyTitle>{empty.title}</EmptyTitle>
+          <EmptyDescription>{empty.description}</EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
           <Button size="sm" onClick={() => openCommandPalette({ open: "add-project" })}>
             <PlusIcon className="size-3.5" />
-            Add project
+            {empty.addProject.label}
           </Button>
         </EmptyContent>
       </Empty>
     );
   }
 
-  if (searching) {
+  if (empty.kind === "searching") {
     // The same ghost the first load wears, so a search on its way and a list on its way are
     // one state to the eye — with the question named where the group headers usually speak.
-    return (
-      <PullRequestListGhost
-        rows={5}
-        caption={`Searching every host for “${query.length > 48 ? `${query.slice(0, 48)}…` : query}”`}
-      />
-    );
+    return <PullRequestListGhost ghost={empty.ghost} />;
   }
 
-  if (query.length > 0) {
+  if (empty.kind === "no-matches") {
     return (
       <Empty>
         <BranchMark joined={false} />
         <EmptyHeader>
           {/* A pasted paragraph is still a search, but it is not a title. */}
-          <EmptyTitle>
-            Nothing matches “{query.length > 48 ? `${query.slice(0, 48)}…` : query}”
-          </EmptyTitle>
-          <EmptyDescription>
-            The hosts were searched for it. Try fewer words, or search by number, author or branch.
-          </EmptyDescription>
+          <EmptyTitle>{empty.title}</EmptyTitle>
+          <EmptyDescription>{empty.description}</EmptyDescription>
         </EmptyHeader>
         <div className="flex flex-wrap justify-center gap-2">
           <Button size="sm" variant="outline" onClick={onClearQuery}>
             <SearchIcon className="size-3.5" />
-            Clear search
+            {empty.clearSearch.label}
           </Button>
           {/* The hosts answered this query once; a pull request opened since then would answer
               differently, and nothing on screen says which of the two the reader is looking at. */}
-          <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}>
-            <RefreshIcon size="sm" refreshing={refreshing} />
-            {refreshing ? "Checking..." : "Check again"}
+          <Button size="sm" variant="outline" disabled={empty.refresh.disabled} onClick={onRefresh}>
+            <RefreshIcon size="sm" refreshing={empty.refresh.busy} />
+            {empty.refresh.label}
           </Button>
         </div>
       </Empty>
@@ -162,22 +132,23 @@ export function PullRequestListEmptyState({
     <Empty>
       <BranchMark joined={false} />
       <EmptyHeader>
-        <EmptyTitle>{filtered ? "Nothing under these filters" : "No pull requests"}</EmptyTitle>
-        <EmptyDescription>
-          {filtered
-            ? "Widen the state, involvement or project filter to see more."
-            : "Pull requests from every project in this workspace appear here."}
-        </EmptyDescription>
+        <EmptyTitle>{empty.title}</EmptyTitle>
+        <EmptyDescription>{empty.description}</EmptyDescription>
       </EmptyHeader>
       <div className="flex flex-wrap justify-center gap-2">
-        {canLoadMore ? (
-          <Button size="sm" variant="outline" disabled={loadingMore} onClick={onLoadMore}>
-            {loadingMore ? "Loading..." : "Load more pull requests"}
+        {empty.loadMore ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={empty.loadMore.disabled}
+            onClick={onLoadMore}
+          >
+            {empty.loadMore.label}
           </Button>
         ) : null}
-        <Button size="sm" variant="outline" disabled={refreshing} onClick={onRefresh}>
-          <RefreshIcon size="sm" refreshing={refreshing} />
-          {refreshing ? "Checking..." : "Check again"}
+        <Button size="sm" variant="outline" disabled={empty.refresh.disabled} onClick={onRefresh}>
+          <RefreshIcon size="sm" refreshing={empty.refresh.busy} />
+          {empty.refresh.label}
         </Button>
       </div>
     </Empty>

@@ -7,11 +7,6 @@ import type {
   ScopedThreadRef,
 } from "@t3tools/contracts";
 import { filePreviewDelimiter } from "@t3tools/shared/delimitedPreview";
-import {
-  isWorkspaceAudioPreviewPath,
-  isWorkspaceImagePreviewPath,
-  isWorkspaceVideoPreviewPath,
-} from "@t3tools/shared/filePreview";
 import { VirtualizedFile, type SelectedLineRange } from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/editor";
 import { EditProvider, File, type FileOptions, Virtualizer } from "@pierre/diffs/react";
@@ -25,7 +20,7 @@ import { Code2, Eye, FolderTree, Globe2, Table2, WrapTextIcon } from "lucide-rea
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { isBrowserPreviewFile, openFileInPreview } from "~/browser/openFileInPreview";
+import { openFileInPreview } from "~/browser/openFileInPreview";
 import { useAssetUrlRefresh, useAssetUrlState } from "~/assets/assetUrls";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { MediaVideoPlayer } from "~/components/media/MediaVideoPlayer";
@@ -33,13 +28,14 @@ import { MediaActions, type MediaActionSource } from "~/components/media/MediaAc
 import { useRemoteOpenState } from "~/remoteOpen";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
-import { getLocalStorageItem, setLocalStorageItem, useLocalStorage } from "~/hooks/useLocalStorage";
+import { useLocalStorage } from "~/hooks/useLocalStorage";
+import { getLocalStorageItem, setLocalStorageItem } from "~/lib/localStorageItem";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
 import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
-import { isAbsolutePath, resolvePathLinkTarget } from "~/terminal-links";
+import { resolvePathLinkTarget } from "~/terminal-links";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
@@ -52,7 +48,7 @@ import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 
 import { AttachmentFilePreview } from "./AttachmentFilePreview";
 import { AudioPreview } from "./AudioPreview";
-import { BrowserDocumentFrame, isPdfPreviewFile } from "./BrowserDocumentFrame";
+import { BrowserDocumentFrame } from "./BrowserDocumentFrame";
 import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import FileBrowserPanel from "./FileBrowserPanel";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
@@ -80,10 +76,10 @@ import { resolveCenteredFileLineScrollTop } from "./fileLineReveal";
 import { DiffCommentAnnotation } from "../diffs/DiffCommentAnnotation";
 import { projectFileCacheKey, projectFileEditorCacheKey } from "./fileContentRevision";
 import {
-  isMarkdownPreviewFile,
+  buildFilePreviewModel,
+  isPdfPreviewFile,
   resolveFilePreviewPath,
   setMarkdownTaskChecked,
-  shouldShowFileExplorer,
 } from "./filePreviewMode";
 import { useFileSaveCoordinator } from "./useFileSaveCoordinator";
 import {
@@ -889,12 +885,6 @@ function RenderedMarkdownSurface({
   );
 }
 
-function renderedToggleLabel(mode: "markdown" | "html" | "table", rendered: boolean): string {
-  if (mode === "markdown") return rendered ? "Show markdown source" : "Show rendered markdown";
-  if (mode === "table") return rendered ? "Show source" : "Show table";
-  return rendered ? "Show HTML source" : "Show rendered page";
-}
-
 function initialExplorerOpen(): boolean {
   try {
     return getLocalStorageItem(FILE_EXPLORER_STORAGE_KEY, Schema.Boolean) ?? true;
@@ -934,16 +924,6 @@ export default function FilePreviewPanel({
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
-  const isVideo = relativePath !== null && isWorkspaceVideoPreviewPath(relativePath);
-  const isAudio = relativePath !== null && !isVideo && isWorkspaceAudioPreviewPath(relativePath);
-  const isImage = relativePath !== null && !isVideo && isWorkspaceImagePreviewPath(relativePath);
-  const isMedia = isImage || isVideo || isAudio;
-  // PDFs have no text to show; HTML has, and can toggle between page and source.
-  const isPdf = relativePath !== null && isPdfPreviewFile(relativePath);
-  const isHtml = relativePath !== null && !isPdf && isBrowserPreviewFile(relativePath);
-  // A file outside the workspace (an absolute path) is shown, never edited.
-  const isHostFile =
-    attachment !== undefined || (relativePath !== null && isAbsolutePath(relativePath));
   // Media and PDFs render from their absolute path, so their contents are never
   // shown. The read still runs: a folder named `assets.png` is only knowable as a
   // folder from the read failure, and the server stats before reading, so a folder
@@ -954,20 +934,7 @@ export default function FilePreviewPanel({
     relativePath,
     attachment === undefined && relativePath !== null,
   );
-  // A chat link cannot tell a folder from a file, so a folder arrives here as
-  // a file surface and the read fails. Keep the breadcrumbs, drop the preview
-  // pane, and let the tree fill the surface with the folder revealed. Mutation
-  // refresh stays on so the surface notices if the path becomes a file. A host
-  // path cannot be revealed in the workspace tree, so it keeps the read error.
-  const isDirectory = file.isNotFile && !isHostFile;
-  // Everything preview-related keys off previewPath; a folder has no preview.
-  const previewPath = isDirectory ? null : relativePath;
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
-  const showExplorer = shouldShowFileExplorer({
-    relativePath: previewPath,
-    explorerOpen,
-    attachmentOpen: attachment !== undefined,
-  });
   // Reading markdown rendered is a preference, not a property of one file. Keeping
   // it on the panel meant a thread switch dropped it and forced source back.
   const [renderMarkdownPreferred, setRenderMarkdownPreferred] = useLocalStorage(
@@ -992,58 +959,44 @@ export default function FilePreviewPanel({
     null,
   );
   const breadcrumbRef = useRef<HTMLDivElement>(null);
-  const isMarkdown = previewPath ? isMarkdownPreviewFile(previewPath) : false;
-  const tableDelimiter =
-    previewPath && attachment === undefined ? filePreviewDelimiter({ name: previewPath }) : null;
-  // A reveal still wins over the preference: the line only exists in the source.
-  const revealHandled =
-    revealLine === null ||
-    (handledReveal?.path === relativePath && handledReveal.requestId === revealRequestId);
-  const renderMarkdown = isMarkdown && renderMarkdownPreferred && revealHandled;
-  const renderBrowserFile = isPdf || (isHtml && renderBrowserFilePreferred && revealHandled);
-  const renderTable = tableDelimiter !== null && renderTablePreferred && revealHandled;
-  const renderedMode = isMarkdown
-    ? ("markdown" as const)
-    : tableDelimiter
-      ? ("table" as const)
-      : isHtml
-        ? ("html" as const)
-        : null;
-  const canToggleRendered =
-    previewPath !== null && attachment === undefined && renderedMode !== null;
+  const preview = buildFilePreviewModel({
+    requestedPath,
+    cwd,
+    attachmentOpen: attachment !== undefined,
+    explorerOpen,
+    renderMarkdownPreferred,
+    renderBrowserFilePreferred,
+    renderTablePreferred,
+    revealLine,
+    revealRequestId,
+    handledReveal,
+    file: { data: file.data, error: file.error, isNotFile: file.isNotFile },
+    previewSupported: isPreviewSupportedInRuntime(),
+    tableDelimiter: relativePath ? filePreviewDelimiter({ name: relativePath }) : null,
+  });
+  const {
+    isDirectory,
+    previewPath,
+    isHostFile,
+    isMarkdown,
+    showExplorer,
+    renderedMode,
+    rendered,
+    canToggleRendered,
+    showsRawText,
+    canOpenInBrowser,
+  } = preview;
   const updateClientSettings = useUpdateClientSettings();
-  // Word wrap only reaches the text bodies. A rendered Markdown document, a table and the
-  // browser frame all lay themselves out, so the toggle stays hidden rather than inert.
-  const showsRawText =
-    previewPath !== null &&
-    file.data !== null &&
-    !(isMarkdown && renderMarkdown) &&
-    !(tableDelimiter && renderTable) &&
-    !renderBrowserFile;
-  const rendered = isMarkdown ? renderMarkdown : tableDelimiter ? renderTable : renderBrowserFile;
   const setRenderedPreferred = isMarkdown
     ? setRenderMarkdownPreferred
-    : tableDelimiter
+    : renderedMode === "table"
       ? setRenderTablePreferred
       : setRenderBrowserFilePreferred;
-  const canOpenInBrowser =
-    previewPath !== null &&
-    attachment === undefined &&
-    !isVideo &&
-    isPreviewSupportedInRuntime() &&
-    isBrowserPreviewFile(previewPath);
   const absolutePath =
     relativePath && attachment === undefined ? resolvePathLinkTarget(relativePath, cwd) : null;
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
   useWorkspaceMutationRefresh({
-    enabled:
-      attachment === undefined &&
-      relativePath !== null &&
-      // Media and PDFs never show their contents, so re-reading them on every
-      // workspace mutation is waste. A folder named like one still re-reads, so
-      // it notices when the path becomes a file.
-      (isDirectory || (!isMedia && !isPdf)) &&
-      !selectedFilePending,
+    enabled: preview.refreshesOnMutation && !selectedFilePending,
     mutationId: workspaceMutationId,
     refresh: file.refresh,
     resourceKey: `file:${environmentId}:${cwd}:${relativePath ?? ""}`,
@@ -1127,9 +1080,9 @@ export default function FilePreviewPanel({
               enableShortcut={false}
             />
           ) : null}
-          {canToggleRendered && renderedMode ? (
+          {canToggleRendered && preview.renderedToggleLabel !== null ? (
             <FileSurfaceAction
-              label={renderedToggleLabel(renderedMode, rendered)}
+              label={preview.renderedToggleLabel}
               pressed={rendered}
               onPress={() => {
                 const pressed = !rendered;
@@ -1141,9 +1094,9 @@ export default function FilePreviewPanel({
                 );
               }}
             >
-              {rendered ? (
+              {preview.renderedToggleIcon === "code" ? (
                 <Code2 className="size-3.5" />
-              ) : renderedMode === "table" ? (
+              ) : preview.renderedToggleIcon === "table" ? (
                 <Table2 className="size-3.5" />
               ) : (
                 <Eye className="size-3.5" />
@@ -1164,9 +1117,9 @@ export default function FilePreviewPanel({
               <Globe2 className="size-3.5" />
             </FileSurfaceAction>
           ) : null}
-          {!isHostFile && previewPath !== null ? (
+          {preview.canToggleExplorer ? (
             <FileSurfaceAction
-              label={explorerOpen ? "Hide file explorer" : "Show file explorer"}
+              label={preview.explorerToggleLabel}
               pressed={explorerOpen}
               onPress={toggleExplorer}
             >
@@ -1175,20 +1128,18 @@ export default function FilePreviewPanel({
           ) : null}
         </div>
       ) : null}
-      {previewPath &&
-      attachment === undefined &&
-      !isMedia &&
-      !renderBrowserFile &&
-      file.data?.truncated ? (
+      {preview.truncatedNotice !== null ? (
         <div className="shrink-0 border-b border-warning/20 bg-warning-surface px-3 py-1.5 text-2xs text-warning-foreground">
-          Preview limited to the first 1 MB of a {file.data.byteLength.toLocaleString()} byte file.
+          {preview.truncatedNotice}
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <div
           className={cn("min-w-0 flex-1 flex-col overflow-hidden", previewPath ? "flex" : "hidden")}
         >
-          {isDirectory ? null : relativePath && attachment ? (
+          {preview.body.kind === "none" ? null : preview.body.kind === "attachment" &&
+            relativePath &&
+            attachment ? (
             <AttachmentFilePreview
               key={`${environmentId}:${attachment.id}`}
               name={attachment.name}
@@ -1196,7 +1147,7 @@ export default function FilePreviewPanel({
               sizeBytes={attachment.sizeBytes}
               asset={{ environmentId, attachmentId: attachment.id }}
             />
-          ) : relativePath && isVideo && absolutePath ? (
+          ) : preview.body.kind === "video" && relativePath && absolutePath ? (
             <WorkspaceVideoPreview
               key={`${environmentId}:${threadRef.threadId}:${absolutePath}`}
               environmentId={environmentId}
@@ -1206,7 +1157,7 @@ export default function FilePreviewPanel({
               name={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
-          ) : relativePath && isAudio && absolutePath ? (
+          ) : preview.body.kind === "audio" && relativePath && absolutePath ? (
             <WorkspaceAudioPreview
               key={`${environmentId}:${threadRef.threadId}:${absolutePath}`}
               environmentId={environmentId}
@@ -1215,7 +1166,7 @@ export default function FilePreviewPanel({
               name={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
-          ) : relativePath && isImage && absolutePath ? (
+          ) : preview.body.kind === "image" && relativePath && absolutePath ? (
             <WorkspaceImagePreview
               key={absolutePath}
               environmentId={environmentId}
@@ -1225,7 +1176,7 @@ export default function FilePreviewPanel({
               alt={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
-          ) : relativePath && renderBrowserFile && absolutePath ? (
+          ) : preview.body.kind === "browser" && relativePath && absolutePath ? (
             <WorkspaceBrowserPreview
               key={absolutePath}
               environmentId={environmentId}
@@ -1235,16 +1186,16 @@ export default function FilePreviewPanel({
               title={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
-          ) : relativePath && file.error && file.data === null ? (
+          ) : preview.body.kind === "error" ? (
             <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center text-xs leading-relaxed text-destructive">
-              {file.error}
+              {preview.body.message}
             </div>
-          ) : relativePath && file.data === null ? (
+          ) : preview.body.kind === "loading" ? (
             <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
               <Spinner size="lg" />
             </div>
           ) : relativePath && file.data ? (
-            isMarkdown && renderMarkdown ? (
+            preview.body.kind === "markdown" ? (
               // Markdown reconciles in place across text updates, so a file
               // switch needs a new key or the previous file's disclosure and
               // wrap state carries into the next document.
@@ -1255,17 +1206,17 @@ export default function FilePreviewPanel({
                 relativePath={relativePath}
                 threadRef={threadRef}
                 contents={file.data.contents}
-                readOnly={isHostFile}
+                readOnly={preview.body.readOnly}
                 onPendingChange={onPendingChange}
               />
-            ) : tableDelimiter && renderTable ? (
+            ) : preview.body.kind === "table" ? (
               <DelimitedTablePreview
                 key={relativePath}
                 name={relativePath}
                 text={file.data.contents}
-                delimiter={tableDelimiter}
+                delimiter={preview.body.delimiter}
               />
-            ) : file.data.truncated || isHostFile ? (
+            ) : preview.body.kind === "source" ? (
               <SourceFilePreview
                 name={relativePath}
                 text={file.data.contents}
@@ -1309,7 +1260,7 @@ export default function FilePreviewPanel({
               selectedPathRevealId={revealRequestId}
               onOpenFile={onOpenFile}
               workspaceMutationId={workspaceMutationId}
-              {...(previewPath && !isMedia && !isPdf
+              {...(previewPath && !preview.isMedia && !preview.isPdf
                 ? { onRefreshSelectedFile: file.refresh }
                 : {})}
             />

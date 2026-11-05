@@ -1,6 +1,5 @@
 import { DesktopWslStateSchema, type DesktopWslState } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as DesktopLifecycle from "../../app/DesktopLifecycle.ts";
@@ -8,6 +7,7 @@ import * as DesktopAppSettings from "../../settings/DesktopAppSettings.ts";
 import * as DesktopWslBackend from "../../wsl/DesktopWslBackend.ts";
 import * as DesktopWslEnvironment from "../../wsl/DesktopWslEnvironment.ts";
 import * as IpcChannels from "../channels.ts";
+import { resolveDesktopWslState } from "../../wsl/DesktopWslState.ts";
 import { makeIpcMethod } from "../DesktopIpc.ts";
 
 const readWslState: Effect.Effect<
@@ -20,22 +20,11 @@ const readWslState: Effect.Effect<
   const appSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
   const wslBackend = yield* DesktopWslBackend.DesktopWslBackend;
-  const settings = yield* appSettings.get;
-  const available = settings.localEnvironmentEnabled && (yield* wslEnvironment.isAvailable);
-  // Only enumerate distros when WSL is actually available — listDistros on a
-  // non-WSL host would spawn wsl.exe and hit the timeout for nothing.
-  const distros = available ? yield* wslEnvironment.listDistros : [];
-  const preflightError = yield* wslBackend.lastPreflightError;
-  return {
-    enabled: settings.wslBackendEnabled,
-    distro: settings.wslDistro,
-    available,
-    wslOnly: settings.wslOnly,
-    distros,
-    // Only the dual-mode secondary records this; a wsl-only failure surfaces via
-    // a dialog + Windows fallback, so it stays null there.
-    preflightError: settings.wslOnly ? null : Option.getOrNull(preflightError),
-  };
+  return yield* resolveDesktopWslState({
+    settings: yield* appSettings.get,
+    wslEnvironment,
+    preflightError: wslBackend.lastPreflightError,
+  });
 });
 
 export const getWslState = makeIpcMethod({

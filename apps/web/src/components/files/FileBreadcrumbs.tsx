@@ -21,12 +21,8 @@ import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh
 import { cn } from "~/lib/utils";
 import { isAbsolutePath } from "~/terminal-links";
 
-import {
-  type FileBreadcrumb,
-  fileBreadcrumbChildren,
-  fileBreadcrumbParent,
-  fileBreadcrumbs,
-} from "./filePath";
+import { type FileBreadcrumb, fileBreadcrumbs } from "./filePath";
+import { buildBreadcrumbMenuModel } from "./FileBreadcrumbs.logic";
 import { useProjectEntriesQuery } from "./projectFilesQueryState";
 
 interface FileBreadcrumbsProps {
@@ -36,10 +32,6 @@ interface FileBreadcrumbsProps {
   readonly projectName: string;
   readonly relativePath: string;
   readonly workspaceMutationId: string | null;
-}
-
-function pathLabel(path: string, projectName: string): string {
-  return path.slice(path.lastIndexOf("/") + 1) || projectName;
 }
 
 function BreadcrumbLabel(props: {
@@ -85,60 +77,64 @@ function BreadcrumbMenuContent(props: {
     resourceKey: `files:${props.environmentId}:${props.cwd}`,
   });
   const { resolvedTheme } = useTheme();
-  const entries = entriesQuery.data?.entries ?? [];
-  const entriesTruncated = entriesQuery.data?.truncated ?? false;
-  const children = useMemo(
-    () => fileBreadcrumbChildren(entries, props.directoryPath),
-    [entries, props.directoryPath],
+  const menu = useMemo(
+    () =>
+      buildBreadcrumbMenuModel({
+        directoryPath: props.directoryPath,
+        rootPath: props.rootPath,
+        currentFilePath: props.currentFilePath,
+        projectName: props.projectName,
+        entries: {
+          data: entriesQuery.data,
+          isPending: entriesQuery.isPending,
+          error: entriesQuery.error,
+        },
+      }),
+    [
+      entriesQuery.data,
+      entriesQuery.error,
+      entriesQuery.isPending,
+      props.currentFilePath,
+      props.directoryPath,
+      props.projectName,
+      props.rootPath,
+    ],
   );
-  const directoryAvailable = entriesQuery.data !== null;
-  const parentPath = fileBreadcrumbParent(props.directoryPath);
-  const canGoBack =
-    props.directoryPath !== props.rootPath &&
-    parentPath !== null &&
-    (props.rootPath === "" ||
-      parentPath === props.rootPath ||
-      parentPath.startsWith(`${props.rootPath}/`));
+  const { back, content } = menu;
 
   return (
     <MenuPopup
       align="start"
       side="bottom"
       onKeyDown={(event) => {
-        if (event.key !== "ArrowLeft" || !canGoBack || parentPath === null) return;
+        if (event.key !== "ArrowLeft" || back === null) return;
         event.preventDefault();
         event.stopPropagation();
-        props.onDirectoryChange(parentPath);
+        props.onDirectoryChange(back.path);
       }}
     >
-      {canGoBack && parentPath !== null ? (
+      {back !== null ? (
         <>
-          <MenuItem closeOnClick={false} onClick={() => props.onDirectoryChange(parentPath)}>
+          <MenuItem closeOnClick={false} onClick={() => props.onDirectoryChange(back.path)}>
             <ArrowLeftIcon />
-            <span className="truncate">Back to {pathLabel(parentPath, props.projectName)}</span>
+            <span className="truncate">{back.label}</span>
           </MenuItem>
           <MenuSeparator />
         </>
       ) : null}
       <MenuGroup key={props.directoryPath}>
-        {entriesQuery.isPending && entriesQuery.data === null ? (
+        {content.kind === "loading" ? (
           <MenuItem disabled>
             <Spinner />
-            Loading folder…
+            {content.label}
           </MenuItem>
-        ) : entriesQuery.error && entriesQuery.data === null ? (
+        ) : content.kind === "retry" ? (
           <MenuItem closeOnClick={false} onClick={entriesQuery.refresh}>
-            <RefreshIcon refreshing={entriesQuery.isPending} />
-            <span className="min-w-0 flex-1 truncate">Retry loading folder</span>
+            <RefreshIcon refreshing={content.refreshing} />
+            <span className="min-w-0 flex-1 truncate">{content.label}</span>
           </MenuItem>
-        ) : !directoryAvailable && !entriesTruncated ? (
-          <MenuItem disabled>This folder is no longer available.</MenuItem>
-        ) : children.length === 0 ? (
-          <MenuItem disabled>
-            {entriesTruncated
-              ? "No entries from this folder are available in the partial workspace index."
-              : "This folder is empty."}
-          </MenuItem>
+        ) : content.kind === "notice" ? (
+          <MenuItem disabled>{content.label}</MenuItem>
         ) : (
           // Files form a radio group keyed by path so the open file is marked as checked;
           // directories only navigate the menu, so they stay plain items.
@@ -149,8 +145,7 @@ function BreadcrumbMenuContent(props: {
               props.onOpenFile(path);
             }}
           >
-            {children.map((entry) => {
-              const isCurrentFile = entry.kind === "file" && entry.path === props.currentFilePath;
+            {content.items.map((entry) => {
               const row = (
                 <>
                   <PierreEntryIcon pathValue={entry.path} kind={entry.kind} theme={resolvedTheme} />
@@ -185,7 +180,7 @@ function BreadcrumbMenuContent(props: {
                   key={entry.path}
                   value={entry.path}
                   closeOnClick
-                  aria-current={isCurrentFile ? "page" : undefined}
+                  aria-current={entry.current ? "page" : undefined}
                 >
                   <span className="flex min-w-0 items-center gap-2">{row}</span>
                 </MenuRadioItem>
@@ -194,19 +189,19 @@ function BreadcrumbMenuContent(props: {
           </MenuRadioGroup>
         )}
       </MenuGroup>
-      {entriesQuery.error && entriesQuery.data !== null ? (
+      {menu.refreshFailed !== null ? (
         <>
           <MenuSeparator />
           <MenuItem closeOnClick={false} onClick={entriesQuery.refresh}>
-            <RefreshIcon refreshing={entriesQuery.isPending} />
-            Refresh failed — retry
+            <RefreshIcon refreshing={menu.refreshFailed.refreshing} />
+            {menu.refreshFailed.label}
           </MenuItem>
         </>
       ) : null}
-      {entriesTruncated ? (
+      {menu.truncatedNotice !== null ? (
         <>
           <MenuSeparator />
-          <MenuItem disabled>Some workspace entries are not shown.</MenuItem>
+          <MenuItem disabled>{menu.truncatedNotice}</MenuItem>
         </>
       ) : null}
     </MenuPopup>

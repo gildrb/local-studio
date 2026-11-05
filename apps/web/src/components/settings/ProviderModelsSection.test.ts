@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { ServerProviderModel } from "@t3tools/contracts";
 
-import { groupModelsForDisplay, nextHiddenModelsForBulkToggle } from "./ProviderModelsSection";
+import {
+  groupModelsForDisplay,
+  nextHiddenModelsForBulkToggle,
+} from "./ProviderModelsSection.logic";
 
 function model(slug: string, isCustom = false): ServerProviderModel {
   return { slug, name: slug, isCustom, capabilities: null };

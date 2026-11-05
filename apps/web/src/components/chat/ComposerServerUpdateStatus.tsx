@@ -3,7 +3,7 @@ import type { ServerUpdateState } from "@t3tools/client-runtime/state/server";
 import { CircleAlertIcon, DownloadIcon } from "lucide-react";
 import { useId, useState } from "react";
 
-import { serverUpdateStageLabel } from "../ServerUpdateAction";
+import { serverUpdateStageLabel } from "../ServerUpdateAction.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ComposerBanner } from "./ComposerBanner";
 

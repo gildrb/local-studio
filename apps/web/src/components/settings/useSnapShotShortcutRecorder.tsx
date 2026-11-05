@@ -1,34 +1,14 @@
-import {
-  isModifierPairShortcut,
-  type SnapShotModifier,
-  type SnapShotShortcut,
-} from "@t3tools/contracts";
-import { parseKeybindingShortcut } from "@t3tools/shared/keybindings";
+import type { SnapShotShortcut } from "@t3tools/contracts";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { getDesktopSnapShotBridge } from "../../lib/desktopSnapShot";
-import {
-  formatSnapShotShortcutLabel,
-  parseDesktopSnapShotShortcut,
-} from "../../lib/snapShotShortcut";
 import { SnapShotShortcutKeys } from "../desktop/SnapShotShortcutKeys";
 import { Button } from "../ui/button";
-import { keybindingFromKeyboardEvent } from "./KeybindingsSettings.logic";
 import { createRecordingRequestTracker } from "./SnapShotSettings.logic";
-
-const MODIFIER_FROM_KEY: Readonly<Record<string, SnapShotModifier>> = {
-  Shift: "shift",
-  Meta: "meta",
-  OS: "meta",
-  Control: "control",
-  Alt: "alt",
-  AltGraph: "alt",
-};
-const MODIFIER_CODES: Readonly<Record<SnapShotModifier, readonly [string, string]>> = {
-  shift: ["ShiftLeft", "ShiftRight"],
-  meta: ["MetaLeft", "MetaRight"],
-  control: ["ControlLeft", "ControlRight"],
-  alt: ["AltLeft", "AltRight"],
-};
+import {
+  buildSnapShotShortcutRecorderModel,
+  resolveSnapShotShortcutKeyDown,
+  snapShotShortcutRecordingErrorMessage,
+} from "./useSnapShotShortcutRecorder.logic";
 
 /** The same recorder for inline changes and config-backed setup, without saving either. */
 export function useSnapShotShortcutRecorder({
@@ -49,10 +29,17 @@ export function useSnapShotShortcutRecorder({
   onError: (message: string) => void;
 }) {
   const bridge = getDesktopSnapShotBridge();
-  const displayShortcut = shortcutLabel ? parseDesktopSnapShotShortcut(shortcutLabel) : shortcut;
   const [recording, setRecording] = useState(false);
   const [requests] = useState(createRecordingRequestTracker);
   const heldModifierCodes = useRef(new Set<string>());
+  const model = buildSnapShotShortcutRecorderModel({
+    shortcut,
+    shortcutLabel: shortcutLabel ?? null,
+    recording,
+    disabled,
+    allowModifierPairs,
+    platform: navigator.platform,
+  });
   const stopRecording = useCallback(() => {
     requests.clear();
     heldModifierCodes.current.clear();
@@ -71,7 +58,7 @@ export function useSnapShotShortcutRecorder({
     } catch (error) {
       if (!requests.owns(request)) return;
       requests.clear();
-      onError(error instanceof Error ? error.message : "Could not start shortcut recording.");
+      onError(snapShotShortcutRecordingErrorMessage(error));
     }
   };
   useEffect(
@@ -82,38 +69,33 @@ export function useSnapShotShortcutRecorder({
     [bridge, requests],
   );
   const recordShortcut = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (!recording || event.key === "Tab" || event.repeat) return;
+    const decision = resolveSnapShotShortcutKeyDown({
+      key: event.key,
+      code: event.code,
+      repeat: event.repeat,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      altKey: event.altKey,
+      shiftKey: event.shiftKey,
+      recording,
+      heldModifierCodes: [...heldModifierCodes.current],
+      allowModifierPairs,
+      platform: navigator.platform,
+    });
+    if (!decision.handled) return;
     event.preventDefault();
     event.stopPropagation();
-    if (event.key === "Escape") {
+    if (decision.holdModifierCode !== null)
+      heldModifierCodes.current.add(decision.holdModifierCode);
+    const outcome = decision.outcome;
+    if (outcome.kind === "cancel") {
       stopRecording();
-      return;
+    } else if (outcome.kind === "error") {
+      onError(outcome.message);
+    } else if (outcome.kind === "record") {
+      stopRecording();
+      onRecord(outcome.shortcut);
     }
-    const modifier = MODIFIER_FROM_KEY[event.key];
-    if (modifier) {
-      const held = heldModifierCodes.current;
-      held.add(event.code);
-      const [left, right] = MODIFIER_CODES[modifier];
-      if (held.has(left) && held.has(right)) {
-        if (!allowModifierPairs) {
-          onError("Add a letter, number, or function key to your shortcut.");
-          return;
-        }
-        stopRecording();
-        onRecord(
-          modifier === "shift" ? { kind: "both-shift-keys" } : { kind: "modifier-pair", modifier },
-        );
-      }
-      return;
-    }
-    // A global shortcut without a modifier would take that key from every app.
-    if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) return;
-    const input = keybindingFromKeyboardEvent(event, navigator.platform);
-    if (!input) return;
-    const next = parseKeybindingShortcut(input);
-    if (!next) return;
-    stopRecording();
-    onRecord(next);
   };
 
   return {
@@ -124,27 +106,19 @@ export function useSnapShotShortcutRecorder({
         type="button"
         size="xs"
         variant={recording ? "secondary" : "outline"}
-        disabled={disabled}
-        aria-label={
-          displayShortcut
-            ? `Record snapshot shortcut, currently ${formatSnapShotShortcutLabel(displayShortcut)}`
-            : "Change snapshot shortcut"
-        }
-        aria-pressed={recording}
+        disabled={model.disabled}
+        aria-label={model.ariaLabel}
+        aria-pressed={model.pressed}
         data-keybinding-capture=""
         onClick={() => void startRecording()}
         onKeyDown={recordShortcut}
         onKeyUp={(event) => heldModifierCodes.current.delete(event.code)}
         onBlur={stopRecording}
       >
-        {recording ? (
-          "Press shortcut…"
-        ) : !displayShortcut ? (
-          "Change shortcut"
-        ) : !allowModifierPairs && isModifierPairShortcut(displayShortcut) ? (
-          "Choose shortcut"
+        {model.content.kind === "text" ? (
+          model.content.text
         ) : (
-          <SnapShotShortcutKeys shortcut={displayShortcut} />
+          <SnapShotShortcutKeys shortcut={model.content.shortcut} />
         )}
       </Button>
     ),

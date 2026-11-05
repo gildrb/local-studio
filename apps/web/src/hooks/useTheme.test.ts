@@ -41,8 +41,8 @@ describe("theme failure handling", () => {
       }),
     });
 
-    const { readThemePreference, ThemeStorageError, writeThemePreference } =
-      await import("./useTheme");
+    const { readThemePreference, writeThemePreference } = await import("./useTheme");
+    const { ThemeStorageError } = await import("../themePreferenceStorage.logic");
 
     try {
       readThemePreference();

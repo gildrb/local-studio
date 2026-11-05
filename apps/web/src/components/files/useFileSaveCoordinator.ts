@@ -4,10 +4,8 @@ import { createRef, useEffect, useMemo } from "react";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
 
-import { FileSaveCoordinator } from "./fileSaveCoordinator";
+import { FILE_SAVE_DEBOUNCE_MS, FileSaveCoordinator } from "./fileSaveCoordinator";
 import { confirmProjectFileQueryData } from "./projectFilesQueryState";
-
-const FILE_SAVE_DEBOUNCE_MS = 500;
 
 interface FileSaveOptions {
   environmentId: EnvironmentId;

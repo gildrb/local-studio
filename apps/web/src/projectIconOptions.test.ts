@@ -1,3 +1,4 @@
+import { iconNames } from "lucide-react/dynamic";
 import { describe, expect, it } from "vite-plus/test";
 import {
   filterProjectIconNames,
@@ -7,8 +8,8 @@ import {
 
 describe("projectIconOptions", () => {
   it("searches across the full Lucide set", () => {
-    expect(filterProjectIconNames("alarm clock")).toContain("alarm-clock");
-    expect(filterProjectIconNames("alarm  \tclock")).toContain("alarm-clock");
+    expect(filterProjectIconNames("alarm clock", iconNames)).toContain("alarm-clock");
+    expect(filterProjectIconNames("alarm  \tclock", iconNames)).toContain("alarm-clock");
   });
 
   it("extracts one complete emoji grapheme", () => {

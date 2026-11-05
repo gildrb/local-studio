@@ -17,6 +17,10 @@ import {
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
+import {
+  resolveTerminalSurfaceClose,
+  resolveTerminalSurfaceSplit,
+} from "./components/ThreadTerminalDrawer.logic";
 import { resolveStorage } from "./lib/storage";
 
 const RIGHT_PANEL_KINDS = [
@@ -638,11 +642,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               const { splitDirection: _splitDirection, ...baseSurface } = surface;
               return {
                 ...baseSurface,
-                terminalIds: surface.terminalIds.includes(terminalId)
-                  ? surface.terminalIds
-                  : [...surface.terminalIds, terminalId],
-                activeTerminalId: terminalId,
-                ...(direction === "vertical" ? { splitDirection: "vertical" as const } : {}),
+                ...resolveTerminalSurfaceSplit(surface, terminalId, direction),
               };
             }),
           })),
@@ -668,8 +668,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               (entry) => entry.id === surfaceId && entry.kind === "terminal",
             );
             if (!surface || surface.kind !== "terminal") return current;
-            const terminalIds = surface.terminalIds.filter((id) => id !== terminalId);
-            if (terminalIds.length === 0) {
+            const resolution = resolveTerminalSurfaceClose(surface, terminalId);
+            if (resolution.kind === "close-surface") {
               const index = current.surfaces.findIndex((entry) => entry.id === surfaceId);
               const surfaces = current.surfaces.filter((entry) => entry.id !== surfaceId);
               const fallback = surfaces[Math.min(index, surfaces.length - 1)] ?? null;
@@ -689,11 +689,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
                 entry.id === surfaceId && entry.kind === "terminal"
                   ? {
                       ...entry,
-                      terminalIds,
-                      activeTerminalId:
-                        entry.activeTerminalId === terminalId
-                          ? (terminalIds.at(-1) ?? terminalIds[0]!)
-                          : entry.activeTerminalId,
+                      terminalIds: resolution.terminalIds,
+                      activeTerminalId: resolution.activeTerminalId,
                     }
                   : entry,
               ),

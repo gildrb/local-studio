@@ -6,6 +6,10 @@ import { Menu, MenuTrigger, MenuPopup, MenuGroup, MenuGroupLabel, MenuItem } fro
 import { PullRequestStackLayers } from "./PullRequestStackLayers";
 import { PullRequestStackHeader } from "./PullRequestStackHeader";
 import { PullRequestGlyph } from "./pullRequestIcons";
+import {
+  buildPullRequestStackBodyModel,
+  buildPullRequestStackPopoverModel,
+} from "./PullRequestStackMenu.logic";
 
 /** Mounted only while the menu is open, so list rows do not each fetch a stack. */
 function StackBody({
@@ -20,26 +24,27 @@ function StackBody({
   stackNumber: number;
 }) {
   const query = usePullRequestStack(environmentId, reference);
-  if (query.data !== null) {
+  const body = buildPullRequestStackBodyModel({
+    stackNumber,
+    stack: query.data,
+    isPending: query.isPending,
+    error: query.error,
+  });
+  if (query.data !== null && body.kind === "stack") {
     return (
       <>
-        <PullRequestStackHeader
-          number={query.data.number}
-          notice={query.notice}
-          stale={!!query.error}
-        />
-        {query.error ? <MenuItem onClick={query.refresh}>Retry stack refresh</MenuItem> : null}
+        <PullRequestStackHeader number={body.number} notice={query.notice} stale={!!query.error} />
+        {body.retryLabel !== null ? (
+          <MenuItem onClick={query.refresh}>{body.retryLabel}</MenuItem>
+        ) : null}
         <PullRequestStackLayers stack={query.data} reference={reference} onSelect={onSelect} />
       </>
     );
   }
   return (
     <>
-      <PullRequestStackHeader number={stackNumber} />
-      <MenuGroupLabel>
-        {query.error ??
-          (query.isPending ? "Loading stack…" : "This pull request is no longer in a stack.")}
-      </MenuGroupLabel>
+      <PullRequestStackHeader number={body.number} />
+      {body.kind === "message" ? <MenuGroupLabel>{body.message}</MenuGroupLabel> : null}
     </>
   );
 }
@@ -56,6 +61,7 @@ export function PullRequestStackPopover({
   onSelect: (reference: PullRequestRef) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const model = buildPullRequestStackPopoverModel(membership);
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <Tooltip>
@@ -70,18 +76,16 @@ export function PullRequestStackPopover({
                   className="inline-flex shrink-0 cursor-pointer items-center gap-1 text-xs font-normal text-muted-foreground"
                 />
               }
-              aria-label={`Stack ${membership.number}, layer ${membership.position} of ${membership.size}`}
+              aria-label={model.ariaLabel}
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
             >
               <PullRequestGlyph.stack aria-hidden className="size-3" />
-              {membership.position}/{membership.size}
+              {model.positionLabel}
             </MenuTrigger>
           }
         />
-        <TooltipPopup>
-          View stack #{membership.number}, layer {membership.position} of {membership.size}
-        </TooltipPopup>
+        <TooltipPopup>{model.tooltip}</TooltipPopup>
       </Tooltip>
       <MenuPopup
         align="start"

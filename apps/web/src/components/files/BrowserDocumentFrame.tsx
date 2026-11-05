@@ -6,9 +6,6 @@
  */
 const PDF_VIEWER_FRAGMENT = "#toolbar=0&view=FitH";
 
-export const isPdfPreviewFile = (path: string): boolean =>
-  /\.pdf$/i.test(path.split(/[?#]/, 1)[0] ?? "");
-
 /**
  * Renders an HTML or PDF document from its URL. HTML runs in a sandboxed frame
  * with an opaque origin, so a page cannot reach the app's session or storage.

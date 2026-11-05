@@ -28,45 +28,39 @@ import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
+import {
+  buildThemeSearchModel,
+  resolveThemeInstallStart,
+  resolveThemeSearchSort,
+  resolveThemeSearchSuggestion,
+  themeSearchErrorMessage,
+  themeSearchKey,
+  THEME_SEARCH_DEBOUNCE_MS,
+  THEME_SEARCH_DEFAULT_SORT,
+  THEME_SEARCH_FAILURE_FALLBACK,
+  THEME_SEARCH_INSTALL_FAILURE_FALLBACK,
+  THEME_SEARCH_READ_INSTALLED_FALLBACK,
+  type ThemeSourceLinkIcon,
+} from "./ThemeSearchSection.logic";
 
-const DOWNLOAD_FORMAT = new Intl.NumberFormat(undefined, {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-const SUGGESTED_SEARCHES = ["Dracula", "Catppuccin", "Nord", "Tokyo Night"];
-const SORT_OPTIONS: ReadonlyArray<{ value: OpenVsxThemeSort; label: string }> = [
-  { value: "downloadCount", label: "Most downloaded" },
-  { value: "rating", label: "Best rated" },
-  { value: "timestamp", label: "Newest" },
-  { value: "relevance", label: "Most relevant" },
-];
-const SEARCH_DEBOUNCE_MS = 350;
-
-function SourceLinkIcon({ url }: { url: string }) {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    if (host === "github.com" || host.endsWith(".github.com"))
-      return <GitHubIcon className="size-3.5" />;
-    if (host === "gitlab.com" || host.endsWith(".gitlab.com"))
-      return <GitLabIcon className="size-3.5" monochrome />;
-  } catch {
-    // Fall through to the generic external-link icon.
-  }
+function SourceLinkIcon({ icon }: { icon: ThemeSourceLinkIcon }) {
+  if (icon === "github") return <GitHubIcon className="size-3.5" />;
+  if (icon === "gitlab") return <GitLabIcon className="size-3.5" monochrome />;
   return <ExternalLinkIcon className="size-3.5" />;
 }
 
-function ThemeExtensionIcon({ extension }: { extension: OpenVsxThemeExtension }) {
+function ThemeExtensionIcon({ iconUrl }: { iconUrl: string | null }) {
   const [failed, setFailed] = useState(false);
 
   return (
     <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground">
-      {extension.iconUrl && !failed ? (
+      {iconUrl && !failed ? (
         <img
           alt=""
           className="size-full object-cover"
           loading="lazy"
           referrerPolicy="no-referrer"
-          src={extension.iconUrl}
+          src={iconUrl}
           onError={() => setFailed(true)}
         />
       ) : (
@@ -84,7 +78,7 @@ export function ThemeSearchSection({
   onInstalled: (themes: ReadonlyArray<ThemeDefinition>, context: { updated: boolean }) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [sortBy, setSortBy] = useState<OpenVsxThemeSort>("downloadCount");
+  const [sortBy, setSortBy] = useState<OpenVsxThemeSort>(THEME_SEARCH_DEFAULT_SORT);
   const [results, setResults] = useState<ReadonlyArray<OpenVsxThemeExtension> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -107,7 +101,7 @@ export function ThemeSearchSection({
       lastSearchKeyRef.current = null;
       prevSearchKeyRef.current = null;
       setQuery("");
-      setSortBy("downloadCount");
+      setSortBy(THEME_SEARCH_DEFAULT_SORT);
       setResults(null);
       setError(null);
       setIsSearching(false);
@@ -136,13 +130,13 @@ export function ThemeSearchSection({
         });
         if (!controller.signal.aborted) {
           setResults(nextResults);
-          lastSearchKeyRef.current = `${trimmed}\u0000${nextSort}`;
+          lastSearchKeyRef.current = themeSearchKey(trimmed, nextSort);
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
           setResults(null);
           lastSearchKeyRef.current = null;
-          setError(cause instanceof Error ? cause.message : "Open VSX search failed.");
+          setError(themeSearchErrorMessage(cause, THEME_SEARCH_FAILURE_FALLBACK));
         }
       }
       if (requestRef.current === controller) {
@@ -153,7 +147,7 @@ export function ThemeSearchSection({
     [sortBy],
   );
 
-  const debouncedQuery = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
+  const debouncedQuery = useDebouncedValue(query.trim(), THEME_SEARCH_DEBOUNCE_MS);
 
   useEffect(() => {
     if (query.trim() || installingId !== null) return;
@@ -167,7 +161,7 @@ export function ThemeSearchSection({
 
   useEffect(() => {
     if (!open) return;
-    const searchKey = `${debouncedQuery}\u0000${sortBy}`;
+    const searchKey = themeSearchKey(debouncedQuery, sortBy);
     const keyChanged = prevSearchKeyRef.current !== searchKey;
     prevSearchKeyRef.current = searchKey;
     if (installingId !== null) return;
@@ -208,7 +202,7 @@ export function ThemeSearchSection({
   }, [open, query, debouncedQuery, installingId, runSearch]);
 
   const handleSortChange = useCallback((value: OpenVsxThemeSort | null) => {
-    const nextSort = SORT_OPTIONS.find((option) => option.value === value)?.value;
+    const nextSort = resolveThemeSearchSort(value);
     if (!nextSort) return;
     setSortBy(nextSort);
   }, []);
@@ -220,14 +214,15 @@ export function ThemeSearchSection({
       try {
         installedCollection = getStoredCustomThemeCollection(extension.collectionId);
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Installed themes could not be read.");
+        setError(themeSearchErrorMessage(cause, THEME_SEARCH_READ_INSTALLED_FALLBACK));
         return;
       }
-      const updated = installedCollection.length > 0;
-      if (updated && !allowUpdate) {
+      const decision = resolveThemeInstallStart({ installedCollection, allowUpdate });
+      if (decision.kind === "confirm-update") {
         setPendingUpdate(extension);
         return;
       }
+      const updated = decision.updated;
 
       requestRef.current?.abort();
       const controller = new AbortController();
@@ -244,7 +239,7 @@ export function ThemeSearchSection({
         }
       } catch (cause) {
         if (!controller.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : "That theme could not be added.");
+          setError(themeSearchErrorMessage(cause, THEME_SEARCH_INSTALL_FAILURE_FALLBACK));
         }
       }
       if (requestRef.current === controller) {
@@ -255,22 +250,31 @@ export function ThemeSearchSection({
     [onInstalled],
   );
 
+  const model = buildThemeSearchModel({
+    query,
+    sortBy,
+    results,
+    error,
+    isSearching,
+    installingId,
+    pendingUpdate,
+    customThemes: getCustomThemes(),
+  });
+
   return (
-    <section className="space-y-3" aria-labelledby="theme-search-heading">
+    <section className="space-y-3" aria-labelledby={model.headingId}>
       <div>
-        <h3 className="text-sm font-medium" id="theme-search-heading">
-          Search community themes
+        <h3 className="text-sm font-medium" id={model.headingId}>
+          {model.title}
         </h3>
-        <p className="mt-0.5 text-muted-foreground text-xs">
-          Find open-source themes from Open VSX.
-        </p>
+        <p className="mt-0.5 text-muted-foreground text-xs">{model.description}</p>
       </div>
       <InputGroup>
         <InputGroupAddon>
-          {isSearching ? <Spinner aria-hidden /> : <SearchIcon aria-hidden />}
+          {model.input.icon === "spinner" ? <Spinner aria-hidden /> : <SearchIcon aria-hidden />}
         </InputGroupAddon>
         <InputGroupInput
-          aria-label="Search Open VSX themes"
+          aria-label={model.input.ariaLabel}
           autoFocus
           onChange={(event) => setQuery(event.currentTarget.value)}
           onKeyDown={(event) => {
@@ -278,50 +282,49 @@ export function ThemeSearchSection({
             if (event.key === "Enter" && !isSearching && installingId === null)
               void runSearch(query.trim());
           }}
-          placeholder="Search themes..."
+          placeholder={model.input.placeholder}
           size="lg"
           type="search"
-          value={query}
+          value={model.input.value}
         />
       </InputGroup>
 
-      {!isSearching || results !== null ? (
+      {model.toolbar ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-            <p className="text-muted-foreground text-xs">Popular</p>
-            {SUGGESTED_SEARCHES.map((suggestion) => (
+            <p className="text-muted-foreground text-xs">{model.toolbar.suggestionsLabel}</p>
+            {model.toolbar.suggestions.map((suggestion) => (
               <Button
-                key={suggestion}
-                disabled={installingId !== null}
+                key={suggestion.label}
+                disabled={suggestion.disabled}
                 size="xs"
                 variant="ghost"
                 onClick={() => {
-                  if (query.trim() === suggestion) {
-                    void runSearch(suggestion);
+                  const intent = resolveThemeSearchSuggestion(query, suggestion.label);
+                  if (intent.kind === "search") {
+                    void runSearch(intent.query);
                   } else {
-                    setQuery(suggestion);
+                    setQuery(intent.query);
                   }
                 }}
               >
-                {suggestion}
+                {suggestion.label}
               </Button>
             ))}
           </div>
-          {results && results.length > 0 ? (
+          {model.toolbar.sort ? (
             <div className="flex shrink-0 items-center justify-end gap-2">
-              <p className="text-muted-foreground text-xs">Sort</p>
+              <p className="text-muted-foreground text-xs">{model.toolbar.sort.label}</p>
               <Select
-                disabled={installingId !== null}
-                value={sortBy}
+                disabled={model.toolbar.sort.disabled}
+                value={model.toolbar.sort.value}
                 onValueChange={handleSortChange}
               >
-                <SelectTrigger size="sm" className="w-40" aria-label="Sort themes">
-                  <SelectValue>
-                    {SORT_OPTIONS.find((option) => option.value === sortBy)?.label}
-                  </SelectValue>
+                <SelectTrigger size="sm" className="w-40" aria-label={model.toolbar.sort.ariaLabel}>
+                  <SelectValue>{model.toolbar.sort.valueLabel}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {SORT_OPTIONS.map((option) => (
+                  {model.toolbar.sort.options.map((option) => (
                     <SelectItem key={option.value} hideIndicator value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -334,114 +337,101 @@ export function ThemeSearchSection({
       ) : null}
 
       <div className="sr-only" role="status">
-        {isSearching
-          ? "Searching themes..."
-          : results
-            ? `${results.length} supported ${results.length === 1 ? "theme" : "themes"} found.`
-            : ""}
+        {model.statusText}
       </div>
 
-      {error ? (
+      {model.error ? (
         <div
           aria-live="polite"
           className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-destructive text-sm"
         >
-          {error}
+          {model.error}
         </div>
       ) : null}
 
-      {isSearching && results === null ? (
+      {model.loadingText === null ? null : (
         <div className="flex min-h-20 items-center justify-center gap-2 text-muted-foreground text-sm">
-          <Spinner /> Searching themes...
+          <Spinner /> {model.loadingText}
+        </div>
+      )}
+
+      {model.empty ? (
+        <div className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
+          <p className="text-sm font-medium">{model.empty.title}</p>
+          <p className="mt-1 text-muted-foreground text-xs">{model.empty.description}</p>
         </div>
       ) : null}
 
-      {results ? (
-        results.length === 0 ? (
-          <div className="flex min-h-40 flex-col items-center justify-center rounded-2xl border border-dashed text-center">
-            <p className="text-sm font-medium">No supported open-source themes found</p>
-            <p className="mt-1 text-muted-foreground text-xs">Try a broader search.</p>
-          </div>
-        ) : (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {results.map((extension) => {
-              const isInstalling = installingId === extension.id;
-              const isInstalled = getCustomThemes().some(
-                (theme) => theme.collection?.id === extension.collectionId,
-              );
-              const action = isInstalled ? "Update" : "Install";
-              const progressAction = isInstalled ? "Updating" : "Installing";
-              return (
-                <article
-                  className="group flex min-w-0 flex-col gap-3 rounded-xl border border-border/70 bg-card/60 p-3 transition-colors hover:bg-accent/20"
-                  key={extension.id}
-                >
-                  <div className="flex min-w-0 gap-3">
-                    <ThemeExtensionIcon key={extension.iconUrl} extension={extension} />
-                    <div className="min-w-0 flex-1">
-                      <h4 className="truncate text-sm font-medium">{extension.name}</h4>
-                      <p className="truncate text-muted-foreground text-xs">
-                        {extension.publisher} · {DOWNLOAD_FORMAT.format(extension.downloadCount)}{" "}
-                        downloads
-                      </p>
-                    </div>
-                  </div>
-                  <p className="line-clamp-2 min-h-8 text-muted-foreground text-xs leading-4">
-                    {extension.description || "A community color theme for your editor."}
-                  </p>
-                  <div className="mt-auto flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      {extension.sourceUrl ? (
-                        <Button
-                          aria-label={`View source for ${extension.name}`}
-                          render={<a href={extension.sourceUrl} rel="noreferrer" target="_blank" />}
-                          size="icon-micro"
-                          variant="ghost-muted"
-                        >
-                          <SourceLinkIcon url={extension.sourceUrl} />
-                        </Button>
-                      ) : null}
-                    </div>
+      {model.results ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {model.results.map((result) => (
+            <article
+              className="group flex min-w-0 flex-col gap-3 rounded-xl border border-border/70 bg-card/60 p-3 transition-colors hover:bg-accent/20"
+              key={result.id}
+            >
+              <div className="flex min-w-0 gap-3">
+                <ThemeExtensionIcon key={result.iconUrl} iconUrl={result.iconUrl} />
+                <div className="min-w-0 flex-1">
+                  <h4 className="truncate text-sm font-medium">{result.name}</h4>
+                  <p className="truncate text-muted-foreground text-xs">{result.meta}</p>
+                </div>
+              </div>
+              <p className="line-clamp-2 min-h-8 text-muted-foreground text-xs leading-4">
+                {result.description}
+              </p>
+              <div className="mt-auto flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  {result.sourceUrl && result.sourceIcon ? (
                     <Button
-                      aria-label={`${isInstalling ? progressAction : action} ${extension.name}`}
-                      disabled={installingId !== null}
-                      size="xs"
-                      variant="outline"
-                      onClick={() => void handleInstall(extension, false)}
+                      aria-label={result.sourceAriaLabel}
+                      render={<a href={result.sourceUrl} rel="noreferrer" target="_blank" />}
+                      size="icon-micro"
+                      variant="ghost-muted"
                     >
-                      {isInstalling ? (
-                        <Spinner />
-                      ) : isInstalled ? (
-                        <RefreshIcon />
-                      ) : (
-                        <PackagePlusIcon />
-                      )}
-                      {isInstalling ? `${progressAction}...` : action}
+                      <SourceLinkIcon icon={result.sourceIcon} />
                     </Button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        )
+                  ) : null}
+                </div>
+                <Button
+                  aria-label={result.actionAriaLabel}
+                  disabled={result.actionDisabled}
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    const extension = results?.find((candidate) => candidate.id === result.id);
+                    if (extension) void handleInstall(extension, false);
+                  }}
+                >
+                  {result.actionIcon === "spinner" ? (
+                    <Spinner />
+                  ) : result.actionIcon === "refresh" ? (
+                    <RefreshIcon />
+                  ) : (
+                    <PackagePlusIcon />
+                  )}
+                  {result.actionLabel}
+                </Button>
+              </div>
+            </article>
+          ))}
+        </div>
       ) : null}
 
       <AlertDialog
-        open={pendingUpdate !== null}
+        open={model.updateDialog.open}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setPendingUpdate(null);
         }}
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Update “{pendingUpdate?.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This replaces its installed variants, including any local edits. Variants no longer in
-              the extension will be removed.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{model.updateDialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>{model.updateDialog.description}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              {model.updateDialog.cancelLabel}
+            </AlertDialogClose>
             <Button
               onClick={() => {
                 const extension = pendingUpdate;
@@ -449,7 +439,7 @@ export function ThemeSearchSection({
                 if (extension) void handleInstall(extension, true);
               }}
             >
-              Update theme
+              {model.updateDialog.confirmLabel}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

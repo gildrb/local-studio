@@ -1227,95 +1227,102 @@ export const layerTest = (stub: DesktopWslEnvironmentTestStub = {}) => {
   );
 };
 
+export const makeForPlatform = Effect.fnUntraced(function* (platform: NodeJS.Platform) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const windir = process.env.WINDIR ?? "C:\\Windows";
+
+  const provideSpawner = <A, E>(
+    effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner>,
+  ): Effect.Effect<A, E> =>
+    effect.pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+
+  // Probe wsl.exe once at layer init and cache the result, exposing
+  // `isAvailable` as a resolved value rather than a re-running effect.
+  // WSL availability is effectively static for the process lifetime — the
+  // Windows feature isn't added/removed mid-session, and backend mode
+  // changes already require an app restart — so the cached boolean stays
+  // accurate. Crucially this keeps `isAvailable` synchronously resolvable:
+  // it's read inside the sync IPC handler getLocalEnvironmentBootstraps
+  // (via the primary instance's lazy label -> resolvePrimaryLabel ->
+  // describePrimary). The underlying probe does a filesystem `exists`
+  // check, so leaving it as a live effect would make Effect.runSync throw
+  // there and break the renderer's synchronous bootstrap path.
+  const wslAvailable = yield* makeIsAvailable(platform, windir).pipe(
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    Effect.provideService(Path.Path, path),
+    Effect.withSpan("desktop.wsl.isAvailable"),
+  );
+  const isAvailable = Effect.succeed(wslAvailable);
+
+  const windowsToWslPath = (distro: string | null, windowsPath: string) =>
+    provideSpawner(windowsToWslPathImpl(distro, windowsPath)).pipe(
+      Effect.withSpan("desktop.wsl.windowsToWslPath"),
+    );
+
+  // Cache user-home results per distro key — folder picker can be opened
+  // many times in a session and the value is stable for the life of the
+  // distro. Negative results aren't cached so a transient wsl.exe failure
+  // doesn't permanently disable tilde expansion.
+  const userHomeCache = new Map<string, string>();
+  const getUserHome = Effect.fn("desktop.wsl.getUserHome")(function* (distro: string | null) {
+    const key = distro ?? "__default__";
+    const cached = userHomeCache.get(key);
+    if (cached !== undefined) return Option.some(cached);
+    const resolved = yield* provideSpawner(getUserHomeImpl(distro));
+    if (Option.isSome(resolved)) userHomeCache.set(key, resolved.value);
+    return resolved;
+  });
+
+  const getDistroIp = (distro: string | null) =>
+    provideSpawner(getDistroIpImpl(distro)).pipe(Effect.withSpan("desktop.wsl.getDistroIp"));
+
+  const probeDistros = provideSpawner(probeWslDistros).pipe(
+    Effect.withSpan("desktop.wsl.probeDistros"),
+  );
+
+  return DesktopWslEnvironment.of({
+    isAvailable,
+    listDistros: probeDistros.pipe(
+      Effect.orElseSucceed(() => []),
+      Effect.withSpan("desktop.wsl.listDistros"),
+    ),
+    probeDistros,
+    preWarm: (distro) =>
+      provideSpawner(preWarmImpl(distro)).pipe(Effect.withSpan("desktop.wsl.preWarm")),
+    windowsToWslPath,
+    getUserHome,
+    getDistroIp,
+    prepareRuntime: (distro, archive) =>
+      provideSpawner(prepareWslRuntimeImpl(distro, archive, windowsToWslPath)).pipe(
+        Effect.withSpan("desktop.wsl.prepareRuntime"),
+      ),
+    pruneRuntimes: (distro, runtimeId) =>
+      provideSpawner(pruneWslRuntimesImpl(distro, runtimeId)).pipe(
+        Effect.withSpan("desktop.wsl.pruneRuntimes"),
+      ),
+    invalidateRuntime: (distro, runtimeId) =>
+      provideSpawner(invalidateWslRuntimeImpl(distro, runtimeId)).pipe(
+        Effect.withSpan("desktop.wsl.invalidateRuntime"),
+      ),
+    probeRuntime: (distro, linuxAppRoot) =>
+      provideSpawner(probeWslRuntimeImpl(distro, linuxAppRoot)).pipe(
+        Effect.withSpan("desktop.wsl.probeRuntime"),
+      ),
+    ensureNodePty: (distro, linuxAppRoot, options) =>
+      provideSpawner(ensureNodePtyImpl(distro, linuxAppRoot, options)).pipe(
+        Effect.withSpan("desktop.wsl.ensureNodePty"),
+      ),
+  });
+});
+
 export const layer = Layer.effect(
   DesktopWslEnvironment,
   Effect.gen(function* () {
     const environment = yield* DesktopEnvironment.DesktopEnvironment;
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const fileSystem = yield* FileSystem.FileSystem;
-    const windir = process.env.WINDIR ?? "C:\\Windows";
-
-    const provideSpawner = <A, E>(
-      effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner>,
-    ): Effect.Effect<A, E> =>
-      effect.pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
-
-    // Probe wsl.exe once at layer init and cache the result, exposing
-    // `isAvailable` as a resolved value rather than a re-running effect.
-    // WSL availability is effectively static for the process lifetime — the
-    // Windows feature isn't added/removed mid-session, and backend mode
-    // changes already require an app restart — so the cached boolean stays
-    // accurate. Crucially this keeps `isAvailable` synchronously resolvable:
-    // it's read inside the sync IPC handler getLocalEnvironmentBootstraps
-    // (via the primary instance's lazy label -> resolvePrimaryLabel ->
-    // describePrimary). The underlying probe does a filesystem `exists`
-    // check, so leaving it as a live effect would make Effect.runSync throw
-    // there and break the renderer's synchronous bootstrap path.
-    const wslAvailable = yield* makeIsAvailable(environment.platform, windir).pipe(
-      Effect.provideService(FileSystem.FileSystem, fileSystem),
+    return yield* makeForPlatform(environment.platform).pipe(
       Effect.provideService(Path.Path, environment.path),
-      Effect.withSpan("desktop.wsl.isAvailable"),
     );
-    const isAvailable = Effect.succeed(wslAvailable);
-
-    const windowsToWslPath = (distro: string | null, windowsPath: string) =>
-      provideSpawner(windowsToWslPathImpl(distro, windowsPath)).pipe(
-        Effect.withSpan("desktop.wsl.windowsToWslPath"),
-      );
-
-    // Cache user-home results per distro key — folder picker can be opened
-    // many times in a session and the value is stable for the life of the
-    // distro. Negative results aren't cached so a transient wsl.exe failure
-    // doesn't permanently disable tilde expansion.
-    const userHomeCache = new Map<string, string>();
-    const getUserHome = Effect.fn("desktop.wsl.getUserHome")(function* (distro: string | null) {
-      const key = distro ?? "__default__";
-      const cached = userHomeCache.get(key);
-      if (cached !== undefined) return Option.some(cached);
-      const resolved = yield* provideSpawner(getUserHomeImpl(distro));
-      if (Option.isSome(resolved)) userHomeCache.set(key, resolved.value);
-      return resolved;
-    });
-
-    const getDistroIp = (distro: string | null) =>
-      provideSpawner(getDistroIpImpl(distro)).pipe(Effect.withSpan("desktop.wsl.getDistroIp"));
-
-    const probeDistros = provideSpawner(probeWslDistros).pipe(
-      Effect.withSpan("desktop.wsl.probeDistros"),
-    );
-
-    return DesktopWslEnvironment.of({
-      isAvailable,
-      listDistros: probeDistros.pipe(
-        Effect.orElseSucceed(() => []),
-        Effect.withSpan("desktop.wsl.listDistros"),
-      ),
-      probeDistros,
-      preWarm: (distro) =>
-        provideSpawner(preWarmImpl(distro)).pipe(Effect.withSpan("desktop.wsl.preWarm")),
-      windowsToWslPath,
-      getUserHome,
-      getDistroIp,
-      prepareRuntime: (distro, archive) =>
-        provideSpawner(prepareWslRuntimeImpl(distro, archive, windowsToWslPath)).pipe(
-          Effect.withSpan("desktop.wsl.prepareRuntime"),
-        ),
-      pruneRuntimes: (distro, runtimeId) =>
-        provideSpawner(pruneWslRuntimesImpl(distro, runtimeId)).pipe(
-          Effect.withSpan("desktop.wsl.pruneRuntimes"),
-        ),
-      invalidateRuntime: (distro, runtimeId) =>
-        provideSpawner(invalidateWslRuntimeImpl(distro, runtimeId)).pipe(
-          Effect.withSpan("desktop.wsl.invalidateRuntime"),
-        ),
-      probeRuntime: (distro, linuxAppRoot) =>
-        provideSpawner(probeWslRuntimeImpl(distro, linuxAppRoot)).pipe(
-          Effect.withSpan("desktop.wsl.probeRuntime"),
-        ),
-      ensureNodePty: (distro, linuxAppRoot, options) =>
-        provideSpawner(ensureNodePtyImpl(distro, linuxAppRoot, options)).pipe(
-          Effect.withSpan("desktop.wsl.ensureNodePty"),
-        ),
-    });
   }),
 );

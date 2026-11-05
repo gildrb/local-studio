@@ -11,11 +11,7 @@ import {
   LocalRecipes,
   LocalTailnet,
   type LocalControllerLink,
-  type LocalHardware,
-  type LocalRecipe,
-  type LocalUsage,
 } from "@t3tools/contracts/local-studio";
-import { formatTokens } from "@t3tools/shared/usageFormat";
 import { primaryEnvironmentHttpLayer } from "../../environments/primary/httpLayer";
 import { resolvePrimaryEnvironmentHttpUrl } from "../../environments/primary/target";
 import { Button } from "../ui/button";
@@ -34,38 +30,25 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings
 import { Metric } from "../usage/UsagePage";
 import { UsageProviderChart } from "../usage/UsageProviderChart";
 import { RegistrySection, SharePanel } from "./RegistrySection";
+import {
+  LOCAL_USAGE_CHART_STYLE,
+  buildLocalMachineModel,
+  buildLocalPageModel,
+  resolveLocalJobStop,
+  resolveLocalLoad,
+  resolveLocalReachableTargets,
+  resolveLocalRename,
+  resolveLocalTailnetDevice,
+  resolveLocalTarget,
+  resolveLocalUnload,
+  type LocalActRequest,
+  type LocalArmDecision,
+  type LocalDotModel,
+} from "./LocalPage.logic";
+
+const localChartPresentation = { codex: { ...LOCAL_USAGE_CHART_STYLE, mark: ServerIcon } };
 
 class LocalRequestError extends Data.TaggedError("LocalRequestError")<{ message: string }> {}
-
-const sum = <T,>(rows: ReadonlyArray<T>, value: (row: T) => number) =>
-  rows.reduce((total, row) => total + value(row), 0);
-const gib = (bytes: number) => `${(bytes / 2 ** 30).toFixed(0)} GiB`;
-const memory = (hardware: LocalHardware) => {
-  const vram = sum(hardware.gpus, (gpu) => gpu.memoryTotalMiB) * 2 ** 20;
-  return vram
-    ? { used: sum(hardware.gpus, (gpu) => gpu.memoryUsedMiB) * 2 ** 20, total: vram, label: "VRAM" }
-    : {
-        used: hardware.memTotalBytes - hardware.memFreeBytes,
-        total: hardware.memTotalBytes,
-        label: "Memory",
-      };
-};
-const gpuSummary = (hardware: LocalHardware) => {
-  const names = new Set(
-    hardware.gpus.map((gpu) =>
-      gpu.name.replace(/^NVIDIA (GeForce )?/, "").replace(/ (Blackwell )?Workstation Edition/, ""),
-    ),
-  );
-  return names.size
-    ? `${hardware.gpus.length}× ${[...names].join(" / ")}`
-    : `${hardware.cpus} CPUs`;
-};
-const tokensOf = (usage: ReadonlyArray<LocalUsage> = [], since = "", until = "9999") =>
-  sum(usage, (row) =>
-    sum(Object.entries(row.tokens ?? {}), ([day, count]) =>
-      day >= since && day <= until ? count : 0,
-    ),
-  );
 
 const request = (path: string, controller: string, body?: unknown) =>
   Effect.gen(function* () {
@@ -95,9 +78,14 @@ const fetchEach = <A,>(path: string, schema: Schema.Codec<A, unknown>, controlle
     { concurrency: 4 },
   ).pipe(Effect.map((entries) => Object.fromEntries(entries.flatMap(Option.toArray))));
 
-const target = (device: LocalControllerLink) => (device.self ? "" : device.url);
-const dot = (className: string, tooltip: string) => (
-  <ConnectionStatusDot dotClassName={className} tooltipText={tooltip} />
+const dotClass: Record<LocalDotModel["tone"], string> = {
+  destructive: "bg-destructive",
+  success: "bg-success",
+  muted: "bg-muted-foreground/60",
+  warning: "bg-warning",
+};
+const dot = (model: LocalDotModel) => (
+  <ConnectionStatusDot dotClassName={dotClass[model.tone]} tooltipText={model.tooltip} />
 );
 const stop = (event: { stopPropagation: () => void }) => event.stopPropagation();
 
@@ -112,7 +100,7 @@ function Machine({
   snapshot: LocalSnapshot | undefined;
   recipes: LocalRecipes | undefined;
   busy: string | null;
-  act: (key: string, path: string, body: unknown, controller: string) => void;
+  act: (request: LocalActRequest) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [reveal, setReveal] = useState(false);
@@ -120,53 +108,20 @@ function Machine({
   const [choice, setChoice] = useState<string | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [sharing, setSharing] = useState<number | null>(null);
-  const hardware = snapshot?.hardware;
-  const use = hardware ? memory(hardware) : null;
-  const running = (snapshot?.endpoints ?? []).filter(
-    (endpoint) => endpoint.live && endpoint.controllerId === device.id,
-  );
-  const loaded = running.flatMap((endpoint) => endpoint.models).join(", ");
-  const jobs = (snapshot?.jobs ?? []).filter((job) => !["ready", "stopped"].includes(job.phase));
-  const rig = hardware?.gpus.length ?? 0;
-  const all = (recipes?.recipes ?? []).toSorted(
-    (a, b) => b.cards - a.cards || (b.tps ?? 0) - (a.tps ?? 0) || a.model.localeCompare(b.model),
-  );
-  const options = all.filter((recipe) => recipe.fits);
-  const reference = [
-    ...new Map(
-      all
-        .filter((recipe) => !recipe.fits)
-        .map((recipe) => [`${recipe.model} ${recipe.cards} ${recipe.engine}`, recipe] as const),
-    ).values(),
-  ];
-  const picked = options.find((recipe) => recipe.id === choice) ?? options[0];
-  const gpus = (recipe: LocalRecipe) =>
-    `${recipe.cards} of ${rig} GPU${rig === 1 ? "" : "s"}${recipe.cards === rig && rig > 1 ? " · full rig" : ""}`;
-  const describe = (recipe: LocalRecipe) =>
-    [
-      gpus(recipe),
-      recipe.engine,
-      recipe.ctx ? `${Math.round(recipe.ctx / 1000)}k context` : null,
-      recipe.tps != null ? `${recipe.tps.toFixed(0)} tok/s` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  const host = URL.parse(device.url)?.hostname ?? device.url;
-  const name = device.name ?? host;
-  const controller = target(device);
-  const loadKey = `load ${device.url}`;
-  const confirm = (key: string, run: () => void) => {
-    setArmed(armed === key ? null : key);
-    if (armed === key) run();
+  const input = {
+    device,
+    snapshot,
+    recipes,
+    busy,
+    ui: { open, reveal, editing, choice, armed, sharing },
   };
-  const load = () =>
-    picked &&
-    act(
-      loadKey,
-      `recipes/${encodeURIComponent(picked.id)}/run`,
-      { replace: running.length > 0 },
-      controller,
-    );
+  const model = buildLocalMachineModel(input);
+  const apply = (decision: LocalArmDecision) => {
+    if (decision.kind === "none") return;
+    setArmed(decision.armed);
+    if (decision.kind === "act") act(decision.request);
+  };
+  const details = model.details;
   return (
     <div className="group border-t border-border/60 first:border-t-0">
       <div
@@ -183,24 +138,20 @@ function Machine({
           aria-hidden
           className={`size-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`}
         />
-        {!device.reachable
-          ? dot("bg-destructive", "Offline")
-          : running.length
-            ? dot("bg-success", "Serving")
-            : dot("bg-muted-foreground/60", "Idle")}
+        {dot(model.dot)}
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex min-w-0 items-center gap-2">
             {editing === null ? (
               <>
-                <span className="truncate text-sm font-medium text-foreground">{name}</span>
-                {device.reachable && (
+                <span className="truncate text-sm font-medium text-foreground">{model.name}</span>
+                {model.canRename && (
                   <button
                     type="button"
-                    aria-label={`Rename ${name}`}
+                    aria-label={model.renameLabel}
                     className="text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100"
                     onClick={(event) => {
                       stop(event);
-                      setEditing(name);
+                      setEditing(model.name);
                     }}
                   >
                     <PencilIcon className="size-3" />
@@ -212,8 +163,8 @@ function Machine({
                 onClick={stop}
                 onSubmit={(event) => {
                   event.preventDefault();
-                  if (editing.trim() && editing !== name)
-                    act(`name ${device.url}`, "name", { name: editing.trim() }, controller);
+                  const decision = resolveLocalRename(device, editing);
+                  if (decision.kind === "rename") act(decision.request);
                   setEditing(null);
                 }}
               >
@@ -231,127 +182,97 @@ function Machine({
             )}
             <button
               type="button"
-              aria-label={reveal ? "Hide address" : "Show address"}
-              title={reveal ? "Hide address" : "Show address"}
+              aria-label={model.addressToggleLabel}
+              title={model.addressToggleLabel}
               onClick={(event) => {
                 stop(event);
                 setReveal(!reveal);
               }}
               className={`hidden truncate text-xs text-muted-foreground tabular-nums transition-[filter] sm:inline ${reveal ? "" : "blur-sm select-none"}`}
             >
-              {host}
+              {model.host}
             </button>
           </div>
-          <span className="truncate text-xs text-muted-foreground">
-            {!device.reachable
-              ? (device.error ?? "Offline")
-              : loaded || (jobs[0] ? `Loading ${jobs[0].recipeId}` : "No model loaded")}
-          </span>
+          <span className="truncate text-xs text-muted-foreground">{model.subtitle}</span>
         </div>
-        {use && (
+        {model.memory && (
           <div className="hidden w-48 shrink-0 flex-col gap-1 sm:flex">
             <div className="h-1.5 overflow-hidden rounded-full bg-muted">
               <div
                 className="h-full rounded-full bg-foreground"
-                style={{ width: `${Math.min(100, (use.used / use.total) * 100)}%` }}
+                style={{ width: `${model.memory.percent}%` }}
               />
             </div>
             <span className="text-right text-xs text-muted-foreground tabular-nums">
-              {gib(use.used)} / {gib(use.total)} {use.label}
+              {model.memory.label}
             </span>
           </div>
         )}
       </div>
-      {open && device.reachable && (
+      {details && (
         <div className="flex flex-col gap-4 px-3 pb-4 sm:px-4 sm:ps-12">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Metric
-              label="Tokens served"
-              value={
-                device.usage?.some((row) => row.measuredRequests)
-                  ? formatTokens(tokensOf(device.usage))
-                  : "—"
-              }
-            />
-            <Metric
-              label="Requests"
-              value={sum(device.usage ?? [], (row) => row.requests).toLocaleString()}
-            />
-            <Metric label="Hardware" value={hardware ? gpuSummary(hardware) : "—"} />
-            <Metric label="Models loaded" value={String(running.length)} />
+            {details.metrics.map((metric) => (
+              <Metric key={metric.label} label={metric.label} value={metric.value} />
+            ))}
           </div>
-          {running.map((endpoint) => (
+          {details.endpoints.map((endpoint) => (
             <div key={endpoint.id} className="flex flex-col gap-2">
               <div className="flex items-center gap-2 text-sm">
-                {dot("bg-success", "Serving")}
-                <span className="min-w-0 flex-1 truncate">{endpoint.models.join(", ")}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">:{endpoint.port}</span>
+                {dot(endpoint.dot)}
+                <span className="min-w-0 flex-1 truncate">{endpoint.models}</span>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {endpoint.portLabel}
+                </span>
                 <Button
                   size="xs"
-                  variant={armed === endpoint.id ? "destructive" : "outline"}
-                  disabled={busy !== null}
-                  onClick={() =>
-                    confirm(endpoint.id, () =>
-                      act(endpoint.id, `ports/${endpoint.port}/stop`, {}, controller),
-                    )
-                  }
+                  variant={endpoint.unloadVariant}
+                  disabled={endpoint.unloadDisabled}
+                  onClick={() => apply(resolveLocalUnload(input, endpoint.id))}
                 >
-                  {busy === endpoint.id
-                    ? "Unloading…"
-                    : armed === endpoint.id
-                      ? "Confirm unload"
-                      : "Unload"}
+                  {endpoint.unloadLabel}
                 </Button>
                 <Button
                   size="xs"
                   variant="ghost"
-                  onClick={() => setSharing(sharing === endpoint.port ? null : endpoint.port)}
+                  onClick={() => setSharing(endpoint.sharing ? null : endpoint.port)}
                 >
                   Share
                 </Button>
               </div>
-              {sharing === endpoint.port && (
+              {endpoint.sharing && (
                 <SharePanel
                   port={endpoint.port}
-                  controller={controller}
+                  controller={model.controller}
                   call={request}
                   onClose={() => setSharing(null)}
                 />
               )}
             </div>
           ))}
-          {jobs.map((job) => (
+          {details.jobs.map((job) => (
             <div key={job.id} className="flex items-center gap-2 text-sm">
-              {job.phase === "failed"
-                ? dot("bg-destructive", "Failed")
-                : dot("bg-warning", "Loading")}
+              {dot(job.dot)}
               <span className="min-w-0 flex-1 truncate">
                 {job.recipeId}
-                <span className="ms-2 text-xs text-muted-foreground">
-                  {job.phase}
-                  {job.progress !== null ? ` ${Math.round(job.progress * 100)}%` : ""}
-                  {job.message ? ` · ${job.message}` : ""}
-                </span>
+                <span className="ms-2 text-xs text-muted-foreground">{job.detail}</span>
               </span>
               <Button
                 size="xs"
                 variant="outline"
-                disabled={busy !== null}
-                onClick={() => act(job.id, `runs/${job.id}/stop`, {}, controller)}
+                disabled={job.buttonDisabled}
+                onClick={() => act(resolveLocalJobStop(device, job.id))}
               >
-                {job.phase === "failed" ? "Dismiss" : "Cancel"}
+                {job.buttonLabel}
               </Button>
             </div>
           ))}
-          {all.length > 0 ? (
+          {details.picker ? (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <Select
-                  items={all.map((recipe) => ({
-                    value: recipe.id,
-                    label: `${recipe.model} · ${recipe.cards}× GPU`,
-                  }))}
-                  value={picked?.id ?? null}
+                  items={details.picker.items}
+                  value={details.picker.value}
                   onValueChange={setChoice}
                 >
                   <SelectTrigger
@@ -362,62 +283,34 @@ function Machine({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectPopup align="start" alignItemWithTrigger={false}>
-                    {[
-                      { label: "Ready to load", recipes: options, detail: describe },
-                      {
-                        label: "In the registry, not one-click yet",
-                        recipes: reference,
-                        detail: (recipe: LocalRecipe) =>
-                          `${gpus(recipe)} · ${recipe.engine} · ${(recipe.blocked ?? "")
-                            .split(/[:;]/)[0]
-                            ?.replace(/captured (\w+) record from/, "$1 report from")}`,
-                      },
-                    ].map(
-                      (group) =>
-                        group.recipes.length > 0 && (
-                          <SelectGroup key={group.label}>
-                            <SelectGroupLabel>{group.label}</SelectGroupLabel>
-                            {group.recipes.map((recipe) => (
-                              <SelectItem key={recipe.id} value={recipe.id} disabled={!recipe.fits}>
-                                <span className="flex flex-col">
-                                  {recipe.model}
-                                  <span className="text-xs text-muted-foreground">
-                                    {group.detail(recipe)}
-                                  </span>
-                                </span>
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ),
-                    )}
+                    {details.picker.groups.map((group) => (
+                      <SelectGroup key={group.label}>
+                        <SelectGroupLabel>{group.label}</SelectGroupLabel>
+                        {group.recipes.map((recipe) => (
+                          <SelectItem key={recipe.id} value={recipe.id} disabled={recipe.disabled}>
+                            <span className="flex flex-col">
+                              {recipe.model}
+                              <span className="text-xs text-muted-foreground">{recipe.detail}</span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    ))}
                   </SelectPopup>
                 </Select>
                 <Button
                   size="sm"
-                  variant={armed === loadKey ? "destructive" : "default"}
-                  disabled={busy !== null || !picked}
-                  onClick={() => (running.length ? confirm(loadKey, load) : load())}
+                  variant={details.picker.loadVariant}
+                  disabled={details.picker.loadDisabled}
+                  onClick={() => apply(resolveLocalLoad(input))}
                 >
-                  {busy === loadKey
-                    ? "Loading…"
-                    : armed === loadKey
-                      ? `Unload ${running.length} and load`
-                      : "Load"}
+                  {details.picker.loadLabel}
                 </Button>
               </div>
-              <p className="text-xs break-all text-muted-foreground">
-                {picked
-                  ? `Recipe ${picked.id} · ${describe(picked)}`
-                  : `None of the ${reference.length} registry recipes for this hardware can load automatically yet. See the supported hardware below.`}
-                {armed === loadKey && ` Loading ${picked?.model} unloads ${loaded} first.`}
-              </p>
+              <p className="text-xs break-all text-muted-foreground">{details.picker.note}</p>
             </div>
           ) : (
-            <p className="text-xs text-muted-foreground">
-              {recipes
-                ? "The registry has no recipes for this hardware yet."
-                : "Reading the registry…"}
-            </p>
+            <p className="text-xs text-muted-foreground">{details.emptyRecipesMessage}</p>
           )}
         </div>
       )}
@@ -434,10 +327,7 @@ export function LocalSettingsPanel() {
   const [busy, setBusy] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   const devices = root?.controllers ?? [];
-  const reachable = devices
-    .filter((device) => device.reachable)
-    .map(target)
-    .join(" ");
+  const reachable = resolveLocalReachableTargets(root).join(" ");
 
   const perform = useCallback(
     <A,>(key: string, effect: Effect.Effect<A, Error>, then: (value: A) => void) => {
@@ -450,8 +340,10 @@ export function LocalSettingsPanel() {
     },
     [],
   );
-  const act = (key: string, path: string, body: unknown, controller: string) =>
-    perform(key, request(path, controller, body), () => setRevision((value) => value + 1));
+  const act = (action: LocalActRequest) =>
+    perform(action.key, request(action.path, action.controller, action.body), () =>
+      setRevision((value) => value + 1),
+    );
   const scan = useCallback(
     () =>
       perform(
@@ -469,11 +361,15 @@ export function LocalSettingsPanel() {
       const state = yield* request("snapshot", "").pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(LocalSnapshot)),
       );
-      const reachableUrls = state.controllers.filter((device) => device.reachable).map(target);
+      const reachableUrls = state.controllers
+        .filter((device) => device.reachable)
+        .map(resolveLocalTarget);
       const each = yield* fetchEach("snapshot", LocalSnapshot, reachableUrls);
       setRoot(state);
       setSnapshots(
-        Object.fromEntries(state.controllers.map((device) => [device.url, each[target(device)]])),
+        Object.fromEntries(
+          state.controllers.map((device) => [device.url, each[resolveLocalTarget(device)]]),
+        ),
       );
     }).pipe(
       Effect.catch((cause) => Effect.sync(() => setError(String(cause)))),
@@ -485,45 +381,36 @@ export function LocalSettingsPanel() {
 
   useEffect(() => {
     void Effect.runPromise(
-      fetchEach("recipes?archived=1", LocalRecipes, reachable ? reachable.split(" ") : [""]),
+      fetchEach("recipes?archived=1", LocalRecipes, reachable.split(" ")),
     ).then(setRecipes);
   }, [reachable, revision]);
 
-  const usage = root?.usage ?? [];
-  const now = new Date(root?.generatedAt ?? Date.now());
-  const today = now.toISOString().slice(0, 10);
-  const monday = new Date(now.getTime() - ((now.getUTCDay() + 6) % 7) * 86_400_000);
-  const days = Array.from({ length: 30 }, (_, index) =>
-    new Date(now.getTime() - (29 - index) * 86_400_000).toISOString().slice(0, 10),
-  );
-  const daily = days.map((day) => {
-    const totalTokens = tokensOf(usage, day, day);
-    return {
-      day,
-      costUsd: 0,
-      totalTokens,
-      byProvider: new Map([["codex" as const, { costUsd: 0, totalTokens }]]),
-    };
+  const model = buildLocalPageModel({
+    root,
+    snapshots,
+    recipes,
+    tailnet,
+    error,
+    busy,
+    machineUi: {},
+    nowMs: Date.now(),
   });
-  const measured = sum(usage, (row) => row.measuredRequests ?? 0);
-  const requests = sum(usage, (row) => row.requests);
-  const shown = (value: number) => (measured ? formatTokens(value) : "—");
-  const models = usage.toSorted((a, b) => tokensOf([b]) - tokensOf([a]) || b.requests - a.requests);
+  const usage = model.usage;
   const cell = "py-2 text-right text-muted-foreground tabular-nums";
 
   return (
     <SettingsPageContainer width="expanded" className="gap-6">
-      {error && (
+      {model.error && (
         <p role="alert" className="text-sm break-all text-destructive">
-          {error}
+          {model.error}
         </p>
       )}
 
       <SettingsSection
-        title="Machines"
+        title={model.machines.title}
         headerAction={
-          <Button variant="ghost" size="sm" disabled={busy === "scan"} onClick={scan}>
-            {busy === "scan" ? "Scanning…" : "Scan tailnet"}
+          <Button variant="ghost" size="sm" disabled={model.machines.scanDisabled} onClick={scan}>
+            {model.machines.scanLabel}
           </Button>
         }
       >
@@ -532,92 +419,56 @@ export function LocalSettingsPanel() {
             key={device.url}
             device={device}
             snapshot={snapshots[device.url]}
-            recipes={recipes[target(device)]}
+            recipes={recipes[resolveLocalTarget(device)]}
             busy={busy}
             act={act}
           />
         ))}
-        {tailnet?.devices
-          .filter(
-            (device) => !device.linked && (device.controller || /^(linux|macOS)$/.test(device.os)),
-          )
-          .map((device) => (
-            <SettingsRow
-              key={device.ip}
-              title={device.name}
-              description={
-                device.controller
-                  ? "Controller found on your tailnet"
-                  : `${device.os} · no controller yet`
-              }
-              control={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy !== null}
-                  onClick={() =>
-                    device.controller
-                      ? act(device.ip, "peers", { url: device.controller.url }, "")
-                      : act(device.ip, "tailnet/deploy", { ip: device.ip, name: device.name }, "")
-                  }
-                >
-                  {busy === device.ip ? "Installing…" : device.controller ? "Connect" : "Install"}
-                </Button>
-              }
-            />
-          ))}
-        {!root && !error && (
-          <p className="px-3 py-3 text-sm text-muted-foreground sm:px-4">Contacting controller…</p>
+        {model.machines.tailnet.map((device) => (
+          <SettingsRow
+            key={device.ip}
+            title={device.title}
+            description={device.description}
+            control={
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={device.buttonDisabled}
+                onClick={() => {
+                  const action = resolveLocalTailnetDevice(tailnet, device.ip);
+                  if (action) act(action);
+                }}
+              >
+                {device.buttonLabel}
+              </Button>
+            }
+          />
+        ))}
+        {model.machines.loadingMessage && (
+          <p className="px-3 py-3 text-sm text-muted-foreground sm:px-4">
+            {model.machines.loadingMessage}
+          </p>
         )}
       </SettingsSection>
 
-      <RegistrySection
-        devices={devices
-          .filter((device) => device.reachable)
-          .map((device) => ({
-            label: device.name ?? URL.parse(device.url)?.hostname ?? device.url,
-            controller: target(device),
-          }))}
-        call={request}
-      />
+      <RegistrySection devices={model.registryDevices} call={request} />
 
       <SettingsSection title="Usage">
         <div className="flex flex-col gap-5 px-3 py-4 sm:px-4">
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Metric label="Today" value={shown(tokensOf(usage, today))} />
-            <Metric
-              label="This week"
-              value={shown(tokensOf(usage, monday.toISOString().slice(0, 10)))}
-            />
-            <Metric label="All time" value={shown(tokensOf(usage))} />
-            <Metric label="Requests" value={requests.toLocaleString()} />
+            {usage.metrics.map((metric) => (
+              <Metric key={metric.label} label={metric.label} value={metric.value} />
+            ))}
           </div>
           <div className="flex flex-col gap-3">
-            <h3 className="text-sm font-medium text-foreground">Daily processed tokens</h3>
-            <UsageProviderChart
-              providers={["codex"]}
-              presentation={{
-                codex: {
-                  label: "Local models",
-                  color: "var(--contrast-foreground)",
-                  mark: ServerIcon,
-                },
-              }}
-              days={days}
-              daily={daily}
-              hours={[]}
-              hourly={[]}
-              metric="tokens"
-              referenceTime={root?.generatedAt}
-              resolution="day"
-              timeZone="UTC"
-            />
+            <h3 className="text-sm font-medium text-foreground">{usage.chartTitle}</h3>
+            <UsageProviderChart model={usage.chart} presentation={localChartPresentation} />
           </div>
           <table className="w-full table-fixed text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-muted-foreground">
                 <th className="w-1/2 py-2 font-normal">Model</th>
-                {["Requests", "Share", "Tokens"].map((label) => (
+                {usage.columns.map((label) => (
                   <th key={label} className="py-2 text-right font-normal">
                     {label}
                   </th>
@@ -625,48 +476,32 @@ export function LocalSettingsPanel() {
               </tr>
             </thead>
             <tbody>
-              {models.map((row) => (
+              {usage.rows.map((row) => (
                 <tr key={row.model} className="border-b border-border/50 hover:bg-muted/50">
                   <td className="truncate py-2 text-foreground">{row.model}</td>
-                  <td className={cell}>{row.requests.toLocaleString()}</td>
-                  <td className={cell}>{((row.requests / requests) * 100).toFixed(0)}%</td>
-                  <td className={cell}>
-                    {row.measuredRequests ? formatTokens(tokensOf([row])) : "—"}
-                  </td>
+                  <td className={cell}>{row.requests}</td>
+                  <td className={cell}>{row.share}</td>
+                  <td className={cell}>{row.tokens}</td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="text-xs text-muted-foreground">
-            {models.length === 0 && "No requests yet. "}
-            Input + output tokens, including cached input, counted in UTC with weeks starting
-            Monday. Tokens are known for {measured.toLocaleString()} of {requests.toLocaleString()}{" "}
-            requests; traffic sent straight to an engine is not seen.
-          </p>
+          <p className="text-xs text-muted-foreground">{usage.footnote}</p>
         </div>
       </SettingsSection>
 
-      <SettingsSection title="About Local">
+      <SettingsSection title={model.about.title}>
         <div className="flex flex-col gap-3 px-3 py-4 text-sm text-muted-foreground sm:px-4">
-          <p>
-            Local runs open models on machines you own. Each machine runs a small Local Studio
-            controller; connected machines share their models, so any model loaded anywhere is
-            available to every chat here. Machines on your Tailscale network are found
-            automatically.
-          </p>
-          <p>
-            Models load from the Local AI Registry: recipes tested on specific hardware, pinned to
-            an exact image and weights. Loading works on Linux machines with NVIDIA GPUs and Docker,
-            including RTX 3090, 4090, 5090, RTX PRO 6000 and DGX Spark. Macs can connect and serve
-            models they already run.
-          </p>
+          {model.about.paragraphs.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
           <a
-            href="https://local-ai-registry.vercel.app/?topic=hardware"
+            href={model.about.link.href}
             target="_blank"
             rel="noreferrer"
             className="inline-flex w-fit items-center gap-1.5 font-medium text-foreground hover:underline"
           >
-            See supported hardware and models
+            {model.about.link.label}
             <ExternalLinkIcon className="size-3.5" />
           </a>
         </div>

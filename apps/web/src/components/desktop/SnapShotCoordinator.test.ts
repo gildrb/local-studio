@@ -10,13 +10,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import { DraftId, useComposerDraftStore } from "../../composerDraftStore";
 import type { DesktopSnapShotBridge } from "../../lib/desktopSnapShot";
 import {
-  beginSnapShotAnimationWhenReady,
   deliverSnapShot,
   dismissFailedSnapShot,
   resolveExistingSnapShotTarget,
+} from "./SnapShotCoordinator";
+import {
+  beginSnapShotAnimationWhenReady,
   resolveSnapShotTargetOnce,
   resolveSnapShotDeliveryTarget,
-} from "./SnapShotCoordinator";
+} from "./SnapShotCoordinator.logic";
 import {
   beginSnapShotAnimation,
   dismissAllSnapShotAnimations,

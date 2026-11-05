@@ -1,7 +1,6 @@
 import type {
   DesktopAppBranding,
   DesktopAppStageLabel,
-  DesktopRuntimeArch,
   DesktopRuntimeInfo,
 } from "@t3tools/contracts";
 import * as Config from "effect/Config";
@@ -14,6 +13,7 @@ import * as Path from "effect/Path";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopConfig from "./DesktopConfig.ts";
 import { resolveLinuxDesktopEntryName } from "./DesktopEarlyElectronStartup.ts";
+import { resolveDesktopRuntimeInfo } from "./DesktopRuntimeInfo.ts";
 import { resolveDesktopBaseDir, resolveDesktopStateDir } from "./DesktopStatePaths.ts";
 import { isNightlyDesktopVersion } from "../updates/updateChannels.ts";
 import type { OtlpProtocol } from "@t3tools/shared/observability";
@@ -117,36 +117,6 @@ export function resolveDesktopAppBranding(input: {
     baseName: APP_BASE_NAME,
     stageLabel,
     displayName: input.isDevelopment ? "Local Studio Dev" : APP_BASE_NAME,
-  };
-}
-
-function normalizeDesktopArch(arch: string): DesktopRuntimeArch {
-  if (arch === "arm64") return "arm64";
-  if (arch === "x64") return "x64";
-  return "other";
-}
-
-function resolveDesktopRuntimeInfo(input: {
-  readonly platform: NodeJS.Platform;
-  readonly processArch: string;
-  readonly runningUnderArm64Translation: boolean;
-}): DesktopRuntimeInfo {
-  const appArch = normalizeDesktopArch(input.processArch);
-
-  if (input.platform !== "darwin") {
-    return {
-      hostArch: appArch,
-      appArch,
-      runningUnderArm64Translation: false,
-    };
-  }
-
-  const hostArch = appArch === "arm64" || input.runningUnderArm64Translation ? "arm64" : appArch;
-
-  return {
-    hostArch,
-    appArch,
-    runningUnderArm64Translation: input.runningUnderArm64Translation,
   };
 }
 

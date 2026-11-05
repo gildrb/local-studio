@@ -1,6 +1,8 @@
 import {
+  type ChatFileAttachment,
   type EnvironmentId,
   isProviderSendTurnSupportedImageMimeType,
+  PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_FILE_BYTES,
 } from "@t3tools/contracts";
 import {
@@ -8,9 +10,14 @@ import {
   fileAttachmentTooLargeMessage,
 } from "@t3tools/client-runtime/state/attachments";
 
-import type { ComposerFileAttachment, ComposerImageAttachment } from "../../composerDraftStore";
+import {
+  composerFileMatchesReattachMarker,
+  composerFileNeedsReattach,
+  type ComposerFileAttachment,
+  type ComposerImageAttachment,
+} from "../../composerDraftStore";
 import { isHeicImageFile } from "../../lib/imageCompression";
-import { isVideoAttachment } from "../../types";
+import { isVideoAttachment, videoMimeType } from "../../types";
 
 type ComposerAttachmentFileKind = "image" | "file" | "unsupported-image";
 
@@ -75,6 +82,91 @@ export function classifyComposerAttachmentFile(
     return "file";
   }
   return isProviderSendTurnSupportedImageMimeType(file.type) ? "image" : "unsupported-image";
+}
+
+export interface ComposerAttachmentIntake {
+  readonly acceptedImages: File[];
+  readonly acceptedFiles: ComposerFileAttachment[];
+  readonly error: string | null;
+}
+
+export function classifyComposerAttachmentIntake(input: {
+  readonly files: ReadonlyArray<File>;
+  readonly reservedCount: number;
+  readonly reattachMarkers: ReadonlyArray<ComposerFileAttachment>;
+  readonly fileStagingLimit: number | null;
+  readonly newId: () => string;
+  readonly source?: ChatFileAttachment["source"];
+}): ComposerAttachmentIntake {
+  let reservedCount = input.reservedCount;
+  const replacedReattachMarkerIds = new Set<string>();
+  const acceptedImages: File[] = [];
+  const acceptedFiles: ComposerFileAttachment[] = [];
+  let error: string | null = null;
+  for (const file of input.files) {
+    const attachmentKind = classifyComposerAttachmentFile(file);
+    const fileMimeType =
+      attachmentKind === "file"
+        ? (videoMimeType({ name: file.name, mimeType: file.type }) ??
+          (file.type || "application/octet-stream"))
+        : file.type;
+    const matchingReattachMarker =
+      attachmentKind === "file"
+        ? input.reattachMarkers.find(
+            (marker) =>
+              !replacedReattachMarkerIds.has(marker.id) &&
+              composerFileMatchesReattachMarker(marker, {
+                name: file.name || "file",
+                mimeType: fileMimeType,
+                sizeBytes: file.size,
+              }),
+          )
+        : undefined;
+    if (matchingReattachMarker) {
+      replacedReattachMarkerIds.add(matchingReattachMarker.id);
+    }
+    if (!matchingReattachMarker && reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
+      error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
+      continue;
+    }
+    if (attachmentKind === "unsupported-image") {
+      error = `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`;
+      continue;
+    }
+    if (attachmentKind === "image") {
+      acceptedImages.push(normalizeComposerImageFileMimeType(file));
+    } else {
+      if (input.fileStagingLimit === null) {
+        error = "This server does not support file attachments.";
+        continue;
+      }
+      if (file.size <= 0) {
+        error = `'${file.name}' is empty or could not be read.`;
+        continue;
+      }
+      if (file.size > input.fileStagingLimit) {
+        error = fileAttachmentTooLargeMessage(file.name, input.fileStagingLimit);
+        continue;
+      }
+      const attachmentFile =
+        file.type === fileMimeType
+          ? file
+          : new File([file], file.name, { type: fileMimeType, lastModified: file.lastModified });
+      acceptedFiles.push({
+        type: "file",
+        id: input.newId(),
+        name: attachmentFile.name || "file",
+        mimeType: fileMimeType,
+        sizeBytes: attachmentFile.size,
+        file: attachmentFile,
+        ...(input.source ? { source: input.source } : {}),
+      });
+    }
+    if (!matchingReattachMarker) {
+      reservedCount += 1;
+    }
+  }
+  return { acceptedImages, acceptedFiles, error };
 }
 
 export function isPreviewableComposerVideo(
@@ -147,6 +239,40 @@ export function attachmentsToReleaseOnUploadCapabilityLoss(
   return attachments.filter(
     (attachment) => !(attachment.type === "file" && attachment.uploadedAttachmentId !== undefined),
   );
+}
+
+export interface ComposerAttachmentUploadPlan {
+  readonly release: ReadonlyArray<ComposerImageAttachment | ComposerFileAttachment>;
+  readonly start: ReadonlyArray<ComposerImageAttachment | ComposerFileAttachment>;
+}
+
+export function planComposerAttachmentUploads(input: {
+  readonly attachmentUploadsCapabilityKnown: boolean;
+  readonly supportsAttachmentUploads: boolean;
+  readonly maxFileAttachmentBytes: number | null;
+  readonly images: ReadonlyArray<ComposerImageAttachment>;
+  readonly files: ReadonlyArray<ComposerFileAttachment>;
+}): ComposerAttachmentUploadPlan {
+  if (!input.attachmentUploadsCapabilityKnown) {
+    return { release: [], start: [] };
+  }
+  if (!input.supportsAttachmentUploads) {
+    return {
+      release: attachmentsToReleaseOnUploadCapabilityLoss([...input.images, ...input.files]),
+      start: [],
+    };
+  }
+  const maxBytes = input.maxFileAttachmentBytes;
+  const invalidFiles =
+    maxBytes === null ? input.files : input.files.filter((file) => file.sizeBytes > maxBytes);
+  const uploadableFiles =
+    maxBytes === null ? [] : input.files.filter((file) => file.sizeBytes <= maxBytes);
+  return {
+    release: attachmentsToReleaseOnUploadCapabilityLoss(invalidFiles),
+    start: [...input.images, ...uploadableFiles].filter(
+      (attachment) => !(attachment.type === "file" && composerFileNeedsReattach(attachment)),
+    ),
+  };
 }
 
 /**

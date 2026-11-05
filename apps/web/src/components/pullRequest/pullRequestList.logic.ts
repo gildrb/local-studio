@@ -18,10 +18,35 @@ import type {
   PullRequestListFilters,
   PullRequestListState,
   PullRequestState,
+  RepositoryIdentity,
 } from "@t3tools/contracts";
+
+import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 
 import { toSortableTimestamp } from "../../lib/threadSort";
 import type { PullRequestListSort } from "./pullRequestListPreferences";
+
+export interface ProjectPullRequestScope {
+  readonly projectId: ProjectId | null;
+  readonly repository: string | null;
+}
+
+export function resolveProjectPullRequestScope(input: {
+  readonly supportsPullRequests: boolean;
+  readonly project:
+    | {
+        readonly id: ProjectId;
+        readonly repositoryIdentity?: RepositoryIdentity | null | undefined;
+      }
+    | null
+    | undefined;
+}): ProjectPullRequestScope {
+  if (!input.supportsPullRequests) return { projectId: null, repository: null };
+  return {
+    projectId: input.project?.id ?? null,
+    repository: sourceControlRepositorySelector(input.project?.repositoryIdentity),
+  };
+}
 
 /**
  * A listed change request with the environment that read it. Nothing on a row says which machine

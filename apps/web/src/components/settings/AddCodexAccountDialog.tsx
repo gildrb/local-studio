@@ -1,10 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  ProviderDriverKind,
-  ProviderInstanceId,
-  type EnvironmentId,
-  type ServerProvider,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { usesChatGptSharing } from "@t3tools/shared/usageLimits";
 
@@ -17,6 +12,10 @@ import { Dialog } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { WizardFooter, WizardHeader, WizardPanel, WizardPopup } from "../ui/wizard";
 import { SettingsRow } from "./settingsLayout";
+import {
+  buildAddCodexAccountModel,
+  resolveAddCodexAccountCreate,
+} from "./AddCodexAccountDialog.logic";
 
 export function AddCodexAccountDialog({
   environmentId,
@@ -35,11 +34,17 @@ export function AddCodexAccountDialog({
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const update = useAtomCommand(serverEnvironment.updateSettings, "Add ChatGPT account");
   const [name, setName] = useState("Personal");
-  const displayName = `ChatGPT - ${name.trim()}`;
   const [instanceId, setInstanceId] = useState<ProviderInstanceId | null>(null);
   const [pending, setPending] = useState(false);
   const provider = providers?.find((candidate) => candidate.instanceId === instanceId);
   const connected = usesChatGptSharing(provider);
+  const model = buildAddCodexAccountModel({
+    name,
+    instanceId,
+    pending,
+    providerHasSetup: Boolean(provider?.setup),
+    connected,
+  });
   const closeAfterConnection = useEffectEvent(onClose);
   useEffect(() => {
     // The destination snapshot confirms remote transfer as well as local sign-in.
@@ -47,92 +52,85 @@ export function AddCodexAccountDialog({
   }, [connected]);
 
   const createAccount = async () => {
-    if (pending || !name.trim()) return;
-    setPending(true);
     // The ID is routing identity; the name is editable and need not be unique.
-    const id = ProviderInstanceId.make(`codex_${randomUUID()}`);
+    const create = resolveAddCodexAccountCreate({
+      name,
+      pending,
+      instanceSuffix: randomUUID(),
+      providerInstances: settings.providerInstances,
+    });
+    if (create.kind === "none") return;
+    setPending(true);
     const result = await update({
       environmentId,
-      input: {
-        patch: {
-          providerInstances: {
-            ...settings.providerInstances,
-            [id]: {
-              driver: ProviderDriverKind.make("codex"),
-              displayName,
-              enabled: true,
-              config: { enabled: true, setupMode: "managed" },
-            },
-          },
-        },
-      },
+      input: { patch: { providerInstances: create.providerInstances } },
     });
     if (result._tag === "Success") {
       if (onAccountCreated) {
-        onAccountCreated(id, displayName);
+        onAccountCreated(create.instanceId, create.displayName);
         onClose();
       } else {
-        setInstanceId(id);
+        setInstanceId(create.instanceId);
       }
     }
     setPending(false);
   };
 
+  const { body, footer } = model;
   return (
     <Dialog
-      open={!connected}
+      open={model.open}
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
     >
       <WizardPopup size="wide">
-        <WizardHeader
-          title={instanceId ? displayName : "Add ChatGPT account"}
-          description="Each account has its own Codex instance and sign-in. Choose the other account on the sign-in page."
-        />
+        <WizardHeader title={model.title} description={model.description} />
         <WizardPanel>
-          {instanceId ? (
-            provider?.setup ? (
-              renderSetup(instanceId, provider)
-            ) : (
-              <SettingsRow title="Codex runtime" description="Preparing managed setup." />
-            )
-          ) : (
+          {body.kind === "setup" && instanceId && provider ? (
+            renderSetup(instanceId, provider)
+          ) : body.kind === "preparing" ? (
+            <SettingsRow title={body.title} description={body.description} />
+          ) : body.kind === "form" ? (
             <form
-              id="add-codex-account"
+              id={body.formId}
               onSubmit={(event) => {
                 event.preventDefault();
                 void createAccount();
               }}
             >
               <SettingsRow
-                title="Account name"
-                description="Shown in the provider list and model picker."
+                title={body.title}
+                description={body.description}
                 control={
                   <Input
-                    aria-label="Account name"
-                    value={name}
-                    disabled={pending}
+                    aria-label={body.inputLabel}
+                    value={body.value}
+                    disabled={body.disabled}
                     onChange={(event) => setName(event.target.value)}
-                    placeholder="e.g. Personal or Work"
+                    placeholder={body.placeholder}
                   />
                 }
               />
             </form>
-          )}
+          ) : null}
         </WizardPanel>
         <WizardFooter>
-          {instanceId ? (
+          {footer.kind === "finish-later" ? (
             <Button variant="outline" onClick={onClose}>
-              Finish later
+              {footer.finishLater.label}
             </Button>
           ) : (
             <>
-              <Button variant="outline" disabled={pending} onClick={onClose}>
-                Cancel
+              <Button variant="outline" disabled={footer.cancel.disabled} onClick={onClose}>
+                {footer.cancel.label}
               </Button>
-              <Button type="submit" form="add-codex-account" disabled={pending || !name.trim()}>
-                {pending ? "Adding account…" : "Continue"}
+              <Button
+                type="submit"
+                form={body.kind === "form" ? body.formId : undefined}
+                disabled={footer.submit.disabled}
+              >
+                {footer.submit.label}
               </Button>
             </>
           )}

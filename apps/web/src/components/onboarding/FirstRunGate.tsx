@@ -17,7 +17,10 @@ import {
   resolveFirstRunDecision,
   resolveHostedFirstRunDecision,
   transitionFirstRunGateState,
+  buildFirstRunRecoveryModel,
+  resolveFirstRunGateView,
   type FirstRunGateState,
+  type FirstRunRecoveryReason,
 } from "../../onboarding/firstRun.logic";
 import {
   useAllEnvironmentShellsBootstrapped,
@@ -103,7 +106,6 @@ export function FirstRunGate({
     stalled: false,
   }));
   const { decision, stalled } = gateState;
-  const settingsReadFailed = hydrationStatus === "failed" || hydrationStatus === "retrying";
   // A workspace still counts as fresh when its only content is the server's
   // own cwd auto-bootstrap: web mode creates a project + thread from cwd at
   // startup (`autoBootstrapProjectFromCwd` defaults on there), so "no
@@ -188,49 +190,44 @@ export function FirstRunGate({
     }
   }, [decision, navigate, pathname]);
 
-  if (settingsReadFailed) {
-    return <FirstRunRecovery reason="settings" retrying={hydrationStatus === "retrying"} />;
+  const view = resolveFirstRunGateView({ hydrationStatus, decision, stalled });
+  if (view.kind === "recovery") {
+    return <FirstRunRecovery reason={view.reason} retrying={view.retrying} />;
   }
-  if (decision !== "app") {
-    return stalled ? <FirstRunRecovery reason="connection" /> : null;
+  if (view.kind === "blank") {
+    return null;
   }
   return children;
 }
 
 function FirstRunRecovery({
   reason,
-  retrying = false,
+  retrying,
 }: {
-  readonly reason: "settings" | "connection";
-  readonly retrying?: boolean;
+  readonly reason: FirstRunRecoveryReason;
+  readonly retrying: boolean;
 }) {
-  const settingsReadFailed = reason === "settings";
+  const model = buildFirstRunRecoveryModel({ reason, retrying });
   return (
     <main className="flex h-dvh min-h-0 items-center justify-center bg-background px-6 text-foreground">
       <div className="flex max-w-sm flex-col items-center text-center">
-        <h1 className="text-lg font-semibold">
-          {settingsReadFailed ? "Could not read settings" : "Still connecting"}
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {settingsReadFailed
-            ? "Your saved settings could not be loaded."
-            : "T3 Code could not confirm this workspace."}
-        </p>
+        <h1 className="text-lg font-semibold">{model.title}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{model.description}</p>
         <Button
           className="mt-5"
           size="sm"
           variant="outline"
-          disabled={retrying}
+          disabled={!model.action.enabled}
           onClick={() => {
-            if (settingsReadFailed) {
+            if (model.action.kind === "retrySettings") {
               void ensureClientSettingsHydrated().catch(() => undefined);
             } else {
               window.location.reload();
             }
           }}
         >
-          <RefreshIcon refreshing={retrying} />
-          {settingsReadFailed ? "Retry" : "Reload"}
+          <RefreshIcon refreshing={model.action.refreshing} />
+          {model.action.label}
         </Button>
       </div>
     </main>

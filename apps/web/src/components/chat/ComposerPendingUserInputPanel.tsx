@@ -9,6 +9,12 @@ import { CheckIcon } from "lucide-react";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "../ui/collapsible";
 import { cn } from "~/lib/utils";
 import { ComposerBanner } from "./ComposerBanner";
+import {
+  PENDING_USER_INPUT_AUTO_ADVANCE_MS,
+  reconcileOptimisticSingleSelect,
+  resolvePendingUserInputOptionRows,
+  type OptimisticSingleSelect,
+} from "./threadInteractions.logic";
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
@@ -68,10 +74,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const activeQuestion = progress.activeQuestion;
   const autoAdvanceTimerRef = useRef<number | null>(null);
   const onAdvanceRef = useRef(onAdvance);
-  const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
-    questionId: string;
-    optionValue: string;
-  } | null>(null);
+  const [optimisticSingleSelect, setOptimisticSingleSelect] =
+    useState<OptimisticSingleSelect | null>(null);
   // Collapsing hides everything but the header so a tall prompt stops covering
   // the thread the user is trying to read. Scoped to a single question: the card
   // is keyed by request id so the next prompt starts expanded, and storing the
@@ -86,18 +90,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }, [onAdvance]);
 
   useEffect(() => {
-    if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect) {
-      return;
-    }
-    if (optimisticSingleSelect.questionId !== activeQuestion.id) {
-      setOptimisticSingleSelect(null);
-      return;
-    }
-    if (
-      progress.customAnswer.trim().length === 0 &&
-      progress.selectedOptionValues.includes(optimisticSingleSelect.optionValue)
-    ) {
-      setOptimisticSingleSelect(null);
+    const next = reconcileOptimisticSingleSelect(optimisticSingleSelect, activeQuestion, {
+      customAnswer: progress.customAnswer,
+      selectedOptionValues: progress.selectedOptionValues,
+    });
+    if (next !== optimisticSingleSelect) {
+      setOptimisticSingleSelect(next);
     }
   }, [
     activeQuestion,
@@ -129,7 +127,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       autoAdvanceTimerRef.current = window.setTimeout(() => {
         autoAdvanceTimerRef.current = null;
         onAdvanceRef.current();
-      }, 200);
+      }, PENDING_USER_INPUT_AUTO_ADVANCE_MS);
     },
     [activeQuestion, onToggleOption],
   );
@@ -169,7 +167,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     return null;
   }
 
-  const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const optionRows = resolvePendingUserInputOptionRows({
+    question: activeQuestion,
+    progress,
+    optimistic: optimisticSingleSelect,
+  });
 
   return (
     <Collapsible
@@ -235,15 +237,9 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               <p className="mt-1 text-secondary-label text-xs">Select one or more options.</p>
             ) : null}
             <div className="mt-2 space-y-0.5">
-              {activeQuestion.options.map((option, index) => {
-                const optionValue = option.value ?? option.label;
-                const isOptimisticallySelected =
-                  optimisticSingleSelect?.questionId === activeQuestion.id &&
-                  optimisticSingleSelect.optionValue === optionValue;
-                const isSelected =
-                  isOptimisticallySelected ||
-                  (!customAnswerActive && progress.selectedOptionValues.includes(optionValue));
-                const shortcutKey = index < 9 ? index + 1 : null;
+              {optionRows.map((option) => {
+                const isSelected = option.selected;
+                const shortcutKey = option.shortcutKey;
                 const className = cn(
                   "group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left outline-none transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-primary/25",
                   isSelected
@@ -256,7 +252,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   <>
                     <div className="min-w-0 flex-1 flex flex-col gap-0.5">
                       <span className="text-sm font-medium">{option.label}</span>
-                      {option.description && option.description !== option.label ? (
+                      {option.description !== null ? (
                         <span className="text-secondary-label text-2xs">{option.description}</span>
                       ) : null}
                     </div>
@@ -275,11 +271,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 );
                 return (
                   <button
-                    key={`${activeQuestion.id}:${optionValue}`}
+                    key={`${activeQuestion.id}:${option.value}`}
                     type="button"
                     disabled={isResponding}
                     onClick={() => {
-                      handleOptionSelection(activeQuestion.id, optionValue);
+                      handleOptionSelection(activeQuestion.id, option.value);
                     }}
                     className={className}
                   >

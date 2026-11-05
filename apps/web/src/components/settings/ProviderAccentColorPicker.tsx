@@ -1,19 +1,23 @@
 "use client";
 
 import { PipetteIcon, XIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { hexToHsv, hsvToHex, type HsvColor } from "../../lib/color";
 import { ColorHueSlider, ColorSaturationValuePlane } from "../ui/color-picker";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Popover, PopoverClose, PopoverPopup, PopoverTrigger } from "../ui/popover";
-import { normalizeProviderAccentColor } from "../../providerInstances";
 import { cn } from "../../lib/utils";
-
-const FALLBACK_ACCENT_COLOR = "#2563eb";
+import {
+  buildProviderAccentColorPickerModel,
+  resolveProviderAccentChange,
+  resolveProviderAccentHexInput,
+  type ProviderAccentColorPickerModel,
+} from "./ProviderAccentColorPicker.logic";
 
 function ProviderCustomColorPanel(props: {
+  readonly model: ProviderAccentColorPickerModel;
   readonly value: string;
   readonly onCommit: (value: string) => void;
 }) {
@@ -33,14 +37,14 @@ function ProviderCustomColorPanel(props: {
   return (
     <div className="w-56 bg-popover">
       <ColorSaturationValuePlane
-        label="Accent color"
+        label={props.model.planeLabel}
         value={hsv}
         onChange={commitHsv}
         variant="edge"
       />
       <div className="grid gap-3 p-3">
         <ColorHueSlider
-          label="Accent color hue"
+          label={props.model.hueLabel}
           value={hsv.h}
           onChange={(h) => commitHsv({ ...hsv, h })}
         />
@@ -51,13 +55,14 @@ function ProviderCustomColorPanel(props: {
           onChange={(event) => {
             const nextColor = event.currentTarget.value;
             setHexDraft(nextColor);
-            if (!/^#[\da-f]{6}$/i.test(nextColor)) return;
-            setHsv(hexToHsv(nextColor));
-            props.onCommit(nextColor);
+            const committedColor = resolveProviderAccentHexInput(nextColor);
+            if (committedColor === null) return;
+            setHsv(hexToHsv(committedColor));
+            props.onCommit(committedColor);
           }}
           onBlur={() => setHexDraft(null)}
           font="mono"
-          aria-label="Custom hex accent color"
+          aria-label={props.model.hexInputAriaLabel}
           spellCheck={false}
         />
       </div>
@@ -66,12 +71,11 @@ function ProviderCustomColorPanel(props: {
 }
 
 function ProviderCustomColorPicker(props: {
-  readonly displayName: string;
-  readonly value: string | undefined;
+  readonly model: ProviderAccentColorPickerModel;
   readonly onCommit: (value: string) => void;
   readonly onClear: () => void;
 }) {
-  const normalized = normalizeProviderAccentColor(props.value) ?? FALLBACK_ACCENT_COLOR;
+  const { model } = props;
 
   return (
     <Popover>
@@ -83,15 +87,19 @@ function ProviderCustomColorPicker(props: {
               "flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md border border-input text-white shadow-xs transition-transform duration-200 active:scale-95",
               "hover:scale-105 hover:border-ring/60",
             )}
-            style={{ backgroundColor: normalized }}
-            aria-label={`Choose accent color for ${props.displayName}`}
+            style={{ backgroundColor: model.swatchColor }}
+            aria-label={model.triggerAriaLabel}
           >
             <PipetteIcon className="size-3 text-white/70 drop-shadow-sm" aria-hidden />
           </button>
         }
       />
       <PopoverPopup side="bottom" align="start" sideOffset={6} padding="none">
-        <ProviderCustomColorPanel value={normalized} onCommit={props.onCommit} />
+        <ProviderCustomColorPanel
+          model={model}
+          value={model.swatchColor}
+          onCommit={props.onCommit}
+        />
         <div className="border-t border-border/60 p-1">
           <PopoverClose
             render={
@@ -101,10 +109,10 @@ function ProviderCustomColorPicker(props: {
                 variant="ghost-muted"
                 className="w-full justify-start"
                 onClick={props.onClear}
-                disabled={!props.value}
+                disabled={model.clearDisabled}
               >
                 <XIcon aria-hidden />
-                Clear color
+                {model.clearLabel}
               </Button>
             }
           />
@@ -159,7 +167,7 @@ export function ProviderAccentColorPicker(props: {
 
   const commitAccentColor = useCallback(
     (value: string) => {
-      const normalizedValue = normalizeProviderAccentColor(value) ?? "";
+      const normalizedValue = resolveProviderAccentChange(value);
       setOptimisticValue(normalizedValue);
 
       if (commitDelayMs <= 0) {
@@ -188,25 +196,35 @@ export function ProviderAccentColorPicker(props: {
     [commitDelayMs, onCommit],
   );
 
-  const normalized = normalizeProviderAccentColor(optimisticValue);
+  const model = useMemo(
+    () =>
+      buildProviderAccentColorPickerModel({
+        displayName,
+        value: optimisticValue,
+        description,
+        layout,
+      }),
+    [description, displayName, layout, optimisticValue],
+  );
   const picker = (
     <ProviderCustomColorPicker
-      displayName={displayName}
-      value={normalized}
+      model={model}
       onCommit={commitAccentColor}
       onClear={() => commitAccentColor("")}
     />
   );
 
-  if (layout === "inline") {
+  if (model.layout === "inline") {
     return picker;
   }
 
   return (
     <div className="grid gap-2">
-      <span className="text-xs font-medium text-foreground">Accent color</span>
+      <span className="text-xs font-medium text-foreground">{model.label}</span>
       {picker}
-      {description ? <span className="text-xs text-muted-foreground">{description}</span> : null}
+      {model.description ? (
+        <span className="text-xs text-muted-foreground">{model.description}</span>
+      ) : null}
     </div>
   );
 }

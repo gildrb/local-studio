@@ -7,6 +7,11 @@ import * as Schema from "effect/Schema";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
+import {
+  escapeDesktopEntryExecArgument,
+  escapeDesktopEntryString,
+} from "@t3tools/shared/desktopEntry";
+
 import * as ElectronProtocol from "../electron/ElectronProtocol.ts";
 import * as DesktopAssets from "./DesktopAssets.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
@@ -57,29 +62,6 @@ export class DesktopLinuxUrlHandlerCacheRefreshError extends Schema.TaggedError<
 }
 
 const isCacheRefreshError = Schema.is(DesktopLinuxUrlHandlerCacheRefreshError);
-
-const escapeDesktopEntryString = (value: string): string =>
-  value
-    .replaceAll("\\", "\\\\")
-    .replaceAll("\n", "\\n")
-    .replaceAll("\r", "\\r")
-    .replaceAll("\t", "\\t");
-
-// Exec values are unescaped twice by implementations: first the general
-// string-value rules, then the Exec quoting rules — so writing composes the
-// layers in reverse. The argument is double-quoted with reserved characters
-// backslash-escaped and literal percent signs doubled (field codes), and the
-// general string escaping is applied on top: a literal backslash ends up as
-// four backslashes in the file, a quote as \\", a dollar sign as \\$.
-export function escapeDesktopEntryExecArgument(value: string): string {
-  const quoted = value
-    .replaceAll("\\", () => "\\\\")
-    .replaceAll("`", () => "\\`")
-    .replaceAll("$", () => "\\$")
-    .replaceAll('"', () => '\\"')
-    .replaceAll("%", () => "%%");
-  return escapeDesktopEntryString(`"${quoted}"`);
-}
 
 // The AppImage integration entry owns the window identity. This
 // hidden URL-only entry must not compete with it for StartupWMClass matching.

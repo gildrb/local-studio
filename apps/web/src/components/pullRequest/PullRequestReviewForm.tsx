@@ -6,7 +6,7 @@
  */
 import type { EnvironmentId, PullRequestRef, PullRequestReviewVerdict } from "@t3tools/contracts";
 import { CheckIcon, MessageSquareIcon, XCircleIcon } from "lucide-react";
-import { useState, type ReactNode, type RefObject } from "react";
+import { useState, type RefObject } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -16,36 +16,28 @@ import { Select, SelectItem, SelectPopup, SelectTrigger } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import {
+  buildPullRequestReviewFormModel,
+  PULL_REQUEST_REVIEW_FAILURE_TITLE,
+  resolvePullRequestReviewSubmit,
+  type PullRequestReviewVerdictIcon,
+  type PullRequestReviewVerdictOption,
+} from "./PullRequestReviewForm.logic";
+import {
   pullRequestReviewKey,
   usePendingReviewComments,
   usePullRequestReviewStore,
 } from "./pullRequestReviewStore";
 
-const VERDICTS: ReadonlyArray<{
-  readonly value: PullRequestReviewVerdict;
-  readonly label: string;
-  readonly sent: string;
-  readonly icon: ReactNode;
-}> = [
-  {
-    value: "comment",
-    label: "Comment",
-    sent: "Review submitted",
-    icon: <MessageSquareIcon className="size-3" />,
-  },
-  {
-    value: "approve",
-    label: "Approve",
-    sent: "Pull request approved",
-    icon: <CheckIcon className="size-3" />,
-  },
-  {
-    value: "request-changes",
-    label: "Request changes",
-    sent: "Changes requested",
-    icon: <XCircleIcon className="size-3" />,
-  },
-];
+function VerdictIcon({ icon }: { icon: PullRequestReviewVerdictIcon }) {
+  switch (icon) {
+    case "message-square":
+      return <MessageSquareIcon className="size-3" />;
+    case "check":
+      return <CheckIcon className="size-3" />;
+    case "x-circle":
+      return <XCircleIcon className="size-3" />;
+  }
+}
 
 export function PullRequestReviewForm({
   environmentId,
@@ -80,12 +72,16 @@ export function PullRequestReviewForm({
     reportFailure: false,
   });
 
-  const offered = VERDICTS.filter((verdict) => verdicts.includes(verdict.value));
-  const selectedVerdict =
-    offered.find((verdict) => verdict.value === requestedVerdict) ?? offered[0];
+  const model = buildPullRequestReviewFormModel({
+    verdicts,
+    requestedVerdict,
+    requestChangesSummaryRequired,
+    body,
+    pendingCommentCount: comments.length,
+    pending,
+  });
 
-  const submit = async (verdict: (typeof VERDICTS)[number]) => {
-    if (pending) return;
+  const submit = async (verdict: PullRequestReviewVerdictOption) => {
     const submittedBody = body;
     const submittedComments = comments;
     onPendingChange(true);
@@ -101,7 +97,7 @@ export function PullRequestReviewForm({
     onPendingChange(false);
     if (result._tag === "Failure") {
       // The draft is kept: whatever went wrong, retyping the review is not the answer.
-      toastManager.add({ type: "error", title: "The review could not be submitted" });
+      toastManager.add({ type: "error", title: PULL_REQUEST_REVIEW_FAILURE_TITLE });
       return;
     }
     // More remarks may have been added while the host was accepting this snapshot. Leave those,
@@ -115,45 +111,35 @@ export function PullRequestReviewForm({
     onSubmitted();
   };
 
-  // Forgejo requires a summary when requesting changes, even with inline comments.
-  const canSubmit = (verdict: PullRequestReviewVerdict) =>
-    verdict === "request-changes" && requestChangesSummaryRequired
-      ? body.trim().length > 0
-      : verdict === "approve" || body.trim().length > 0 || comments.length > 0;
-
   return (
     <>
       <Textarea
         ref={textareaRef}
         rows={3}
         value={body}
-        placeholder={
-          requestChangesSummaryRequired && verdicts.includes("request-changes")
-            ? "Summarize your review (required to request changes)"
-            : "Summarize your review (optional)"
-        }
-        aria-label="Review summary"
+        placeholder={model.summaryPlaceholder}
+        aria-label={model.summaryAriaLabel}
         onChange={(event) => setSummary(reviewKey, event.target.value)}
       />
       <div className="mt-2 flex justify-between gap-2">
         <Select
-          value={selectedVerdict?.value ?? null}
-          disabled={pending}
+          value={model.selected?.value ?? null}
+          disabled={model.verdictDisabled}
           onValueChange={(value) => {
             if (value !== null) setRequestedVerdict(value);
           }}
         >
-          <SelectTrigger size="xs" className="w-auto min-w-0" aria-label="Review verdict">
+          <SelectTrigger size="xs" className="w-auto min-w-0" aria-label={model.verdictAriaLabel}>
             <span className="flex items-center gap-1.5">
-              {selectedVerdict?.icon}
-              {selectedVerdict?.label}
+              {model.selected ? <VerdictIcon icon={model.selected.icon} /> : null}
+              {model.selected?.label}
             </span>
           </SelectTrigger>
           <SelectPopup side="top" alignItemWithTrigger={false}>
-            {offered.map((verdict) => (
+            {model.options.map((verdict) => (
               <SelectItem key={verdict.value} value={verdict.value}>
                 <span className="flex items-center gap-1.5">
-                  {verdict.icon}
+                  <VerdictIcon icon={verdict.icon} />
                   {verdict.label}
                 </span>
               </SelectItem>
@@ -162,12 +148,13 @@ export function PullRequestReviewForm({
         </Select>
         <Button
           size="xs"
-          disabled={pending || selectedVerdict === undefined || !canSubmit(selectedVerdict.value)}
+          disabled={model.submitDisabled}
           onClick={() => {
-            if (selectedVerdict !== undefined) void submit(selectedVerdict);
+            const decision = resolvePullRequestReviewSubmit(model, pending);
+            if (decision.kind === "submit") void submit(decision.verdict);
           }}
         >
-          {pending ? "Submitting..." : "Submit review"}
+          {model.submitLabel}
         </Button>
       </div>
     </>

@@ -1,11 +1,14 @@
 import { create } from "zustand";
 
 import {
+  getCustomThemes,
+  getEnvironmentThemes,
   getThemeDefinition,
   type ThemeAppearance,
   type ThemeHalves,
   type ThemePreference,
 } from "../../themePalette";
+import { resolveThemeEditorToggle } from "./themeEditorStore.logic";
 
 /**
  * The theme editor lives above the router so a draft survives navigation: the
@@ -51,18 +54,16 @@ export function toggleThemeEditorForTheme(input: {
   initialAppearance: ThemeAppearance;
 }): void {
   const store = useThemeEditorStore.getState();
-  if (store.session) {
+  const decision = resolveThemeEditorToggle({
+    isOpen: store.session !== null,
+    baseThemeId: getThemeDefinition(input.theme)?.id ?? null,
+    themeHalves: input.themeHalves,
+    initialAppearance: input.initialAppearance,
+    catalog: { customThemes: getCustomThemes(), environmentThemes: getEnvironmentThemes() },
+  });
+  if (decision.kind === "close") {
     store.closeThemeEditor();
     return;
   }
-
-  const baseThemeId = getThemeDefinition(input.theme)?.id ?? null;
-  const activeThemeId = input.themeHalves?.[input.initialAppearance] ?? baseThemeId;
-  const seedThemeId = activeThemeId ? (getThemeDefinition(activeThemeId)?.id ?? null) : null;
-  store.openThemeEditor({
-    editingThemeId: null,
-    seedThemeId,
-    seedName: null,
-    initialAppearance: input.initialAppearance,
-  });
+  store.openThemeEditor(decision.session);
 }

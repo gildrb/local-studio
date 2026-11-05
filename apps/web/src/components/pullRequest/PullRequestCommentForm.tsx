@@ -13,6 +13,12 @@ import { Button } from "../ui/button";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 import { PullRequestGlyph } from "./pullRequestIcons";
+import {
+  buildPullRequestCommentFormModel,
+  PULL_REQUEST_COMMENT_POST_FAILED,
+  resolvePullRequestCommentSubmit,
+  type PullRequestCommentSubmitAction,
+} from "./PullRequestComposer.logic";
 
 export function PullRequestCommentForm({
   environmentId,
@@ -39,20 +45,11 @@ export function PullRequestCommentForm({
   const [body, setBody] = useState("");
   const [submitting, setSubmitting] = useState<"comment" | "close" | "reopen" | null>(null);
   const postComment = useAtomCommand(pullRequestEnvironment.comment, { reportFailure: false });
-  const followUpAction =
-    detail.state === "open" &&
-    detail.capabilities.actions.includes("close") &&
-    detail.viewerPermissions.actions.includes("close")
-      ? ("close" as const)
-      : detail.state === "closed" &&
-          detail.capabilities.actions.includes("reopen") &&
-          detail.viewerPermissions.actions.includes("reopen")
-        ? ("reopen" as const)
-        : null;
+  const model = buildPullRequestCommentFormModel({ detail, body, submitting, actionPending });
 
-  const submit = async (action: "comment" | "close" | "reopen") => {
-    const trimmed = body.trim();
-    if (trimmed.length === 0 || submitting !== null || actionPending) return;
+  const submit = async (action: PullRequestCommentSubmitAction) => {
+    const trimmed = resolvePullRequestCommentSubmit({ body, submitting, actionPending });
+    if (trimmed === null) return;
     setSubmitting(action);
     if (action !== "comment") {
       const result = await onCommentAction(trimmed, action);
@@ -72,7 +69,7 @@ export function PullRequestCommentForm({
     });
     if (result._tag === "Failure") {
       setSubmitting(null);
-      toastManager.add({ type: "error", title: "Could not post the comment" });
+      toastManager.add({ type: "error", title: PULL_REQUEST_COMMENT_POST_FAILED });
       return;
     }
     setBody("");
@@ -87,11 +84,11 @@ export function PullRequestCommentForm({
         ref={textareaRef}
         // Locked while posting: the body is cleared on success, which would otherwise throw
         // away a new draft typed while the request was still in flight.
-        disabled={submitting !== null || actionPending}
+        disabled={model.disabled}
         value={body}
         rows={3}
-        placeholder="Leave a comment"
-        aria-label="Comment on this pull request"
+        placeholder={model.placeholder}
+        aria-label={model.ariaLabel}
         onChange={(event) => setBody(event.target.value)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -108,35 +105,31 @@ export function PullRequestCommentForm({
         }}
       />
       <div className="flex flex-wrap justify-end gap-2">
-        {followUpAction === null ? null : (
+        {model.followUp === null ? null : (
           <Button
             size="xs"
-            variant={followUpAction === "close" ? "destructive-outline" : "outline"}
-            disabled={body.trim().length === 0 || submitting !== null || actionPending}
-            onClick={() => void submit(followUpAction)}
+            variant={model.followUp.destructive ? "destructive-outline" : "outline"}
+            disabled={model.followUp.disabled}
+            onClick={() => {
+              if (model.followUp !== null) void submit(model.followUp.action);
+            }}
           >
-            {followUpAction === "close" ? (
+            {model.followUp.action === "close" ? (
               <PullRequestGlyph.closed className="size-3.5" />
             ) : (
               <PullRequestGlyph.reopen className="size-3.5" />
             )}
-            {submitting === followUpAction
-              ? followUpAction === "close"
-                ? "Closing..."
-                : "Reopening..."
-              : followUpAction === "close"
-                ? "Close with comment"
-                : "Reopen with comment"}
+            {model.followUp.label}
           </Button>
         )}
         <Button
           size="xs"
           variant="outline"
-          disabled={body.trim().length === 0 || submitting !== null || actionPending}
+          disabled={model.submit.disabled}
           onClick={() => void submit("comment")}
         >
           <SendIcon className="size-3.5" />
-          {submitting === "comment" ? "Posting..." : "Comment"}
+          {model.submit.label}
         </Button>
       </div>
     </div>

@@ -5,6 +5,7 @@ import { TaskItem } from "@tiptap/extension-task-item";
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
 import { parseInlineMarkdown, RICH_TEXT_DELIMITERS, type RichTextMark } from "~/composer-rich-text";
 import { collectInlineContextIds } from "~/lib/composerContextReferences";
+import type { ComposerSkillMeta } from "~/components/chat/composerTriggers.logic";
 
 /**
  * Pure document model for the rich text (Tiptap) composer.
@@ -23,7 +24,7 @@ import { collectInlineContextIds } from "~/lib/composerContextReferences";
  * JSON this produces and assert the round trip without a browser.
  */
 
-export type SkillMeta = { label: string; description: string | null };
+export type SkillMeta = ComposerSkillMeta;
 
 /** Outermost mark first, so closers mirror openers when nested. */
 const MARK_NESTING_ORDER: RichTextMark[] = ["strike", "bold", "italic", "code"];

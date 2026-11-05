@@ -1,7 +1,6 @@
 import { SettingsGroup } from "./SettingsGroup";
 import { InfoIcon, Undo2Icon } from "lucide-react";
-import { DEFAULT_SERVER_SETTINGS, type ServerSettings } from "@t3tools/contracts";
-import * as Equal from "effect/Equal";
+import type { ServerSettings } from "@t3tools/contracts";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   createContext,
@@ -14,28 +13,17 @@ import {
   useState,
 } from "react";
 
-import {
-  PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
-  usePrimarySettingsAvailable,
-} from "../../hooks/useSettings";
+import { usePrimarySettingsAvailable } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { WorkspacePageContainer, type WorkspacePageWidth } from "../WorkspacePageContainer";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { useOptionalSettingsScope } from "./SettingsScopeContext";
 import { SettingsScopeSentence } from "./SettingsScopeSentence";
-import {
-  isProjectScopedSettingKey,
-  listProjectOverrides,
-  scopedSettingsAreMixed,
-  scopedSettingsSource,
-} from "./scopedSettings";
+import { listProjectOverrides } from "./scopedSettings";
 import { useClearProjectOverrides, useClearScopedSettings } from "./useScopedSettings";
-import {
-  SettingInheritance,
-  type SettingInheritanceState,
-  type SettingOverridingProject,
-} from "./SettingInheritance";
+import { SettingInheritance, type SettingOverridingProject } from "./SettingInheritance";
+import { buildSettingsRowScopeModel, resolveSettingsSearchTargetId } from "./settingsLayout.logic";
 
 const EMPTY_SETTING_KEYS: readonly (keyof ServerSettings)[] = [];
 
@@ -283,36 +271,26 @@ export function SettingsRow({
   const context = useOptionalSettingsScope();
   const clearOverrides = useClearScopedSettings();
   const clearProjectOverrides = useClearProjectOverrides();
-  const isProjectScope =
-    context !== null && (context.scope.kind === "project" || context.scope.kind === "checkout");
-  const scopedKeys = settingKeys.filter(isProjectScopedSettingKey);
-  // A project scope can only edit keys that support overrides; the rest stay
-  // visible so the user sees the inherited value, but cannot change it here.
-  const environmentWide = isProjectScope && serverScoped && scopedKeys.length === 0;
-  const mixed =
-    mixedOverride ?? (context !== null && scopedSettingsAreMixed(context.targets, settingKeys));
-  const source =
-    context && isProjectScope ? scopedSettingsSource(context.targets, scopedKeys) : null;
-  const unavailable =
-    serverScoped &&
-    !(context ? context.connectedEnvironments.length > 0 : primarySettingsAvailable);
-  const inheritedFrom =
-    source === "environment" && context?.scope.environmentIds.length === 1
-      ? (context.environments.find(
-          (environment) => environment.environmentId === context.scope.environmentIds[0],
-        )?.label ?? "environment")
-      : "environment";
-  const environmentSettingsById = useMemo(
+  const rowScope = useMemo(
     () =>
-      new Map(
-        (context?.connectedEnvironments ?? []).flatMap((environment) =>
-          environment.serverConfig
-            ? [[environment.environmentId, environment.serverConfig.settings] as const]
-            : [],
-        ),
-      ),
-    [context?.connectedEnvironments],
+      buildSettingsRowScopeModel({
+        serverScoped,
+        settingKeys,
+        mixed: mixedOverride,
+        primarySettingsAvailable,
+        context: context
+          ? {
+              scopeKind: context.scope.kind,
+              scopeEnvironmentIds: context.scope.environmentIds,
+              targets: context.targets,
+              connectedEnvironments: context.connectedEnvironments,
+              environments: context.environments,
+            }
+          : null,
+      }),
+    [context, mixedOverride, primarySettingsAvailable, serverScoped, settingKeys],
   );
+  const { isProjectScope, scopedKeys, unavailable } = rowScope;
   // At environment scope, projects with their own value keep it when the
   // environment default changes; the chain names them and can reset them.
   const overridingProjects = useMemo((): SettingOverridingProject[] => {
@@ -337,17 +315,16 @@ export function SettingsRow({
       ];
     });
   }, [context, isProjectScope, scopedKeys]);
-  const renderedReset = unavailable ? null : isProjectScope && scopedKeys.length > 0 ? (
-    source === "project" || source === "mixed" ? (
+  const renderedReset =
+    rowScope.reset.kind === "row-action" ? (
+      resetAction
+    ) : rowScope.reset.kind === "clear-overrides" ? (
       <SettingResetButton
         label={typeof title === "string" ? title : "override"}
-        tooltip="Reset to inherited value"
+        tooltip={rowScope.reset.tooltip}
         onClick={() => (onResetOverride ? onResetOverride() : clearOverrides(scopedKeys))}
       />
-    ) : null
-  ) : (
-    resetAction
-  );
+    ) : null;
   const inertControl = (message: string) => (
     <Tooltip>
       <TooltipTrigger
@@ -373,44 +350,14 @@ export function SettingsRow({
   // (the multi-selection inspector convention): the popover shows who has
   // what, and picking a value applies it to every target.
   const renderedControl =
-    unavailable && control
-      ? inertControl(
-          context
-            ? "Reconnect the selected environment to change this setting."
-            : PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE,
-        )
-      : environmentWide && control
-        ? inertControl("Environment-wide setting. Select an environment to change it.")
-        : control;
+    rowScope.inertMessage !== null && control ? inertControl(rowScope.inertMessage) : control;
   // Server rows get an indicator beside the title that opens the resolution
   // chain per target at every scope; client rows keep a plain status only.
-  const customized =
-    context !== null &&
-    settingKeys.some((key) =>
-      context.targets.some((candidate) => {
-        const environmentSettings = environmentSettingsById.get(candidate.environmentId);
-        return (
-          environmentSettings !== undefined &&
-          !Equal.equals(environmentSettings[key], DEFAULT_SERVER_SETTINGS[key])
-        );
-      }),
-    );
-  const inheritance: { state: SettingInheritanceState; summary: string } = mixed
-    ? { state: "mixed", summary: "Mixed across selected environments" }
-    : source === "project"
-      ? { state: "overridden", summary: "Overridden for this project" }
-      : source === "t3.json"
-        ? { state: "inherited", summary: "Inherited from the repository's t3.json" }
-        : source === "environment" && scopedKeys.length > 0
-          ? { state: "inherited", summary: `Inherited from ${inheritedFrom}` }
-          : customized
-            ? { state: "environment", summary: "Set on the environment" }
-            : { state: "default", summary: "Built-in default" };
   const renderedInheritance =
-    context && serverScoped && settingKeys.length > 0 ? (
+    context && rowScope.inheritance ? (
       <SettingInheritance
-        state={inheritance.state}
-        summary={inheritance.summary}
+        state={rowScope.inheritance.state}
+        summary={rowScope.inheritance.summary}
         targets={context.targets}
         environments={context.connectedEnvironments}
         keys={settingKeys}
@@ -519,7 +466,7 @@ export function SettingsPageContainer({
   const highlightTarget = useLocation({
     select: (location) => location.state.settingsTargetHighlight !== false,
   });
-  const targetId = hash.replace(/^#/, "") || null;
+  const targetId = resolveSettingsSearchTargetId(hash);
   const clearTargetHash = useCallback(() => {
     void navigate({
       hash: "",

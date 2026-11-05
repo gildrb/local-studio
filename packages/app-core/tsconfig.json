@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "erasableSyntaxOnly": false,
+    "verbatimModuleSyntax": false,
+    "jsx": "react-jsx",
+    "rewriteRelativeImportExtensions": false,
+    "types": ["node"],
+    "lib": ["ESNext", "DOM", "DOM.Iterable", "esnext.disposable"],
+    "paths": {
+      "~/*": ["../../apps/web/src/*"]
+    },
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "diagnosticSeverity": {
+          "nodeBuiltinImport": "off",
+          "globalDate": "off",
+          "globalTimers": "off",
+          "globalFetch": "off",
+          "preferSchemaOverJson": "off",
+          "unknownInEffectCatch": "off",
+          "anyUnknownInErrorContext": "off",
+          "globalConsole": "off",
+          "globalRandom": "off"
+        }
+      }
+    ]
+  },
+  "include": ["src", "../../apps/web/src/vite-env.d.ts", "../../apps/web/src/router.ts"]
+}

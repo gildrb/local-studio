@@ -1,4 +1,5 @@
 import {
+  getFiletypeFromFileName,
   getSharedHighlighter,
   type DiffsHighlighter,
   type HighlighterTypes,
@@ -14,6 +15,10 @@ import { resolveDiffThemeName } from "./diffRendering";
  * pass this value.
  */
 export const PREFERRED_HIGHLIGHTER: HighlighterTypes = "shiki-wasm";
+
+export function resolveSyntaxLanguage(path: string): SupportedLanguages {
+  return getFiletypeFromFileName(path);
+}
 
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
 

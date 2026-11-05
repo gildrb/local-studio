@@ -6,6 +6,17 @@ import type {
 } from "@t3tools/contracts";
 import { normalizeThreadPullRequestKey } from "@t3tools/shared/threadPullRequests";
 
+import type {
+  LinkThreadPullRequestInput,
+  UnlinkThreadPullRequestInput,
+  UpdateThreadMetadataInput,
+} from "./operations/commands.ts";
+
+export type ThreadPullRequestMutation =
+  | { readonly type: "thread.pull-request.link"; readonly input: LinkThreadPullRequestInput }
+  | { readonly type: "thread.pull-request.unlink"; readonly input: UnlinkThreadPullRequestInput }
+  | { readonly type: "thread.meta.update"; readonly input: UpdateThreadMetadataInput };
+
 type LinkingCapabilities = Pick<
   ExecutionEnvironmentCapabilities,
   "threadPullRequests" | "threadPullRequestLinking"
@@ -36,7 +47,7 @@ export function planThreadPullRequestMutation({
   /** Provider selector for legacy APIs, which omit Azure organization and project paths. */
   legacyRepository?: string | undefined;
   linked: boolean;
-}) {
+}): ThreadPullRequestMutation | null {
   const key = normalizeThreadPullRequestKey(reference);
   switch (threadPullRequestLinkMode(capabilities)) {
     case "multiple":

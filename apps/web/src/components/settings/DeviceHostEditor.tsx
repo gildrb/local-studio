@@ -1,5 +1,4 @@
 import { useState } from "react";
-import * as Option from "effect/Option";
 import type { SshDeviceHostConfig } from "@t3tools/contracts";
 import { CheckIcon, MonitorIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
@@ -16,11 +15,13 @@ import {
 } from "../ui/dialog";
 import { DeviceHostAvailability } from "../device/DeviceHostAvailability";
 import { useHostConnectionChecks } from "./useHostConnectionChecks";
+import type { DeviceHostCheckTarget } from "./deviceHostConnectionChecks";
 import {
-  deviceHostConnectionKey,
-  parseDeviceHostDraft,
-  type DeviceHostCheckTarget,
-} from "./deviceHostConnectionChecks";
+  buildDeviceHostEditorModel,
+  resolveDeviceHostDraftChange,
+  resolveDeviceHostEditorSubmit,
+  resolveDeviceHostEditorTest,
+} from "./deviceHostsSettings.logic";
 
 export function DeviceHostEditor({
   host,
@@ -39,183 +40,158 @@ export function DeviceHostEditor({
 }) {
   const [draft, setDraft] = useState(host);
   const { checks, testConnection } = useHostConnectionChecks(targets);
-  const results = checks[deviceHostConnectionKey(draft)];
-  const checking = Object.values(results ?? {}).some((check) => check.status === "pending");
-  const input = parseDeviceHostDraft({ ...draft, label: draft.label.trim() || draft.target });
-  const valid = Option.isSome(input);
-  const failed = Object.values(results ?? {}).filter((check) => check.status === "failed").length;
+  const modelInput = { host, draft, isNew, targets, busy, checks };
+  const model = buildDeviceHostEditorModel(modelInput);
+  const { fields } = model;
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !busy) onClose();
+        if (!open && model.closeable) onClose();
       }}
     >
       <DialogPopup
-        showCloseButton={!busy}
+        showCloseButton={model.closeable}
         render={
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              if (Option.isSome(input) && draft.label.trim() && !busy && !checking)
-                onSave(input.value);
+              const decision = resolveDeviceHostEditorSubmit(modelInput);
+              if (decision.kind === "save") onSave(decision.host);
             }}
           />
         }
       >
         <DialogHeader>
-          <DialogTitle>{isNew ? "Add device host" : "Edit device host"}</DialogTitle>
-          <DialogDescription>
-            {targets.length === 1
-              ? `Connect from ${targets[0]?.label}.`
-              : `Connect from ${targets.length} selected environments.`}{" "}
-            Hosts on the same machine are skipped.
-          </DialogDescription>
+          <DialogTitle>{model.title}</DialogTitle>
+          <DialogDescription>{model.description}</DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <label className="block space-y-1.5 text-sm">
-            <span>Name</span>
+            <span>{fields.label.label}</span>
             <Input
               autoFocus
-              required
-              value={draft.label}
-              disabled={busy}
-              onChange={(event) => setDraft({ ...draft, label: event.target.value })}
-              placeholder="Mac mini"
+              required={fields.label.required}
+              value={fields.label.value}
+              disabled={fields.label.disabled}
+              onChange={(event) =>
+                setDraft(resolveDeviceHostDraftChange(draft, "label", event.target.value))
+              }
+              placeholder={fields.label.placeholder}
             />
           </label>
           <label className="block space-y-1.5 text-sm">
-            <span>SSH target</span>
+            <span>{fields.target.label}</span>
             <Input
-              required
-              value={draft.target}
-              disabled={busy}
-              onChange={(event) => setDraft({ ...draft, target: event.target.value })}
-              placeholder="user@host or SSH alias"
+              required={fields.target.required}
+              value={fields.target.value}
+              disabled={fields.target.disabled}
+              onChange={(event) =>
+                setDraft(resolveDeviceHostDraftChange(draft, "target", event.target.value))
+              }
+              placeholder={fields.target.placeholder}
             />
           </label>
-          <details
-            open={host.port !== undefined || host.identityFile !== undefined || undefined}
-            className="text-sm"
-          >
-            <summary className="cursor-pointer text-muted-foreground">SSH options</summary>
+          <details open={model.sshOptions.open || undefined} className="text-sm">
+            <summary className="cursor-pointer text-muted-foreground">
+              {model.sshOptions.summary}
+            </summary>
             <div className="mt-3 grid grid-cols-[minmax(0,1fr)_7rem] gap-3">
               <label className="block space-y-1.5">
-                <span>Identity file</span>
+                <span>{fields.identityFile.label}</span>
                 <Input
-                  value={draft.identityFile ?? ""}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const { identityFile: _, ...rest } = draft;
+                  value={fields.identityFile.value}
+                  disabled={fields.identityFile.disabled}
+                  onChange={(event) =>
                     setDraft(
-                      event.target.value ? { ...rest, identityFile: event.target.value } : rest,
-                    );
-                  }}
-                  placeholder="SSH config default"
+                      resolveDeviceHostDraftChange(draft, "identityFile", event.target.value),
+                    )
+                  }
+                  placeholder={fields.identityFile.placeholder}
                 />
               </label>
               <label className="block space-y-1.5">
-                <span>Port</span>
+                <span>{fields.port.label}</span>
                 <Input
                   type="number"
-                  min={1}
-                  max={65535}
-                  value={draft.port ?? ""}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const { port: _, ...rest } = draft;
-                    setDraft(
-                      event.target.value ? { ...rest, port: Number(event.target.value) } : rest,
-                    );
-                  }}
-                  placeholder="Default"
+                  min={fields.port.min ?? undefined}
+                  max={fields.port.max ?? undefined}
+                  value={fields.port.value}
+                  disabled={fields.port.disabled}
+                  onChange={(event) =>
+                    setDraft(resolveDeviceHostDraftChange(draft, "port", event.target.value))
+                  }
+                  placeholder={fields.port.placeholder}
                 />
               </label>
             </div>
-            <p className="mt-2 text-xs text-muted-foreground">
-              Optional. Resolved separately on each environment.
-            </p>
+            <p className="mt-2 text-xs text-muted-foreground">{model.sshOptions.hint}</p>
           </details>
           <div className="rounded-lg border border-border/60">
             <div className="flex items-center justify-between gap-3 px-3 py-2.5">
               <p role="status" className="text-xs text-muted-foreground">
-                {checking
-                  ? "Checking environments…"
-                  : results
-                    ? failed
-                      ? `${failed} of ${targets.length} failed`
-                      : "Connection checks passed"
-                    : "Check access before saving"}
+                {model.connection.status}
               </p>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={busy || checking || !valid}
+                disabled={model.connection.testButton.disabled}
                 onClick={() => {
-                  if (Option.isSome(input)) void testConnection(input.value);
+                  const testHost = resolveDeviceHostEditorTest(draft);
+                  if (testHost !== null) void testConnection(testHost);
                 }}
               >
-                {checking ? <Spinner size="xs" /> : null} Test connection
+                {model.connection.checking ? <Spinner size="xs" /> : null}{" "}
+                {model.connection.testButton.label}
               </Button>
             </div>
-            {results ? (
+            {model.connection.results ? (
               <ul className="border-t border-border/60 divide-y divide-border/40">
-                {targets.map((target) => {
-                  const result = results[target.environmentId];
-                  if (!result) return null;
-                  return (
-                    <li key={target.environmentId} className="px-3 py-2.5 text-xs">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="truncate font-medium">{target.label}</span>
-                        <span
-                          className={`flex shrink-0 items-center gap-1.5 ${result.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}
-                        >
-                          {result.status === "pending" ? (
-                            <>
-                              <Spinner size="xs" /> Checking…
-                            </>
-                          ) : result.status === "local" ? (
-                            <>
-                              <MonitorIcon className="size-3" /> Already available locally
-                            </>
-                          ) : result.status === "failed" ? (
-                            <>
-                              <XIcon className="size-3" /> Failed
-                            </>
-                          ) : (
-                            <>
-                              <CheckIcon className="size-3" /> Connected
-                            </>
-                          )}
-                        </span>
+                {model.connection.results.map((result) => (
+                  <li key={result.environmentId} className="px-3 py-2.5 text-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate font-medium">{result.label}</span>
+                      <span
+                        className={`flex shrink-0 items-center gap-1.5 ${result.status === "failed" ? "text-destructive" : "text-muted-foreground"}`}
+                      >
+                        {result.icon === "spinner" ? (
+                          <Spinner size="xs" />
+                        ) : result.icon === "monitor" ? (
+                          <MonitorIcon className="size-3" />
+                        ) : result.icon === "x" ? (
+                          <XIcon className="size-3" />
+                        ) : (
+                          <CheckIcon className="size-3" />
+                        )}{" "}
+                        {result.statusLabel}
+                      </span>
+                    </div>
+                    {result.platforms ? (
+                      <div className="mt-1.5">
+                        <DeviceHostAvailability platforms={result.platforms} />
                       </div>
-                      {result.status === "connected" ? (
-                        <div className="mt-1.5">
-                          <DeviceHostAvailability platforms={result.platforms} />
-                        </div>
-                      ) : null}
-                      {result.status === "failed" ? (
-                        <details className="mt-1.5 text-muted-foreground">
-                          <summary className="cursor-pointer">Show error</summary>
-                          <p className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">
-                            {result.error}
-                          </p>
-                        </details>
-                      ) : null}
-                    </li>
-                  );
-                })}
+                    ) : null}
+                    {result.error ? (
+                      <details className="mt-1.5 text-muted-foreground">
+                        <summary className="cursor-pointer">{result.error.summary}</summary>
+                        <p className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words">
+                          {result.error.detail}
+                        </p>
+                      </details>
+                    ) : null}
+                  </li>
+                ))}
               </ul>
             ) : null}
           </div>
         </DialogPanel>
         <DialogFooter>
-          <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
+          <Button type="button" variant="ghost" disabled={model.cancel.disabled} onClick={onClose}>
+            {model.cancel.label}
           </Button>
-          <Button type="submit" disabled={busy || checking || !valid || !draft.label.trim()}>
-            {busy ? <Spinner size="xs" /> : null} Save host
+          <Button type="submit" disabled={model.save.disabled}>
+            {model.save.busy ? <Spinner size="xs" /> : null} {model.save.label}
           </Button>
         </DialogFooter>
       </DialogPopup>

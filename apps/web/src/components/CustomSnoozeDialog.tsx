@@ -1,11 +1,13 @@
 import { useEffect, useId, useState } from "react";
-import { create } from "zustand";
+import { localSnoozeDate, localSnoozeTime } from "@t3tools/client-runtime/state/thread-settled";
 import {
-  localSnoozeDate,
-  localSnoozeTime,
-  resolveCustomSnooze,
-  type CustomSnoozeInput,
-} from "@t3tools/client-runtime/state/thread-settled";
+  CUSTOM_SNOOZE_UNIT_LABELS,
+  finishCustomSnooze,
+  resolveCustomSnoozeSubmission,
+  useCustomSnoozeRequest,
+  type CustomSnoozeMode,
+  type CustomSnoozeUnit,
+} from "./CustomSnoozeDialog.logic";
 import { Button } from "./ui/button";
 import { CalendarIcon } from "lucide-react";
 import { Calendar } from "./ui/calendar";
@@ -32,44 +34,27 @@ import {
   DialogFooter,
 } from "./ui/dialog";
 
-type SnoozeChoice = { readonly snoozedUntil: string };
-type Request = { readonly resolve: (choice: SnoozeChoice | null) => void };
-const useRequest = create<{ request: Request | null }>(() => ({ request: null }));
-
-export function requestCustomSnooze(): Promise<SnoozeChoice | null> {
-  useRequest.getState().request?.resolve(null);
-  return new Promise((resolve) => useRequest.setState({ request: { resolve } }));
-}
-
-function finish(choice: SnoozeChoice | null) {
-  const request = useRequest.getState().request;
-  useRequest.setState({ request: null });
-  request?.resolve(choice);
-}
-
 export function CustomSnoozeDialogHost() {
-  const request = useRequest((state) => state.request);
-  useEffect(() => () => finish(null), []);
+  const request = useCustomSnoozeRequest((state) => state.request);
+  useEffect(() => () => finishCustomSnooze(null), []);
   return request ? <CustomSnoozeDialog /> : null;
 }
 
 function CustomSnoozeDialog() {
   const id = useId();
   const [initial] = useState(() => new Date(Date.now() + 3_600_000));
-  const [mode, setMode] = useState<CustomSnoozeInput["mode"]>("date");
+  const [mode, setMode] = useState<CustomSnoozeMode>("date");
   const [date, setDate] = useState(initial);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [time, setTime] = useState(localSnoozeTime(initial));
   const [amount, setAmount] = useState("2");
-  const [unit, setUnit] = useState<"minutes" | "hours" | "days">("hours");
+  const [unit, setUnit] = useState<CustomSnoozeUnit>("hours");
   const [error, setError] = useState<string | null>(null);
-  const input: CustomSnoozeInput =
-    mode === "date" ? { mode, date: localSnoozeDate(date), time } : { mode, amount, unit };
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) finish(null);
+        if (!open) finishCustomSnooze(null);
       }}
     >
       <DialogPopup className="sm:max-w-sm">
@@ -77,16 +62,15 @@ function CustomSnoozeDialog() {
           className="flex min-h-0 flex-col"
           onSubmit={(event) => {
             event.preventDefault();
-            const snoozedUntil = resolveCustomSnooze(input, new Date());
-            if (!snoozedUntil) {
-              setError(
-                mode === "date"
-                  ? "Choose a valid date and time in the future."
-                  : "Enter a positive duration.",
-              );
+            const submission = resolveCustomSnoozeSubmission(
+              { mode, date: localSnoozeDate(date), time, amount, unit },
+              new Date(),
+            );
+            if (submission.kind === "error") {
+              setError(submission.message);
               return;
             }
-            finish({ snoozedUntil });
+            finishCustomSnooze(submission.choice);
           }}
         >
           <DialogHeader>
@@ -186,7 +170,7 @@ function CustomSnoozeDialog() {
                       Unit
                       <Select
                         value={unit}
-                        items={{ minutes: "Minutes", hours: "Hours", days: "Days" }}
+                        items={CUSTOM_SNOOZE_UNIT_LABELS}
                         onValueChange={(value) => {
                           if (value === "minutes" || value === "hours" || value === "days")
                             setUnit(value);
@@ -214,7 +198,7 @@ function CustomSnoozeDialog() {
             )}
           </DialogPanel>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => finish(null)}>
+            <Button type="button" variant="outline" onClick={() => finishCustomSnooze(null)}>
               Cancel
             </Button>
             <Button type="submit">Snooze</Button>

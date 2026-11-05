@@ -1,7 +1,6 @@
 import { PermissionChecklist, PermissionContinueButton } from "../permissions/PermissionChecklist";
 import { usePermissionStatus } from "../permissions/usePermissionStatus";
 import type { BrowserImportSource } from "@t3tools/contracts";
-import { BROWSER_IMPORT_FAILURE_COPY } from "@t3tools/contracts";
 import { ArrowDownIcon, ArrowRightIcon, CheckIcon, HardDriveIcon } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -20,17 +19,25 @@ import {
 } from "../ui/dialog";
 import { Spinner } from "../ui/spinner";
 import {
+  buildBrowserImportWizardModel,
+  buildFullDiskAccessStatusModel,
   initialWizardStep,
   initialTargetSelection,
-  canCloseWizard,
-  isRetryableReason,
-  formatSkippedDomains,
+  isImportSourceReadable,
   fullDiskAccessRecheckStep,
   outcomeToStep,
   refreshedSourceProfileDirectory,
   refreshedSourceStep,
-  resolveWizardTarget,
+  resolveWizardImport,
+  FULL_DISK_ACCESS_OPEN_FAILED_MESSAGE,
+  WIZARD_FAILED_STEP,
   type ImportOutcome,
+  type WizardBlockedStepModel,
+  type WizardConfigureStepModel,
+  type WizardDoneStepModel,
+  type WizardFullDiskAccessStepModel,
+  type WizardProgressStepModel,
+  type WizardQuitStepModel,
   type WizardTarget,
   type WizardTargetProfile,
   type WizardTargetSelection,
@@ -90,7 +97,7 @@ export function BrowserImportWizard({
   const [target, setTarget] = useState<WizardTargetSelection>(() =>
     initialTargetSelection(canCreateProfile, targetProfiles),
   );
-  const [targetError, setTargetError] = useState<string>();
+  const [targetError, setTargetError] = useState<string | null>(null);
   // Stable across retries so a keychain re-approval lands in one profile, not
   // a new one each time.
   const newProfileId = useRef(`profile-${randomUUID()}`);
@@ -99,21 +106,36 @@ export function BrowserImportWizard({
   // would drop the wizard out of the importing step while the first write is
   // still going. The ref settles synchronously where state does not.
   const importInFlight = useRef(false);
+  const model = buildBrowserImportWizardModel({
+    step,
+    source,
+    destinationEnvironmentName,
+    targetProfiles,
+    canCreateProfile,
+    sourceProfileDirectory,
+    target,
+    targetError,
+  });
 
   const runImport = () => {
-    if (importInFlight.current) return;
-    const chosen = resolveWizardTarget(target, newProfileId.current, targetProfiles);
-    if (chosen === undefined) {
-      setTargetError("That profile is no longer available. Choose where to import these cookies.");
-      setStep({ step: "configure" });
+    const decision = resolveWizardImport({
+      importInFlight: importInFlight.current,
+      selection: target,
+      newProfileId: newProfileId.current,
+      targetProfiles,
+    });
+    if (decision.kind === "ignore") return;
+    if (decision.kind === "targetUnavailable") {
+      setTargetError(decision.targetError);
+      setStep(decision.step);
       return;
     }
-    setTargetError(undefined);
+    setTargetError(null);
     importInFlight.current = true;
-    setStep({ step: "importing" });
-    void onImport({ sourceProfileDirectory, target: chosen })
+    setStep(decision.step);
+    void onImport({ sourceProfileDirectory, target: decision.target })
       .then((outcome) => setStep(outcomeToStep(outcome)))
-      .catch(() => setStep({ step: "blocked", reason: "readFailed" }))
+      .catch(() => setStep(WIZARD_FAILED_STEP))
       .finally(() => {
         importInFlight.current = false;
       });
@@ -136,62 +158,45 @@ export function BrowserImportWizard({
         }
         setStep(nextStep(refreshed));
       })
-      .catch(() => setStep({ step: "blocked", reason: "readFailed" }));
+      .catch(() => setStep(WIZARD_FAILED_STEP));
   };
   const recheckAfterQuit = () => recheckSource("browser", refreshedSourceStep);
   const recheckFullDiskAccess = () => recheckSource("fullDiskAccess", fullDiskAccessRecheckStep);
+  const stepModel = model.step;
 
   return (
-    <Dialog open onOpenChange={(open) => (open || !canCloseWizard(step) ? undefined : onClose())}>
-      <DialogPopup className="max-w-lg" showCloseButton={canCloseWizard(step)}>
-        {step.step === "quit" ? (
-          <QuitStep source={source} onCancel={onClose} onRechecked={recheckAfterQuit} />
-        ) : step.step === "fullDiskAccess" ? (
+    <Dialog open onOpenChange={(open) => (open || !model.closeable ? undefined : onClose())}>
+      <DialogPopup className="max-w-lg" showCloseButton={model.closeable}>
+        {stepModel.kind === "quit" ? (
+          <QuitStep model={stepModel} onCancel={onClose} onRechecked={recheckAfterQuit} />
+        ) : stepModel.kind === "fullDiskAccess" ? (
           <FullDiskAccessStep
-            source={source}
+            model={stepModel}
             onCancel={onClose}
             onOpenSettings={onOpenFullDiskAccessSettings}
             onCheck={
-              onCheckFullDiskAccess ??
-              (async () => {
-                const refreshed = await onRefreshSource();
-                return refreshed !== undefined && refreshed.unavailable === undefined;
-              })
+              onCheckFullDiskAccess ?? (async () => isImportSourceReadable(await onRefreshSource()))
             }
-            onGranted={step.resume === "import" ? runImport : recheckFullDiskAccess}
-            stillRequired={step.checked === true}
+            onGranted={stepModel.onGranted === "import" ? runImport : recheckFullDiskAccess}
           />
-        ) : step.step === "importing" ? (
-          <ImportingStep />
-        ) : step.step === "checking" ? (
-          <CheckingStep sourceName={source.name} check={step.check} />
-        ) : step.step === "done" ? (
-          <DoneStep
-            {...step}
-            destinationEnvironmentName={destinationEnvironmentName}
-            onClose={onClose}
-          />
-        ) : step.step === "blocked" ? (
+        ) : stepModel.kind === "importing" || stepModel.kind === "checking" ? (
+          <ProgressStep model={stepModel} />
+        ) : stepModel.kind === "done" ? (
+          <DoneStep model={stepModel} onClose={onClose} />
+        ) : stepModel.kind === "blocked" ? (
           <BlockedStep
-            source={source}
-            reason={step.reason}
+            model={stepModel}
             onClose={onClose}
-            onRetry={isRetryableReason(step.reason) ? runImport : undefined}
+            onRetry={stepModel.retryLabel !== null ? runImport : undefined}
           />
         ) : (
           <ConfigureStep
-            source={source}
-            destinationEnvironmentName={destinationEnvironmentName}
-            targetProfiles={targetProfiles}
-            canCreateProfile={canCreateProfile}
-            sourceProfileDirectory={sourceProfileDirectory}
+            model={stepModel}
             onSourceProfileChange={setSourceProfileDirectory}
-            target={target}
             onTargetChange={(selection) => {
               setTarget(selection);
-              setTargetError(undefined);
+              setTargetError(null);
             }}
-            targetError={targetError}
             onCancel={onClose}
             onImport={runImport}
           />
@@ -202,76 +207,54 @@ export function BrowserImportWizard({
 }
 
 function QuitStep({
-  source,
+  model,
   onCancel,
   onRechecked,
 }: {
-  readonly source: BrowserImportSource;
+  readonly model: WizardQuitStepModel;
   readonly onCancel: () => void;
   readonly onRechecked: () => void;
 }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Quit {source.name} to import</DialogTitle>
-        <DialogDescription>
-          {source.name} is open, so its cookies can&rsquo;t be read yet. Quit it, then continue.
-        </DialogDescription>
+        <DialogTitle>{model.title}</DialogTitle>
+        <DialogDescription>{model.description}</DialogDescription>
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {model.cancelLabel}
         </Button>
-        <Button onClick={onRechecked}>I&rsquo;ve quit it</Button>
+        <Button onClick={onRechecked}>{model.confirmLabel}</Button>
       </DialogFooter>
     </>
   );
 }
 
-/** "5,065 cookies", or "no cookies", or nothing when the store is unreadable. */
-function cookieCountLabel(count: number | undefined): string | undefined {
-  if (count === undefined) return undefined;
-  if (count === 0) return "no cookies";
-  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
-}
-
-function cookieResultCount(count: number): string {
-  return `${count.toLocaleString()} ${count === 1 ? "cookie" : "cookies"}`;
-}
-
-type ConfigureStepProps = {
-  readonly source: BrowserImportSource;
-  readonly destinationEnvironmentName: string;
-  readonly targetProfiles: ReadonlyArray<WizardTargetProfile>;
-  readonly canCreateProfile: boolean;
-  readonly sourceProfileDirectory: string;
-  readonly onSourceProfileChange: (directory: string) => void;
-  readonly target: WizardTargetSelection;
-  readonly targetError: string | undefined;
-  readonly onTargetChange: (target: WizardTargetSelection) => void;
-  readonly onCancel: () => void;
-  readonly onImport: () => void;
-};
-
 function FullDiskAccessStep({
-  source,
+  model,
   onCancel,
   onOpenSettings,
   onGranted,
-  stillRequired,
   onCheck,
 }: {
-  readonly source: BrowserImportSource;
+  readonly model: WizardFullDiskAccessStepModel;
   readonly onCancel: () => void;
   readonly onOpenSettings: () => void | Promise<void>;
   readonly onCheck: () => Promise<boolean>;
   readonly onGranted: () => void;
-  readonly stillRequired: boolean;
 }) {
   const [opening, setOpening] = useState(false);
   const [openingError, setOpeningError] = useState<string | null>(null);
   const permission = usePermissionStatus(async () => ({ fullDiskAccess: await onCheck() }), {
     fullDiskAccess: false,
+  });
+  const ready = permission.isReady(["fullDiskAccess"]);
+  const status = buildFullDiskAccessStatusModel({
+    ready,
+    stillRequired: model.stillRequired,
+    openingError,
+    permissionError: permission.error,
   });
   const allow = () => {
     if (opening) return;
@@ -279,115 +262,88 @@ function FullDiskAccessStep({
     setOpeningError(null);
     void Promise.resolve()
       .then(onOpenSettings)
-      .catch(() => setOpeningError("Could not open System Settings. Try Allow again."))
+      .catch(() => setOpeningError(FULL_DISK_ACCESS_OPEN_FAILED_MESSAGE))
       .finally(() => setOpening(false));
   };
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Let T3 Code read {source.name}&rsquo;s cookies</DialogTitle>
-        <DialogDescription>
-          To import cookies from {source.name}, T3 Code needs Full Disk Access. Turn it on in System
-          Settings, then come back to finish the import — you can revoke it again once the import is
-          done.
-        </DialogDescription>
+        <DialogTitle>{model.title}</DialogTitle>
+        <DialogDescription>{model.description}</DialogDescription>
       </DialogHeader>
       <DialogPanel>
         <PermissionChecklist
           busy={opening}
           permissions={[
             {
-              id: "fullDiskAccess",
+              id: model.permission.id,
               icon: (
                 <HardDriveIcon
                   className="size-8 shrink-0 text-muted-foreground"
                   aria-hidden="true"
                 />
               ),
-              title: "Full Disk Access",
-              description: `Read ${source.name}'s cookies for this import.`,
+              title: model.permission.title,
+              description: model.permission.description,
               granted: permission.status.fullDiskAccess,
               onAllow: () => void allow(),
             },
           ]}
         />
-        {openingError || permission.error ? (
+        {status.notice !== null ? (
           <p role="status" className="mt-3 text-xs text-muted-foreground">
-            {openingError ?? permission.error}
+            {status.notice}
           </p>
         ) : null}
-        {!permission.isReady(["fullDiskAccess"]) ? (
-          <p className="mt-3 text-xs text-muted-foreground">
-            {stillRequired
-              ? "Access is still required. Quit and reopen T3 Code if you just allowed it, then retry the import."
-              : "If access doesn't update after you allow it, quit and reopen T3 Code, then retry the import."}
-          </p>
+        {status.hint !== null ? (
+          <p className="mt-3 text-xs text-muted-foreground">{status.hint}</p>
         ) : null}
       </DialogPanel>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {model.cancelLabel}
         </Button>
-        <PermissionContinueButton
-          ready={permission.isReady(["fullDiskAccess"])}
-          busy={opening}
-          onClick={onGranted}
-        >
-          Continue
+        <PermissionContinueButton ready={ready} busy={opening} onClick={onGranted}>
+          {model.continueLabel}
         </PermissionContinueButton>
       </DialogFooter>
     </>
   );
 }
+
 function ConfigureStep({
-  source,
-  destinationEnvironmentName,
-  targetProfiles,
-  canCreateProfile,
-  sourceProfileDirectory,
+  model,
   onSourceProfileChange,
-  target,
-  targetError,
   onTargetChange,
   onCancel,
   onImport,
-}: ConfigureStepProps) {
-  const targetMissing =
-    target.kind === "existing" &&
-    !targetProfiles.some((profile) => profile.id === target.profileId);
-  // The "New profile" tile is unrendered once the cap is reached, so a target
-  // chosen before that leaves nothing selected in "Into" — say so, the same
-  // way a vanished existing target is explained.
-  const targetUncreatable = target.kind === "new" && !canCreateProfile;
-  const targetFeedback =
-    targetError ??
-    (targetMissing
-      ? "That profile is no longer available. Choose where to import these cookies."
-      : targetUncreatable
-        ? "You've reached the profile limit. Choose an existing profile to import into."
-        : undefined);
+}: {
+  readonly model: WizardConfigureStepModel;
+  readonly onSourceProfileChange: (directory: string) => void;
+  readonly onTargetChange: (target: WizardTargetSelection) => void;
+  readonly onCancel: () => void;
+  readonly onImport: () => void;
+}) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Import from {source.name}</DialogTitle>
-        <DialogDescription>
-          Choose which cookies to import for {destinationEnvironmentName}.
-        </DialogDescription>
+        <DialogTitle>{model.title}</DialogTitle>
+        <DialogDescription>{model.description}</DialogDescription>
       </DialogHeader>
       <DialogPanel>
         {/* Side by side when the dialog has room, stacked when it doesn't. */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
           <section className="flex-1 space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              From
+              {model.fromLabel}
             </p>
-            {source.profiles.map((profile) => (
+            {model.sourceProfiles.map((profile) => (
               <SelectableTile
-                key={profile.directory}
-                selected={sourceProfileDirectory === profile.directory}
-                title={profile.name}
-                subtitle={cookieCountLabel(profile.cookieCount)}
-                onSelect={() => onSourceProfileChange(profile.directory)}
+                key={profile.id}
+                selected={profile.selected}
+                title={profile.title}
+                subtitle={profile.subtitle ?? undefined}
+                onSelect={() => onSourceProfileChange(profile.id)}
               />
             ))}
           </section>
@@ -397,42 +353,31 @@ function ConfigureStep({
           </div>
           <section className="flex-1 space-y-2">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Into
+              {model.intoLabel}
             </p>
-            {canCreateProfile ? (
+            {model.targets.map((tile) => (
               <SelectableTile
-                selected={target.kind === "new"}
-                title="New profile"
-                subtitle="Created for these cookies"
-                onSelect={() => onTargetChange({ kind: "new" })}
-              />
-            ) : null}
-            {targetProfiles.map((profile) => (
-              <SelectableTile
-                key={profile.id}
-                selected={target.kind === "existing" && target.profileId === profile.id}
-                title={profile.name}
-                subtitle="Existing profile"
-                onSelect={() => onTargetChange({ kind: "existing", profileId: profile.id })}
+                key={tile.id}
+                selected={tile.selected}
+                title={tile.title}
+                subtitle={tile.subtitle ?? undefined}
+                onSelect={() => onTargetChange(tile.selection)}
               />
             ))}
           </section>
         </div>
-        {targetFeedback ? (
+        {model.feedback ? (
           <p role="alert" className="mt-3 text-sm text-destructive">
-            {targetFeedback}
+            {model.feedback}
           </p>
         ) : null}
       </DialogPanel>
       <DialogFooter>
         <Button variant="outline" onClick={onCancel}>
-          Cancel
+          {model.cancelLabel}
         </Button>
-        <Button
-          disabled={sourceProfileDirectory === "" || targetMissing || targetUncreatable}
-          onClick={onImport}
-        >
-          Import
+        <Button disabled={model.importDisabled} onClick={onImport}>
+          {model.importLabel}
         </Button>
       </DialogFooter>
     </>
@@ -483,46 +428,17 @@ function SelectableTile({
   );
 }
 
-function ImportingStep() {
+function ProgressStep({ model }: { readonly model: WizardProgressStepModel }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Importing cookies</DialogTitle>
-        <DialogDescription>This may take a moment.</DialogDescription>
+        <DialogTitle>{model.title}</DialogTitle>
+        <DialogDescription>{model.description}</DialogDescription>
       </DialogHeader>
       <DialogPanel>
         <div className="flex items-center gap-3 py-2">
           <Spinner size="md" tone="muted" />
-          <span className="text-sm text-muted-foreground">Importing…</span>
-        </div>
-      </DialogPanel>
-    </>
-  );
-}
-
-function CheckingStep({
-  sourceName,
-  check,
-}: {
-  readonly sourceName: string;
-  readonly check: "browser" | "fullDiskAccess";
-}) {
-  return (
-    <>
-      <DialogHeader>
-        <DialogTitle>Checking {sourceName}</DialogTitle>
-        <DialogDescription>
-          {check === "fullDiskAccess"
-            ? "Checking Full Disk Access."
-            : "Checking whether the browser has closed."}
-        </DialogDescription>
-      </DialogHeader>
-      <DialogPanel>
-        <div className="flex items-center gap-3 py-2">
-          <Spinner size="md" tone="muted" />
-          <span className="text-sm text-muted-foreground">
-            {check === "fullDiskAccess" ? "Checking access…" : "Checking…"}
-          </span>
+          <span className="text-sm text-muted-foreground">{model.progressLabel}</span>
         </div>
       </DialogPanel>
     </>
@@ -530,49 +446,29 @@ function CheckingStep({
 }
 
 function DoneStep({
-  imported,
-  skipped,
-  skippedDomains,
-  targetName,
-  destinationEnvironmentName,
+  model,
   onClose,
 }: {
-  readonly imported: number;
-  readonly skipped: number;
-  readonly skippedDomains: ReadonlyArray<string>;
-  readonly targetName: string;
-  readonly destinationEnvironmentName: string;
+  readonly model: WizardDoneStepModel;
   readonly onClose: () => void;
 }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>
-          {imported > 0
-            ? `Imported ${cookieResultCount(imported)}`
-            : skipped > 0
-              ? `Skipped ${cookieResultCount(skipped)}`
-              : "No cookies found"}
-        </DialogTitle>
-        <DialogDescription>
-          {imported > 0
-            ? `Added to ${targetName} for ${destinationEnvironmentName}.${skipped > 0 ? ` ${cookieResultCount(skipped)} skipped.` : ""}`
-            : skipped > 0
-              ? `No cookies were imported for ${destinationEnvironmentName}.`
-              : `There were no cookies to import for ${destinationEnvironmentName}.`}
-        </DialogDescription>
+        <DialogTitle>{model.title}</DialogTitle>
+        <DialogDescription>{model.description}</DialogDescription>
       </DialogHeader>
-      {skippedDomains.length > 0 ? (
+      {model.skipped ? (
         <DialogPanel>
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Skipped
+            {model.skipped.label}
           </p>
-          <p className="mt-1 text-sm text-foreground">{formatSkippedDomains(skippedDomains)}</p>
+          <p className="mt-1 text-sm text-foreground">{model.skipped.domains}</p>
         </DialogPanel>
       ) : null}
       <DialogFooter>
         <DialogClose render={<Button />} onClick={onClose}>
-          Done
+          {model.doneLabel}
         </DialogClose>
       </DialogFooter>
     </>
@@ -580,27 +476,25 @@ function DoneStep({
 }
 
 function BlockedStep({
-  source,
-  reason,
+  model,
   onClose,
   onRetry,
 }: {
-  readonly source: BrowserImportSource;
-  readonly reason: keyof typeof BROWSER_IMPORT_FAILURE_COPY;
+  readonly model: WizardBlockedStepModel;
   readonly onClose: () => void;
   readonly onRetry: (() => void) | undefined;
 }) {
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Couldn&rsquo;t import from {source.name}</DialogTitle>
-        <DialogDescription>{BROWSER_IMPORT_FAILURE_COPY[reason]}</DialogDescription>
+        <DialogTitle>{model.title}</DialogTitle>
+        <DialogDescription>{model.description}</DialogDescription>
       </DialogHeader>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
-          Close
+          {model.closeLabel}
         </Button>
-        {onRetry ? <Button onClick={onRetry}>Try again</Button> : null}
+        {onRetry ? <Button onClick={onRetry}>{model.retryLabel}</Button> : null}
       </DialogFooter>
     </>
   );

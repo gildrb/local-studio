@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./device/input": {
+      "types": "./src/device/input.ts",
+      "default": "./src/device/input.ts"
+    },
     "./device/stream": {
       "types": "./src/device/stream.ts",
       "default": "./src/device/stream.ts"
@@ -70,6 +74,10 @@
     "./codex-markdown-directives": {
       "types": "./src/codexMarkdownDirectives.ts",
       "default": "./src/codexMarkdownDirectives.ts"
+    },
+    "./markdown-parse": {
+      "types": "./src/markdownParse.ts",
+      "default": "./src/markdownParse.ts"
     },
     "./errors": {
       "types": "./src/errors/index.ts",

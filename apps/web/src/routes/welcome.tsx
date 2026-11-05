@@ -1,21 +1,21 @@
 import { createFileRoute, redirect, useLocation, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { EnvironmentId } from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
-import * as Option from "effect/Option";
 
 import { NoProjectsHero } from "../components/NoProjectsHero";
 import { WelcomeWizard } from "../components/onboarding/WelcomeWizard";
+import {
+  resolveWelcomeResumeEnvironmentId,
+  resolveWelcomeRouteAccess,
+  resolveWelcomeWizardVisible,
+} from "../components/onboarding/WelcomeWizard.logic";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-
-const decodeEnvironmentId = Schema.decodeOption(EnvironmentId);
 
 /** Onboarding overlays the workspace. Visiting /welcome reopens setup. */
 export const Route = createFileRoute("/welcome")({
   beforeLoad: ({ context }) => {
-    const { authGateState } = context;
-    if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
-      throw redirect({ to: "/pair", replace: true });
+    const access = resolveWelcomeRouteAccess(context.authGateState);
+    if (access.kind === "redirect") {
+      throw redirect({ to: access.to, replace: true });
     }
   },
   component: WelcomeRouteView,
@@ -25,9 +25,7 @@ function WelcomeRouteView() {
   const { authGateState } = Route.useRouteContext();
   const navigate = useNavigate();
   const hash = useLocation({ select: (location) => location.hash });
-  const resumeEnvironmentId = hash.startsWith("agents:")
-    ? Option.getOrUndefined(decodeEnvironmentId(hash.slice("agents:".length)))
-    : undefined;
+  const resumeEnvironmentId = resolveWelcomeResumeEnvironmentId(hash);
   // The root shell can remount this pending outlet after the location changes.
   // Never reopen setup while the destination route is still loading.
   const isWelcomeRoute = useLocation({ select: (location) => location.pathname === "/welcome" });
@@ -37,11 +35,12 @@ function WelcomeRouteView() {
   // desktop, `npx t3`, or a dev server — and that server is "this machine"
   // no matter what hostname the browser used. Only hosted-static has no
   // local server to offer.
-  const localAvailable = authGateState.status === "authenticated";
+  const access = resolveWelcomeRouteAccess(authGateState);
+  const localAvailable = access.kind === "render" && access.localAvailable;
   return (
     <>
       <NoProjectsHero />
-      {isWelcomeRoute && !dismissed ? (
+      {resolveWelcomeWizardVisible({ isWelcomeRoute, dismissed }) ? (
         <WelcomeWizard
           localAvailable={localAvailable}
           resumeEnvironmentId={resumeEnvironmentId}

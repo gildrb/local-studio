@@ -2,6 +2,10 @@ import { InlineButton } from "../ui/button";
 import { useId, useState } from "react";
 
 import { cn } from "../../lib/utils";
+import {
+  buildExpandableTextModel,
+  DEFAULT_EXPANDABLE_TEXT_EXPAND_LABEL,
+} from "./ExpandableText.logic";
 
 /**
  * Long error text clamped to a few lines with a toggle to reveal the rest.
@@ -11,7 +15,7 @@ export function ExpandableText({
   text,
   className,
   collapsedClassName = "line-clamp-3",
-  expandLabel = "Show full error",
+  expandLabel = DEFAULT_EXPANDABLE_TEXT_EXPAND_LABEL,
 }: {
   text: string;
   className?: string;
@@ -20,7 +24,7 @@ export function ExpandableText({
 }) {
   const textId = useId();
   const [expanded, setExpanded] = useState(false);
-  const canExpand = text.length > 180 || text.includes("\n");
+  const model = buildExpandableTextModel({ text, expanded, expandLabel });
 
   return (
     <div className={cn("min-w-0", className)}>
@@ -28,20 +32,20 @@ export function ExpandableText({
         id={textId}
         className={cn(
           "whitespace-pre-wrap break-words",
-          !expanded && canExpand ? collapsedClassName : null,
+          model.collapsed ? collapsedClassName : null,
         )}
       >
-        {text}
+        {model.text}
       </div>
-      {canExpand ? (
+      {model.canExpand ? (
         <InlineButton
-          aria-expanded={expanded}
+          aria-expanded={model.expanded}
           aria-controls={textId}
           tone="muted"
           className="mt-1"
           onClick={() => setExpanded((value) => !value)}
         >
-          {expanded ? "Show less" : expandLabel}
+          {model.toggleLabel}
         </InlineButton>
       ) : null}
     </div>

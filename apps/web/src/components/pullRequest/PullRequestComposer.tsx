@@ -22,6 +22,10 @@ import {
   usePendingReviewComments,
   usePullRequestReviewStore,
 } from "./pullRequestReviewStore";
+import {
+  buildPullRequestComposerModel,
+  pullRequestComposerOpenMode,
+} from "./PullRequestComposer.logic";
 
 export function PullRequestComposer({
   environmentId,
@@ -56,24 +60,21 @@ export function PullRequestComposer({
   const summaryStarted = usePullRequestReviewStore(
     (store) => (store.summaries[reviewKey] ?? "").trim().length > 0,
   );
+  const model = buildPullRequestComposerModel({
+    detail,
+    requestedMode,
+    pendingCommentCount: pendingComments.length,
+    summaryStarted,
+  });
+  if (!model.visible) return null;
+  const { canComment, verdicts, mode } = model;
   const reviewStarted = pendingComments.length > 0 || summaryStarted;
-
-  // What is offered is the intersection of two different questions: what this host can do at
-  // all, and what this account may do on this repository. Either one saying no means a control
-  // that would only ever end in a refusal.
-  const canComment = detail.capabilities.comment && detail.viewerPermissions.comment;
-  const verdicts = detail.capabilities.review.verdicts.filter((verdict) =>
-    detail.viewerPermissions.verdicts.includes(verdict),
-  );
-  if (!canComment && verdicts.length === 0) return null;
-
-  const mode = canComment ? (verdicts.length === 0 ? "comment" : requestedMode) : "review";
 
   return (
     <Popover
       open={open}
       onOpenChange={(next) => {
-        if (next) setRequestedMode(reviewStarted ? "review" : "comment");
+        if (next) setRequestedMode(pullRequestComposerOpenMode(reviewStarted));
         setOpen(next);
       }}
     >
@@ -81,21 +82,15 @@ export function PullRequestComposer({
         render={<Button size="icon" variant="glass" />}
         // The only label this control has, so the pending count belongs in it: the badge beside
         // the icon is decorative and a reader who cannot see it still needs the number.
-        aria-label={
-          pendingComments.length > 0
-            ? `Review pull request, ${pendingComments.length} ${pendingComments.length === 1 ? "comment" : "comments"} pending`
-            : reviewStarted || !canComment
-              ? "Review pull request"
-              : "Comment on pull request"
-        }
+        aria-label={model.triggerLabel}
       >
         <MessageSquareIcon className="size-4" />
-        {pendingComments.length > 0 ? (
+        {model.pendingBadge !== null ? (
           <span
             aria-hidden
             className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-info px-1 text-3xs font-semibold tabular-nums text-white"
           >
-            {pendingComments.length}
+            {model.pendingBadge}
           </span>
         ) : null}
       </PopoverTrigger>
@@ -106,12 +101,12 @@ export function PullRequestComposer({
         sideOffset={8}
         width="lg"
         initialFocus={mode === "review" ? reviewRef : commentRef}
-        aria-label="Pull request composer"
+        aria-label={model.popupLabel}
       >
         <div className="mb-3 flex items-center justify-between gap-2">
-          {canComment && verdicts.length > 0 ? (
+          {model.modeToggle !== null ? (
             <ToggleGroup
-              aria-label="Composer mode"
+              aria-label={model.modeToggle.ariaLabel}
               variant="segmented"
               value={[mode]}
               onValueChange={(next) => {
@@ -119,23 +114,22 @@ export function PullRequestComposer({
                 if (value === "comment" || value === "review") setRequestedMode(value);
               }}
             >
-              <Toggle value="comment">Comment</Toggle>
-              <Toggle value="review">
-                {pendingComments.length > 0 ? `Review (${pendingComments.length})` : "Review"}
-              </Toggle>
+              {model.modeToggle.options.map((option) => (
+                <Toggle key={option.value} value={option.value}>
+                  {option.label}
+                </Toggle>
+              ))}
             </ToggleGroup>
           ) : (
-            <PopoverTitle>
-              {mode === "review" ? "Review pull request" : "Comment on pull request"}
-            </PopoverTitle>
+            <PopoverTitle>{model.title}</PopoverTitle>
           )}
           <div className="flex items-center gap-1">
-            {mode === "review" && pendingComments.length > 0 ? (
+            {model.discard !== null ? (
               <Button
                 size="icon-xs"
                 variant="ghost"
-                aria-label="Discard pending line comments"
-                title="Discard pending line comments"
+                aria-label={model.discard.label}
+                title={model.discard.label}
                 disabled={reviewPending}
                 onClick={() => clearComments(reviewKey)}
               >
@@ -144,7 +138,7 @@ export function PullRequestComposer({
             ) : null}
             <PopoverClose
               render={<Button size="icon-xs" variant="ghost" />}
-              aria-label="Close composer"
+              aria-label={model.closeLabel}
             >
               <XIcon className="size-3.5" />
             </PopoverClose>
@@ -158,7 +152,7 @@ export function PullRequestComposer({
               environmentId={environmentId}
               reference={reference}
               verdicts={verdicts}
-              requestChangesSummaryRequired={detail.provider === "forgejo"}
+              requestChangesSummaryRequired={model.requestChangesSummaryRequired}
               textareaRef={reviewRef}
               pending={reviewPending}
               onPendingChange={setReviewPending}

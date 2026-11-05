@@ -1,13 +1,4 @@
-import type {
-  ProjectScript,
-  ProjectScriptIcon,
-  ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
-import {
-  isAtomCommandInterrupted,
-  squashAtomCommandFailure,
-  type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+import type { ProjectScript, ProjectScriptIcon } from "@t3tools/contracts";
 import {
   BugIcon,
   FlaskConicalIcon,
@@ -26,11 +17,19 @@ import React, {
 } from "react";
 
 import {
-  keybindingValueForCommand,
-  decodeProjectScriptKeybindingRule,
-} from "~/lib/projectScriptKeybindings";
-import { keybindingFromKeyboardEvent } from "~/components/settings/KeybindingsSettings.logic";
-import { commandForProjectScript, nextProjectScriptId } from "~/projectScripts";
+  buildProjectScriptEditorDialogCopy,
+  errorMessageOr,
+  projectScriptEditorFormFromInput,
+  PROJECT_SCRIPT_ICON_OPTIONS,
+  PROJECT_SCRIPT_SAVE_FAILED_MESSAGE,
+  resolveProjectScriptEditorToggles,
+  resolveProjectScriptKeybindingCapture,
+  resolveProjectScriptSaveOutcome,
+  resolveProjectScriptSubmission,
+  type NewProjectScriptInput,
+  type ProjectScriptActionResult,
+  type ProjectScriptEditorRequest,
+} from "./projectScriptEditor.logic";
 import {
   AlertDialog,
   AlertDialogClose,
@@ -56,15 +55,6 @@ import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 
-const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
-  { id: "play", label: "Play" },
-  { id: "test", label: "Test" },
-  { id: "lint", label: "Lint" },
-  { id: "configure", label: "Configure" },
-  { id: "build", label: "Build" },
-  { id: "debug", label: "Debug" },
-];
-
 export function ScriptIcon({
   icon,
   className = "size-3.5",
@@ -78,60 +68,6 @@ export function ScriptIcon({
   if (icon === "build") return <HammerIcon className={className} />;
   if (icon === "debug") return <BugIcon className={className} />;
   return <PlayIcon className={className} />;
-}
-
-export interface NewProjectScriptInput {
-  name: string;
-  command: string;
-  icon: ProjectScriptIcon;
-  runOnWorktreeCreate: boolean;
-  /** Setup scripts only: hold the agent until the script exits. */
-  waitForSetup: boolean;
-  keybinding: string | null;
-  /** Optional URL to open in the in-app preview when this script runs. */
-  previewUrl: string | null;
-  /** When true, automatically open the preview panel pointed at `previewUrl`. */
-  autoOpenPreview: boolean;
-}
-
-export type ProjectScriptActionResult = AtomCommandResult<void, unknown>;
-
-export const EMPTY_PROJECT_SCRIPT_INPUT: NewProjectScriptInput = {
-  name: "",
-  command: "",
-  icon: "play",
-  runOnWorktreeCreate: false,
-  waitForSetup: false,
-  keybinding: null,
-  previewUrl: null,
-  autoOpenPreview: false,
-};
-
-/** What the editor dialog should open with. `scriptId: null` means "add". */
-export interface ProjectScriptEditorRequest {
-  scriptId: string | null;
-  initial: NewProjectScriptInput;
-  /** Validation error to show immediately (e.g. a failed t3.json import). */
-  error?: string;
-}
-
-export function editorRequestForScript(
-  script: ProjectScript,
-  keybindings: ResolvedKeybindingsConfig,
-): ProjectScriptEditorRequest {
-  return {
-    scriptId: script.id,
-    initial: {
-      name: script.name,
-      command: script.command,
-      icon: script.icon,
-      runOnWorktreeCreate: script.runOnWorktreeCreate,
-      waitForSetup: script.runOnWorktreeCreate && script.async === false,
-      keybinding: keybindingValueForCommand(keybindings, commandForProjectScript(script.id)),
-      previewUrl: script.previewUrl ?? null,
-      autoOpenPreview: script.autoOpenPreview ?? false,
-    },
-  };
 }
 
 /**
@@ -188,15 +124,16 @@ export function ProjectScriptEditorDialog({
   // Hydrate the form whenever a new request opens the dialog.
   useEffect(() => {
     if (!request) return;
-    setName(request.initial.name);
-    setCommand(request.initial.command);
-    setIcon(request.initial.icon);
+    const form = projectScriptEditorFormFromInput(request.initial);
+    setName(form.name);
+    setCommand(form.command);
+    setIcon(form.icon);
     setIconPickerOpen(false);
-    setRunOnWorktreeCreate(request.initial.runOnWorktreeCreate);
-    setWaitForSetup(request.initial.waitForSetup);
-    setKeybinding(request.initial.keybinding ?? "");
-    setPreviewUrl(request.initial.previewUrl ?? "");
-    setAutoOpenPreview(request.initial.autoOpenPreview);
+    setRunOnWorktreeCreate(form.runOnWorktreeCreate);
+    setWaitForSetup(form.waitForSetup);
+    setKeybinding(form.keybinding);
+    setPreviewUrl(form.previewUrl);
+    setAutoOpenPreview(form.autoOpenPreview);
     setValidationError(request.error ?? null);
     setSavingRequest(null);
   }, [request]);
@@ -209,86 +146,62 @@ export function ProjectScriptEditorDialog({
   };
 
   const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Tab") return;
+    const capture = resolveProjectScriptKeybindingCapture(event, navigator.platform);
+    if (capture.kind === "pass-through") return;
     event.preventDefault();
-    if (event.key === "Backspace" || event.key === "Delete") {
-      setKeybinding("");
-      return;
-    }
-    const next = keybindingFromKeyboardEvent(event, navigator.platform);
-    if (!next) return;
-    setKeybinding(next);
+    if (capture.kind === "set") setKeybinding(capture.keybinding);
   };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!request || pendingSubmissionRef.current !== null) return;
-    const trimmedName = name.trim();
-    const trimmedCommand = command.trim();
-    if (trimmedName.length === 0) {
-      setValidationError("Name is required.");
-      return;
-    }
-    if (trimmedCommand.length === 0) {
-      setValidationError("Command is required.");
-      return;
-    }
-
-    setValidationError(null);
-    let payload: NewProjectScriptInput;
-    try {
-      const scriptIdForValidation =
-        request.scriptId ??
-        nextProjectScriptId(
-          trimmedName,
-          scripts.map((script) => script.id),
-        );
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding,
-        command: commandForProjectScript(scriptIdForValidation),
-      });
-      const trimmedPreviewUrl = previewUrl.trim();
-      payload = {
-        name: trimmedName,
-        command: trimmedCommand,
+    const submission = resolveProjectScriptSubmission({
+      scriptId: request.scriptId,
+      scripts,
+      form: {
+        name,
+        command,
         icon,
         runOnWorktreeCreate,
-        waitForSetup: runOnWorktreeCreate && waitForSetup,
-        keybinding: keybindingRule?.key ?? null,
-        previewUrl: trimmedPreviewUrl.length > 0 ? trimmedPreviewUrl : null,
-        autoOpenPreview: trimmedPreviewUrl.length > 0 ? autoOpenPreview : false,
-      } satisfies NewProjectScriptInput;
-    } catch (error) {
-      setValidationError(error instanceof Error ? error.message : "Failed to save action.");
+        waitForSetup,
+        keybinding,
+        previewUrl,
+        autoOpenPreview,
+      },
+    });
+    if (submission.kind === "invalid") {
+      setValidationError(submission.error);
       return;
     }
+    setValidationError(null);
 
-    const submission = { request };
-    pendingSubmissionRef.current = submission;
+    const pending = { request };
+    pendingSubmissionRef.current = pending;
     setSavingRequest(request);
     setIconPickerOpen(false);
     try {
-      const result = await onSubmit(request.scriptId, payload);
-      if (pendingSubmissionRef.current === submission) {
-        if (result._tag === "Failure") {
-          if (!isAtomCommandInterrupted(result)) {
-            const error = squashAtomCommandFailure(result);
-            setValidationError(error instanceof Error ? error.message : "Failed to save action.");
-          }
-        } else {
+      const result = await onSubmit(request.scriptId, submission.payload);
+      if (pendingSubmissionRef.current === pending) {
+        const outcome = resolveProjectScriptSaveOutcome(result);
+        if (outcome.kind === "error") {
+          setValidationError(outcome.message);
+        } else if (outcome.kind === "close") {
           close();
         }
       }
     } catch (error) {
-      if (pendingSubmissionRef.current === submission) {
-        setValidationError(error instanceof Error ? error.message : "Failed to save action.");
+      if (pendingSubmissionRef.current === pending) {
+        setValidationError(errorMessageOr(error, PROJECT_SCRIPT_SAVE_FAILED_MESSAGE));
       }
     }
-    if (pendingSubmissionRef.current === submission) {
+    if (pendingSubmissionRef.current === pending) {
       pendingSubmissionRef.current = null;
       setSavingRequest(null);
     }
   };
+
+  const copy = buildProjectScriptEditorDialogCopy({ isEditing, isSaving, name });
+  const toggles = resolveProjectScriptEditorToggles({ runOnWorktreeCreate, previewUrl });
 
   return (
     <>
@@ -302,10 +215,8 @@ export function ProjectScriptEditorDialog({
       >
         <DialogPopup>
           <DialogHeader>
-            <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
-            <DialogDescription>
-              Actions are project-scoped commands you can run from the top bar or keybindings.
-            </DialogDescription>
+            <DialogTitle>{copy.title}</DialogTitle>
+            <DialogDescription>{copy.description}</DialogDescription>
           </DialogHeader>
           <DialogPanel>
             <form id={formId} onSubmit={submit}>
@@ -328,7 +239,7 @@ export function ProjectScriptEditorDialog({
                       </PopoverTrigger>
                       <PopoverPopup align="start">
                         <div className="grid grid-cols-3 gap-2">
-                          {SCRIPT_ICONS.map((entry) => {
+                          {PROJECT_SCRIPT_ICON_OPTIONS.map((entry) => {
                             const isSelected = entry.id === icon;
                             return (
                               <button
@@ -405,25 +316,25 @@ export function ProjectScriptEditorDialog({
                 </label>
                 <label
                   className={`flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035] ${
-                    runOnWorktreeCreate ? "" : "opacity-60"
+                    toggles.waitForSetupDisabled ? "opacity-60" : ""
                   }`}
                 >
                   <span>Wait for it to finish before the agent starts</span>
                   <Switch
                     checked={waitForSetup}
-                    disabled={!runOnWorktreeCreate}
+                    disabled={toggles.waitForSetupDisabled}
                     onCheckedChange={(checked) => setWaitForSetup(Boolean(checked))}
                   />
                 </label>
                 <label
                   className={`flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035] ${
-                    previewUrl.trim().length === 0 ? "opacity-60" : ""
+                    toggles.autoOpenPreviewDisabled ? "opacity-60" : ""
                   }`}
                 >
                   <span>Open preview automatically when this action runs</span>
                   <Switch
                     checked={autoOpenPreview}
-                    disabled={previewUrl.trim().length === 0}
+                    disabled={toggles.autoOpenPreviewDisabled}
                     onCheckedChange={(checked) => setAutoOpenPreview(Boolean(checked))}
                   />
                 </label>
@@ -440,14 +351,14 @@ export function ProjectScriptEditorDialog({
                 disabled={isSaving}
                 onClick={() => setDeleteConfirmOpen(true)}
               >
-                Delete
+                {copy.deleteLabel}
               </Button>
             )}
             <Button type="button" variant="outline" onClick={close}>
-              Cancel
+              {copy.cancelLabel}
             </Button>
             <Button form={formId} type="submit" disabled={isSaving}>
-              {isSaving ? "Saving…" : isEditing ? "Save changes" : "Save action"}
+              {copy.submitLabel}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -456,11 +367,13 @@ export function ProjectScriptEditorDialog({
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete action "{name}"?</AlertDialogTitle>
-            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
+            <AlertDialogTitle>{copy.deleteConfirmTitle}</AlertDialogTitle>
+            <AlertDialogDescription>{copy.deleteConfirmDescription}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
+            <AlertDialogClose render={<Button variant="outline" />}>
+              {copy.cancelLabel}
+            </AlertDialogClose>
             <Button
               variant="destructive"
               disabled={isSaving}
@@ -471,7 +384,7 @@ export function ProjectScriptEditorDialog({
                 onDelete(request.scriptId);
               }}
             >
-              Delete action
+              {copy.deleteConfirmLabel}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>

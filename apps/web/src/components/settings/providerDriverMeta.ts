@@ -1,15 +1,4 @@
-import {
-  AntigravitySettings,
-  ClaudeSettings,
-  CodexSettings,
-  CursorSettings,
-  GrokSettings,
-  OmpSettings,
-  OpenCodeSettings,
-  PiAgentSettings,
-  ProviderDriverKind,
-} from "@t3tools/contracts";
-import type * as Schema from "effect/Schema";
+import type { ProviderDriverKind } from "@t3tools/contracts";
 import {
   AntigravityIcon,
   ClaudeAI,
@@ -21,86 +10,30 @@ import {
   OpenCodeIcon,
   PiAgentIcon,
 } from "../Icons";
+import {
+  PROVIDER_DRIVER_METAS,
+  type ProviderDriverIconKey,
+  type ProviderDriverMeta,
+} from "./providerDriverMeta.logic";
 
-type ProviderSettingsSchema = {
-  readonly fields: Readonly<Record<string, Schema.Top>>;
-} & Schema.Top;
-
-/**
- * Browser-safe provider definition. This is deliberately shaped like the
- * future provider package client export: the core web app gets a schema with
- * field annotations plus provider-level presentation metadata, then renders
- * settings generically.
- */
-export interface ProviderClientDefinition {
-  readonly value: ProviderDriverKind;
-  readonly label: string;
+export type ProviderClientDefinition = ProviderDriverMeta & {
   readonly icon: Icon;
-  readonly settingsSchema: ProviderSettingsSchema;
-  /**
-   * Optional short label rendered as a `variant="warning"` badge next to
-   * the instance title. Used to flag drivers that still ship under an
-   * early-access or preview gate — the flag is a property of the driver
-   * kind (not a specific instance), so every instance of that driver —
-   * built-in default or custom — advertises the same marker.
-   */
-  readonly badgeLabel?: string;
-}
+};
 
-const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = [
-  {
-    value: ProviderDriverKind.make("codex"),
-    label: "Codex",
-    icon: OpenAI,
-    settingsSchema: CodexSettings,
-  },
-  {
-    value: ProviderDriverKind.make("claudeAgent"),
-    label: "Claude",
-    icon: ClaudeAI,
-    settingsSchema: ClaudeSettings,
-  },
-  {
-    value: ProviderDriverKind.make("cursor"),
-    label: "Cursor",
-    icon: CursorIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: CursorSettings,
-  },
-  {
-    value: ProviderDriverKind.make("grok"),
-    label: "Grok",
-    icon: GrokIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: GrokSettings,
-  },
-  {
-    value: ProviderDriverKind.make("opencode"),
-    label: "OpenCode",
-    icon: OpenCodeIcon,
-    settingsSchema: OpenCodeSettings,
-  },
-  {
-    value: ProviderDriverKind.make("antigravity"),
-    label: "Antigravity",
-    icon: AntigravityIcon,
-    settingsSchema: AntigravitySettings,
-  },
-  {
-    value: ProviderDriverKind.make("piAgent"),
-    label: "Pi",
-    icon: PiAgentIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: PiAgentSettings,
-  },
-  {
-    value: ProviderDriverKind.make("omp"),
-    label: "Oh My Pi",
-    icon: OmpIcon,
-    badgeLabel: "Early Access",
-    settingsSchema: OmpSettings,
-  },
-];
+export const PROVIDER_DRIVER_ICONS: Readonly<Record<ProviderDriverIconKey, Icon>> = {
+  openai: OpenAI,
+  claude: ClaudeAI,
+  cursor: CursorIcon,
+  grok: GrokIcon,
+  opencode: OpenCodeIcon,
+  antigravity: AntigravityIcon,
+  "pi-agent": PiAgentIcon,
+  omp: OmpIcon,
+};
+
+const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = PROVIDER_DRIVER_METAS.map(
+  (meta) => ({ ...meta, icon: PROVIDER_DRIVER_ICONS[meta.iconKey] }),
+);
 
 const PROVIDER_CLIENT_DEFINITION_BY_VALUE: Partial<
   Record<ProviderDriverKind, ProviderClientDefinition>

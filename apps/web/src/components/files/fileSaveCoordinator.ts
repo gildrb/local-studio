@@ -1,5 +1,7 @@
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 
+export const FILE_SAVE_DEBOUNCE_MS = 500;
+
 export interface FileSaveCoordinatorOptions<A, E> {
   readonly debounceMs: number;
   readonly persist: (contents: string) => Promise<AtomCommandResult<A, E>>;
@@ -15,8 +17,11 @@ export class FileSaveCoordinator<A = unknown, E = unknown> {
   private lastChangeAt = 0;
   private saving = false;
   private disposed = false;
+  private readonly options: FileSaveCoordinatorOptions<A, E>;
 
-  constructor(private readonly options: FileSaveCoordinatorOptions<A, E>) {}
+  constructor(options: FileSaveCoordinatorOptions<A, E>) {
+    this.options = options;
+  }
 
   change(contents: string): void {
     if (this.disposed) return;

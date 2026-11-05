@@ -5,7 +5,6 @@ import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
-import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
 import { elementContextToPreviewAnnotation } from "../../lib/elementContext";
 import { RefreshIcon } from "~/components/ui/refresh-icon";
@@ -51,7 +50,6 @@ import {
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
-import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
 import {
   memo,
   type ComponentProps,
@@ -79,7 +77,7 @@ import {
   formatAssistantCitationForComposer,
   replaceTextRange,
 } from "../../composer-logic";
-import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
+import { resolveComposerPlaceholder } from "../../composerPlaceholder";
 import { listContinuationForEnter, listIndentForTab } from "../../composer-list-continuation";
 import {
   deriveComposerSendState,
@@ -113,8 +111,8 @@ import {
   hydrateImagesFromPersisted,
   useComposerDraftStore,
   useComposerThreadDraft,
-  useEffectiveComposerModelState,
 } from "../../composerDraftStore";
+import { useEffectiveComposerModelState } from "../../composerDraftModelState";
 import {
   MAX_STASH_ENTRIES,
   partitionStashAttachments,
@@ -148,20 +146,17 @@ import {
   type ComposerBannerStackItem,
 } from "./ComposerBannerStack";
 import { compressImageForStash, prepareImageForAttachment } from "../../lib/imageCompression";
+import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import {
-  fileAttachmentTooLargeMessage,
-  formatAttachmentSize,
-} from "@t3tools/client-runtime/state/attachments";
-import {
-  attachmentsToReleaseOnUploadCapabilityLoss,
+  classifyComposerAttachmentIntake,
   composerOtherFilesForPresentation,
-  classifyComposerAttachmentFile,
   fileAttachmentCapabilityBlockReason,
   fileAttachmentStagingLimit,
   isPreviewableComposerVideo,
-  normalizeComposerImageFileMimeType,
+  planComposerAttachmentUploads,
   shouldHandleComposerAttachmentPaste,
 } from "./composerAttachmentFiles";
+import { interactionModeControlLabels } from "./runtimeModeLabels";
 import {
   readAttachmentUpload,
   releaseAttachmentUpload,
@@ -223,7 +218,6 @@ import {
   previewAnnotationContextRecord,
   previewAnnotationFromRecord,
   reviewCommentContextId,
-  reviewCommentContextReference,
   reviewCommentContextRecord,
   reviewCommentFromRecord,
   terminalContextDraftFromRecord,
@@ -237,20 +231,29 @@ import { resolveAssetUrl } from "~/assets/assetUrls";
 import { assetEnvironment } from "~/state/assets";
 import { readPreparedConnection } from "~/state/session";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
-import {
-  pullRequestEnvironment,
-  usePullRequestList,
-  type EnvironmentQueryTarget,
-} from "~/state/pullRequests";
+import { pullRequestEnvironment, usePullRequestList } from "~/state/pullRequests";
+import type { EnvironmentQueryTarget } from "~/state/mergedEnvironmentQuery";
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
 import { ProviderModelPicker } from "./ProviderModelPicker";
-import { resolveModelPickerSelectedModel } from "./ModelPickerContent";
+import { resolveModelPickerSelectedModel } from "./modelPickerTrigger.logic";
+import { ComposerCommandMenu, composerSuggestionOptionId } from "./ComposerCommandMenu";
 import {
+  buildComposerMenuItems,
+  COMPOSER_PULL_REQUEST_QUERY_DEBOUNCE_MS,
+  composerMenuEmptyStateText,
+  composerMenuSearchKey as resolveComposerMenuSearchKey,
+  composerPullRequestListHasNumber,
+  composerPullRequestListInput,
+  composerPullRequestTextQuery,
+  composerPullRequestTriggerNumber,
+  isComposerCompactSlashCommandAvailable,
+  isComposerTextInsertionBlocked,
+  nextComposerMenuHighlightId,
+  planComposerItemSelection,
+  resolveComposerTextInsertion,
   type ComposerCommandItem,
-  ComposerCommandMenu,
-  composerSuggestionOptionId,
-} from "./ComposerCommandMenu";
+} from "./composerTriggers.logic";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerImageThumbnail } from "./ComposerImageThumbnail";
@@ -265,18 +268,11 @@ import {
   ComposerSelectControl,
 } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
-import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
-import {
-  matchesPullRequestQuery,
-  rankPullRequestMatches,
-} from "../pullRequest/pullRequestList.logic";
-import {
-  searchSlashCommandItems,
-  slashCommandItemsForPromptPosition,
-} from "./composerSlashCommandSearch";
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
+} from "./composerProviderState.logic";
+import {
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
 } from "./composerProviderState";
@@ -305,7 +301,6 @@ import {
   subscribeToPendingSnapShotAnimations,
 } from "../../lib/snapShotAnimation";
 import { resizeSnapShotSource } from "../../lib/snapShotSource";
-import { basenameOfPath } from "../../pierre-icons";
 import { cn, isMacPlatform, randomUUID } from "~/lib/utils";
 import {
   getComposerPromptLengthValidationMessage,
@@ -394,8 +389,6 @@ function SnapShotAttachmentFrame({
   );
 }
 
-const COMPOSER_PULL_REQUEST_LIST_LIMIT = 99;
-const COMPOSER_PULL_REQUEST_RESULT_LIMIT = 12;
 const EMPTY_PULL_REQUEST_LIST_TARGETS: ReadonlyArray<EnvironmentQueryTarget<PullRequestListInput>> =
   [];
 
@@ -948,7 +941,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
-import { hasProviderSetup } from "./ProviderStatusBanner";
+import { hasProviderSetup } from "./ProviderStatusBanner.logic";
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
@@ -964,7 +957,6 @@ import {
   type SessionPhase,
   type Thread,
   type ThreadShell,
-  videoMimeType,
 } from "../../types";
 import {
   buildComposerPromptHistoryEntries,
@@ -975,13 +967,9 @@ import type { PendingUserInputDraftAnswer } from "../../pendingUserInput";
 import type { PendingApproval, PendingUserInput } from "../../session-logic";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
-  formatProviderSkillDisplayName,
-  getProviderSlashCommandsForSlashMenu,
-  getProviderSkillsForSlashMenu,
   resolveProviderSkillsForCwd,
   resolveProviderSlashCommandsForCwd,
 } from "@t3tools/client-runtime/providerSkills";
-import { searchProviderSkills } from "../../providerSkillSearch";
 import { useDelayedStatus } from "../../hooks/useDelayedStatus";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { usePanelAnimationSettings } from "../../panelAnimations";
@@ -990,17 +978,6 @@ import { serverEnvironment } from "../../state/server";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
-
-const extendReplacementRangeForTrailingSpace = (
-  text: string,
-  rangeEnd: number,
-  replacement: string,
-): number => {
-  if (!replacement.endsWith(" ")) {
-    return rangeEnd;
-  }
-  return text[rangeEnd] === " " ? rangeEnd + 1 : rangeEnd;
-};
 
 function useRestingComposerControlsLayout(host: HTMLDivElement | null, useControlsAsHost = false) {
   const [controls, setControls] = useState<HTMLDivElement | null>(null);
@@ -1093,10 +1070,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
-  const interactionModeTooltip =
-    props.interactionMode === "plan"
-      ? "Plan mode — click to return to normal build mode"
-      : "Default mode — click to enter plan mode";
+  const interactionModeTooltip = interactionModeControlLabels[props.interactionMode].tooltip;
 
   const interactionModeToggle = props.showInteractionModeToggle ? (
     <>
@@ -1128,7 +1102,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             />
           )}
           <span data-composer-control-label className="sr-only sm:not-sr-only">
-            {props.interactionMode === "plan" ? "Plan" : "Build"}
+            {interactionModeControlLabels[props.interactionMode].label}
           </span>
         </TooltipTrigger>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
@@ -1782,38 +1756,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft);
 
   useEffect(() => {
-    if (!attachmentUploadsCapabilityKnown) {
-      return;
-    }
-    if (!supportsAttachmentUploads) {
-      // The capability can flap on reconnect or version skew. Deleting a
-      // persisted hydrated upload here would make the next send fail
-      // verification while the file still sits in the draft.
-      for (const attachment of attachmentsToReleaseOnUploadCapabilityLoss([
-        ...composerImages,
-        ...composerFiles,
-      ])) {
-        releaseAttachmentUpload(attachment.id);
-      }
-      return;
-    }
-    const invalidFiles =
-      maxFileAttachmentBytes === null
-        ? composerFiles
-        : composerFiles.filter((file) => file.sizeBytes > maxFileAttachmentBytes);
-    for (const attachment of attachmentsToReleaseOnUploadCapabilityLoss(invalidFiles)) {
+    const plan = planComposerAttachmentUploads({
+      attachmentUploadsCapabilityKnown,
+      supportsAttachmentUploads,
+      maxFileAttachmentBytes,
+      images: composerImages,
+      files: composerFiles,
+    });
+    for (const attachment of plan.release) {
       releaseAttachmentUpload(attachment.id);
     }
-    const uploadableFiles =
-      maxFileAttachmentBytes === null
-        ? []
-        : composerFiles.filter((file) => file.sizeBytes <= maxFileAttachmentBytes);
-    const uploadableAttachments = [...composerImages, ...uploadableFiles];
-    for (const attachment of uploadableAttachments) {
-      // A needs-reattach file has no bytes to upload and no upload to verify.
-      if (attachment.type === "file" && composerFileNeedsReattach(attachment)) {
-        continue;
-      }
+    for (const attachment of plan.start) {
       startAttachmentUpload({
         environmentId,
         image: attachment,
@@ -2259,15 +2212,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   const composerTriggerKind = composerTrigger?.kind ?? null;
   const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
-  const pullRequestTriggerQuery =
-    composerTrigger?.kind === "pull-request" ? composerTrigger.query : "";
-  const pullRequestTextQuery =
-    composerTriggerKind === "pull-request" &&
-    pullRequestTriggerQuery.length > 0 &&
-    !/^\d+$/u.test(pullRequestTriggerQuery)
-      ? pullRequestTriggerQuery
-      : null;
-  const debouncedPullRequestTextQuery = useDebouncedValue(pullRequestTextQuery, 180);
+  const pullRequestTextQuery = composerPullRequestTextQuery(composerTrigger);
+  const debouncedPullRequestTextQuery = useDebouncedValue(
+    pullRequestTextQuery,
+    COMPOSER_PULL_REQUEST_QUERY_DEBOUNCE_MS,
+  );
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
@@ -2276,16 +2225,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
-  const compactSlashCommandAvailable =
-    composerTrigger?.kind === "slash-command" &&
-    prompt.slice(0, composerTrigger.rangeStart).trim() === "" &&
-    !compactThreadUnavailable &&
-    prompt.slice(composerTrigger.rangeEnd).trim() === "" &&
-    composerImages.length + composerFiles.length === 0 &&
-    composerDraft.persistedAttachments.length === 0 &&
-    composerTerminalContexts.length === 0 &&
-    composerPreviewAnnotations.length === 0 &&
-    composerReviewComments.length === 0;
+  const compactSlashCommandAvailable = isComposerCompactSlashCommandAvailable({
+    trigger: composerTrigger,
+    prompt,
+    compactThreadUnavailable,
+    attachmentCount:
+      composerImages.length +
+      composerFiles.length +
+      composerDraft.persistedAttachments.length +
+      composerTerminalContexts.length +
+      composerPreviewAnnotations.length +
+      composerReviewComments.length,
+  });
 
   const pullRequestListTargets = useMemo(
     () =>
@@ -2296,14 +2247,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         : [
             {
               environmentId,
-              input: {
-                state: "all" as const,
-                projectId: pullRequestProjectId,
-                limit: COMPOSER_PULL_REQUEST_LIST_LIMIT,
-                ...(settledPullRequestTextQuery === null
-                  ? {}
-                  : { query: settledPullRequestTextQuery }),
-              },
+              input: composerPullRequestListInput(
+                pullRequestProjectId,
+                settledPullRequestTextQuery,
+              ),
             },
           ],
     [
@@ -2315,24 +2262,22 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   );
   const pullRequestLookup = usePullRequestList(pullRequestListTargets);
-  const pullRequestTriggerNumber = useMemo(() => {
-    if (composerTrigger?.kind !== "pull-request" || composerTrigger.query.length === 0) {
-      return null;
-    }
-    const number = Number(composerTrigger.query);
-    return Number.isSafeInteger(number) && number > 0 ? number : null;
-  }, [composerTrigger]);
-  const debouncedPullRequestNumber = useDebouncedValue(pullRequestTriggerNumber, 180);
+  const pullRequestTriggerNumber = useMemo(
+    () => composerPullRequestTriggerNumber(composerTrigger),
+    [composerTrigger],
+  );
+  const debouncedPullRequestNumber = useDebouncedValue(
+    pullRequestTriggerNumber,
+    COMPOSER_PULL_REQUEST_QUERY_DEBOUNCE_MS,
+  );
   const settledPullRequestNumber =
     pullRequestTriggerNumber === debouncedPullRequestNumber ? pullRequestTriggerNumber : null;
-  const recentHasExactPullRequest =
-    settledPullRequestNumber !== null &&
-    pullRequestLookup.data?.entries.some(
-      (entry) =>
-        entry.projectId === pullRequestProjectId &&
-        entry.repository.trim().toLowerCase() === pullRequestRepository?.trim().toLowerCase() &&
-        entry.number === settledPullRequestNumber,
-    ) === true;
+  const recentHasExactPullRequest = composerPullRequestListHasNumber({
+    entries: pullRequestLookup.data?.entries ?? [],
+    projectId: pullRequestProjectId,
+    repository: pullRequestRepository,
+    number: settledPullRequestNumber,
+  });
   const exactPullRequestLookup = useEnvironmentQuery(
     settledPullRequestNumber === null ||
       pullRequestProjectId === null ||
@@ -2349,168 +2294,51 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }),
   );
 
-  const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
-    if (!composerTrigger) return [];
-    if (composerTrigger.kind === "path") {
-      return workspaceEntries.entries.map((entry) => ({
-        id: `path:${entry.kind}:${entry.path}`,
-        type: "path",
-        path: entry.path,
-        pathKind: entry.kind,
-        label: basenameOfPath(entry.path),
-        description: entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))),
-      }));
-    }
-    if (composerTrigger.kind === "slash-command") {
-      const builtInSlashCommandItems = [
-        {
-          id: "slash:model",
-          type: "slash-command",
-          command: "model",
-          label: "/model",
-          description: "Switch response model for this thread",
-        },
-        ...(planModeUiEnabled
-          ? ([
-              {
-                id: "slash:plan",
-                type: "slash-command",
-                command: "plan",
-                label: "/plan",
-                description: "Switch this thread into plan mode",
-              },
-              {
-                id: "slash:default",
-                type: "slash-command",
-                command: "default",
-                label: "/default",
-                description: "Switch this thread back to normal build mode",
-              },
-            ] as const)
-          : []),
-      ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
-      const slashMenuSkills = getProviderSkillsForSlashMenu(
+  const composerMenuItems = useMemo<ComposerCommandItem[]>(
+    () =>
+      buildComposerMenuItems({
+        trigger: composerTrigger,
+        pathEntries: workspaceEntries.entries,
+        planModeUiEnabled,
+        selectedProvider,
         selectedProviderSkills,
-        settings.showSkillsInSlashMenu,
-      );
-      const providerSlashCommandItems = getProviderSlashCommandsForSlashMenu(
         selectedProviderSlashCommands,
-        slashMenuSkills,
-      ).map((command) => ({
-        id: `provider-slash-command:${selectedProvider}:${command.name}`,
-        type: "provider-slash-command" as const,
-        provider: selectedProvider,
-        command,
-        label: `/${command.name}`,
-        description: command.description ?? command.input?.hint ?? "Run provider command",
-      }));
-      const query = composerTrigger.query.trim().toLowerCase();
-      const skillItems = slashMenuSkills.map((skill) => ({
-        id: `skill:${selectedProvider}:${skill.name}`,
-        type: "skill" as const,
-        provider: selectedProvider,
-        skill,
-        label: `/skill:${skill.name}`,
-        description:
-          skill.shortDescription ??
-          skill.description ??
-          (skill.scope ? `${skill.scope} skill` : ""),
-      }));
-      const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
-        (item) => item.command.name !== "compact" || compactSlashCommandAvailable,
-      );
-      const slashCommandItems = slashCommandItemsForPromptPosition(
-        [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
-        composerTrigger.rangeStart === 0,
-      );
-      return searchSlashCommandItems(slashCommandItems, query);
-    }
-    if (composerTrigger.kind === "skill") {
-      return searchProviderSkills(selectedProviderSkills, composerTrigger.query).map((skill) => ({
-        id: `skill:${selectedProvider}:${skill.name}`,
-        type: "skill" as const,
-        provider: selectedProvider,
-        skill,
-        label: formatProviderSkillDisplayName(skill),
-        description:
-          skill.shortDescription ??
-          skill.description ??
-          (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
-      }));
-    }
-    if (
-      composerTrigger.kind === "pull-request" &&
-      pullRequestProjectId !== null &&
-      pullRequestRepository !== null
-    ) {
-      const exactPullRequest =
-        exactPullRequestLookup.data?.number === pullRequestTriggerNumber
-          ? [exactPullRequestLookup.data]
-          : [];
-      const matches = /^\d*$/u.test(composerTrigger.query)
-        ? filterComposerPullRequestMatches({
-            entries: [...exactPullRequest, ...(pullRequestLookup.data?.entries ?? [])],
-            projectId: pullRequestProjectId,
-            repository: pullRequestRepository,
-            query: composerTrigger.query,
-            limit: COMPOSER_PULL_REQUEST_RESULT_LIMIT,
-          })
-        : rankPullRequestMatches(
-            (pullRequestLookup.data?.entries ?? []).filter((entry) => {
-              if (
-                entry.projectId !== pullRequestProjectId ||
-                entry.repository.trim().toLowerCase() !== pullRequestRepository.trim().toLowerCase()
-              ) {
-                return false;
+        showSkillsInSlashMenu: settings.showSkillsInSlashMenu,
+        compactSlashCommandAvailable,
+        pullRequest:
+          pullRequestProjectId !== null && pullRequestRepository !== null
+            ? {
+                projectId: pullRequestProjectId,
+                repository: pullRequestRepository,
+                triggerNumber: pullRequestTriggerNumber,
+                exactPullRequest: exactPullRequestLookup.data ?? null,
+                listEntries: pullRequestLookup.data?.entries ?? [],
+                listProviders: pullRequestLookup.data?.providers ?? [],
               }
-              const provider = pullRequestLookup.data?.providers.find(
-                (candidate) => candidate.host === entry.host,
-              );
-              return (
-                provider?.searchesOnHost === true ||
-                matchesPullRequestQuery(entry, composerTrigger.query)
-              );
-            }),
-            composerTrigger.query,
-          ).slice(0, COMPOSER_PULL_REQUEST_RESULT_LIMIT);
-      return matches.map((pullRequest) => ({
-        id: `pull-request:${pullRequest.projectId}:${pullRequest.repository}:${pullRequest.number}`,
-        type: "pull-request",
-        pullRequest: {
-          number: pullRequest.number,
-          title: pullRequest.title,
-          url: pullRequest.url,
-          headBranch: pullRequest.headBranch,
-          baseBranch: pullRequest.baseBranch,
-          state: pullRequest.state,
-          isDraft: pullRequest.isDraft,
-        },
-        label: `#${pullRequest.number}`,
-        description: pullRequest.title,
-      }));
-    }
-    return [];
-  }, [
-    compactSlashCommandAvailable,
-    composerTrigger,
-    exactPullRequestLookup.data,
-    planModeUiEnabled,
-    pullRequestLookup.data,
-    pullRequestProjectId,
-    pullRequestRepository,
-    pullRequestTriggerNumber,
-    selectedProvider,
-    selectedProviderSkills,
-    selectedProviderSlashCommands,
-    selectedProviderStatus,
-    settings.showSkillsInSlashMenu,
-    workspaceEntries.entries,
-  ]);
+            : null,
+      }),
+    [
+      compactSlashCommandAvailable,
+      composerTrigger,
+      exactPullRequestLookup.data,
+      planModeUiEnabled,
+      pullRequestLookup.data,
+      pullRequestProjectId,
+      pullRequestRepository,
+      pullRequestTriggerNumber,
+      selectedProvider,
+      selectedProviderSkills,
+      selectedProviderSlashCommands,
+      settings.showSkillsInSlashMenu,
+      workspaceEntries.entries,
+    ],
+  );
 
   const composerMenuOpen = Boolean(composerTrigger);
-  const composerMenuSearchKey = composerTrigger
-    ? `${composerSuggestionListId}:${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
-    : null;
+  const composerMenuSearchKey = resolveComposerMenuSearchKey(
+    composerSuggestionListId,
+    composerTrigger,
+  );
   const activeComposerMenuItem = useMemo(() => {
     const activeItemId = resolveComposerMenuActiveItemId({
       items: composerMenuItems,
@@ -2585,35 +2413,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         pullRequestTextQuery !== debouncedPullRequestTextQuery ||
         pullRequestTriggerNumber !== debouncedPullRequestNumber ||
         exactPullRequestLookup.isPending));
-  const composerMenuEmptyState = useMemo(() => {
-    if (composerTriggerKind === "skill") {
-      return "No skills found. Try / to browse provider commands.";
-    }
-    if (composerTriggerKind === "pull-request") {
-      if (pullRequestProjectId === null || pullRequestRepository === null) {
-        return "Pull requests are not available for this project.";
-      }
-      if (
-        pullRequestLookup.error !== null ||
-        pullRequestLookup.data?.errors.some((error) => error.projectId === pullRequestProjectId)
-      ) {
-        return "Pull requests could not be read for this project.";
-      }
-      return composerTrigger?.query
-        ? `No pull request matches ${composerTrigger.query}.`
-        : "No pull requests found in this repository.";
-    }
-    return composerTriggerKind === "path"
-      ? "No matching files or folders."
-      : "No matching command.";
-  }, [
-    composerTrigger,
-    composerTriggerKind,
-    pullRequestLookup.data?.errors,
-    pullRequestLookup.error,
-    pullRequestProjectId,
-    pullRequestRepository,
-  ]);
+  const composerMenuEmptyState = useMemo(
+    () =>
+      composerMenuEmptyStateText({
+        triggerKind: composerTriggerKind,
+        query: composerTrigger?.query ?? "",
+        pullRequestScopeAvailable: pullRequestProjectId !== null && pullRequestRepository !== null,
+        pullRequestReadFailed:
+          pullRequestLookup.error !== null ||
+          pullRequestLookup.data?.errors.some(
+            (error) => error.projectId === pullRequestProjectId,
+          ) === true,
+      }),
+    [
+      composerTrigger,
+      composerTriggerKind,
+      pullRequestLookup.data?.errors,
+      pullRequestLookup.error,
+      pullRequestProjectId,
+      pullRequestRepository,
+    ],
+  );
 
   // ------------------------------------------------------------------
   // Provider traits UI
@@ -3597,122 +3417,33 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       });
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
-      if (item.type === "path") {
-        const replacement = `${serializeComposerFileLink(item.path)} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-          snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-        );
-        if (applied) {
-          setComposerHighlightedItemId(null);
-        }
-        return;
+      const plan = planComposerItemSelection({
+        item,
+        trigger,
+        text: snapshot.value,
+        planModeUiEnabled,
+        usageLimitsCommandAvailable: onUsageLimitsCommand !== undefined,
+        menuItemIds: composerMenuItemsRef.current.map((candidate) => candidate.id),
+      });
+      if (!plan) return;
+      if (plan.effect?.kind === "interaction-mode") {
+        void handleInteractionModeChange(plan.effect.mode);
       }
-      if (item.type === "slash-command") {
-        if (item.command === "model") {
-          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-            focusEditorAfterReplace: false,
-          });
-          if (applied) {
-            setComposerHighlightedItemId(null);
-            setIsComposerModelPickerOpen(true);
-          }
-          return;
-        }
-        if (!planModeUiEnabled) return;
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
-        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+      const applied = applyPromptReplacement(plan.rangeStart, plan.rangeEnd, plan.replacement, {
+        expectedText: plan.expectedText,
+        ...(plan.focusEditor ? {} : { focusEditorAfterReplace: false }),
+      });
+      if (!applied) return;
+      if (plan.effect?.kind === "review-comment") {
+        addComposerDraftReviewComment(composerDraftTarget, plan.effect.comment, {
+          appendReference: false,
         });
-        if (applied) {
-          setComposerHighlightedItemId(null);
-        }
-        return;
       }
-      if (item.type === "provider-slash-command") {
-        if (item.command.name === USAGE_LIMITS_COMMAND.name && onUsageLimitsCommand) {
-          const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
-            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-            focusEditorAfterReplace: false,
-          });
-          if (applied) {
-            setComposerHighlightedItemId(null);
-            onUsageLimitsCommand();
-          }
-          return;
-        }
-        const replacement = `/${item.command.name} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-          snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-        );
-        if (applied) {
-          setComposerHighlightedItemId(null);
-        }
-        return;
-      }
-      if (item.type === "skill") {
-        const replacement = `$${item.skill.name} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-          snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-        );
-        if (applied) {
-          setComposerHighlightedItemId(null);
-        }
-        return;
-      }
-      if (item.type === "pull-request") {
-        if (
-          trigger.kind !== "pull-request" ||
-          !composerMenuItemsRef.current.some((candidate) => candidate.id === item.id)
-        ) {
-          return;
-        }
-        const comment = buildPullRequestReferenceContext(item.pullRequest);
-        const replacement = `${formatInlineContextReference(
-          reviewCommentContextReference(comment),
-        )} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
-          snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        const applied = applyPromptReplacement(
-          trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
-        );
-        if (applied) {
-          addComposerDraftReviewComment(composerDraftTarget, comment, {
-            appendReference: false,
-          });
-          setComposerHighlightedItemId(null);
-        }
-        return;
+      setComposerHighlightedItemId(null);
+      if (plan.effect?.kind === "open-model-picker") {
+        setIsComposerModelPickerOpen(true);
+      } else if (plan.effect?.kind === "usage-limits") {
+        onUsageLimitsCommand?.();
       }
     },
     [
@@ -3736,17 +3467,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const nudgeComposerMenuHighlight = useCallback(
     (key: "ArrowDown" | "ArrowUp") => {
-      if (composerMenuItems.length === 0) return;
-      const highlightedIndex = composerMenuItems.findIndex(
-        (item) => item.id === composerHighlightedItemId,
+      const nextItemId = nextComposerMenuHighlightId(
+        composerMenuItems,
+        composerHighlightedItemId,
+        key,
       );
-      const normalizedIndex =
-        highlightedIndex >= 0 ? highlightedIndex : key === "ArrowDown" ? -1 : 0;
-      const offset = key === "ArrowDown" ? 1 : -1;
-      const nextIndex =
-        (normalizedIndex + offset + composerMenuItems.length) % composerMenuItems.length;
-      const nextItem = composerMenuItems[nextIndex];
-      setComposerHighlightedItemId(nextItem?.id ?? null);
+      if (nextItemId === null) return;
+      setComposerHighlightedItemId(nextItemId);
     },
     [composerHighlightedItemId, composerMenuItems],
   );
@@ -5327,80 +5054,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     // accepted files reserve their attachment slots (via the pending counter)
     // before the first await, keeping the total under the limit.
     const pendingCount = pendingImageCompressionsRef.current.get(attachmentTargetKey) ?? 0;
-    let reservedCount = countReservedAttachments();
-    // A pick that matches a needs-reattach marker replaces it in the draft, so
-    // it must not consume a slot; a draft full of markers would otherwise hit
-    // the capacity error before the replacement path could run.
-    const reattachMarkers = composerFilesRef.current.filter(composerFileNeedsReattach);
-    const replacedReattachMarkerIds = new Set<string>();
-    const acceptedImages: File[] = [];
-    const acceptedFiles: ComposerFileAttachment[] = [];
-    let error: string | null = null;
-    for (const file of files) {
-      const attachmentKind = classifyComposerAttachmentFile(file);
-      const fileMimeType =
-        attachmentKind === "file"
-          ? (videoMimeType({ name: file.name, mimeType: file.type }) ??
-            (file.type || "application/octet-stream"))
-          : file.type;
-      const matchingReattachMarker =
-        attachmentKind === "file"
-          ? reattachMarkers.find(
-              (marker) =>
-                !replacedReattachMarkerIds.has(marker.id) &&
-                composerFileMatchesReattachMarker(marker, {
-                  name: file.name || "file",
-                  mimeType: fileMimeType,
-                  sizeBytes: file.size,
-                }),
-            )
-          : undefined;
-      if (matchingReattachMarker) {
-        replacedReattachMarkerIds.add(matchingReattachMarker.id);
-      }
-      if (!matchingReattachMarker && reservedCount >= PROVIDER_SEND_TURN_MAX_ATTACHMENTS) {
-        error = `You can attach up to ${PROVIDER_SEND_TURN_MAX_ATTACHMENTS} files per message.`;
-        // Keep scanning: a later file in this batch can still replace a
-        // needs-reattach marker without needing a free slot.
-        continue;
-      }
-      if (attachmentKind === "unsupported-image") {
-        error = `'${file.name}' is not a supported image type. Attach GIF, HEIC, HEIF, JPEG, PNG, or WebP images.`;
-        continue;
-      }
-      if (attachmentKind === "image") {
-        acceptedImages.push(normalizeComposerImageFileMimeType(file));
-      } else {
-        if (fileStagingLimit === null) {
-          error = "This server does not support file attachments.";
-          continue;
-        }
-        if (file.size <= 0) {
-          error = `'${file.name}' is empty or could not be read.`;
-          continue;
-        }
-        if (file.size > fileStagingLimit) {
-          error = fileAttachmentTooLargeMessage(file.name, fileStagingLimit);
-          continue;
-        }
-        const attachmentFile =
-          file.type === fileMimeType
-            ? file
-            : new File([file], file.name, { type: fileMimeType, lastModified: file.lastModified });
-        acceptedFiles.push({
-          type: "file",
-          id: randomUUID(),
-          name: attachmentFile.name || "file",
-          mimeType: fileMimeType,
-          sizeBytes: attachmentFile.size,
-          file: attachmentFile,
-          ...(options?.source ? { source: options.source } : {}),
-        });
-      }
-      if (!matchingReattachMarker) {
-        reservedCount += 1;
-      }
-    }
+    const { acceptedImages, acceptedFiles, error } = classifyComposerAttachmentIntake({
+      files,
+      reservedCount: countReservedAttachments(),
+      reattachMarkers: composerFilesRef.current.filter(composerFileNeedsReattach),
+      fileStagingLimit,
+      newId: randomUUID,
+      ...(options?.source ? { source: options.source } : {}),
+    });
     setThreadError(threadId, error);
     let insertedAny = false;
     if (acceptedFiles.length > 0) {
@@ -5671,11 +5332,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       },
     ): boolean => {
       if (
-        text.length === 0 ||
-        isConnecting ||
-        isComposerApprovalState ||
-        pendingUserInputs.length > 0 ||
-        projectSelectionRequired ||
+        isComposerTextInsertionBlocked({
+          text,
+          isConnecting,
+          approvalPending: isComposerApprovalState,
+          pendingUserInputCount: pendingUserInputs.length,
+          projectSelectionRequired,
+        }) ||
         (options?.citationCommentAnchor && !composerEditorRef.current)
       ) {
         return false;
@@ -5685,19 +5348,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       const prompt = promptRef.current;
       const cursor = position === "cursor" ? readComposerSnapshot().expandedCursor : prompt.length;
-      const needsLeadingSpace =
-        (options?.ensureLeadingBoundary ?? false) &&
-        cursor > 0 &&
-        !/\s/.test(prompt[cursor - 1] ?? "");
-      const rangeEnd = extendReplacementRangeForTrailingSpace(prompt, cursor, text);
-      return applyPromptReplacement(
+      const insertion = resolveComposerTextInsertion({
+        prompt,
         cursor,
-        rangeEnd,
-        needsLeadingSpace ? ` ${text}` : text,
+        text,
+        ensureLeadingBoundary: options?.ensureLeadingBoundary ?? false,
+      });
+      return applyPromptReplacement(
+        insertion.rangeStart,
+        insertion.rangeEnd,
+        insertion.replacement,
         options?.citationCommentAnchor
           ? {
               citationComment: {
-                start: cursor + (needsLeadingSpace ? 1 : 0),
+                start: cursor + (insertion.leadingSpace ? 1 : 0),
                 sourceAnchor: options.citationCommentAnchor,
               },
               focusEditorAfterReplace: false,
@@ -6908,23 +6572,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     onPageScrollRelease={onPageScrollRelease}
                     onCitationSubmitAndSend={submitCitationAndSend}
                     onPaste={onComposerPaste}
-                    placeholder={
-                      isComposerApprovalState
-                        ? "Resolve this approval request to continue"
-                        : activePendingProgress
-                          ? isChoiceOnlyPendingQuestion
-                            ? "Choose an option above"
-                            : "Type your own answer, or leave this blank to use the selected option"
-                          : showPlanFollowUpPrompt && activeProposedPlan
-                            ? "Add feedback to refine the plan, or leave this blank to implement it"
-                            : projectSelectionRequired
-                              ? "Choose a project above to start a thread"
-                              : showProviderUnavailable
-                                ? "Enable a provider in Settings to send a message"
-                                : phase === "disconnected"
-                                  ? DISCONNECTED_COMPOSER_PLACEHOLDER
-                                  : "Ask anything, @tag files/folders, $use skills, or / for commands"
-                    }
+                    placeholder={resolveComposerPlaceholder({
+                      approvalPending: isComposerApprovalState,
+                      pendingQuestion: activePendingProgress
+                        ? { choiceOnly: isChoiceOnlyPendingQuestion }
+                        : null,
+                      planFollowUp: Boolean(showPlanFollowUpPrompt && activeProposedPlan),
+                      projectSelectionRequired,
+                      providerUnavailable: showProviderUnavailable,
+                      disconnected: phase === "disconnected",
+                    })}
                     disabled={
                       isConnecting ||
                       isComposerApprovalState ||

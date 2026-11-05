@@ -5,6 +5,7 @@ import { Alert, AlertAction, AlertDescription, AlertTitle } from "../ui/alert";
 import { Button, InlineButton } from "../ui/button";
 import { formatProviderDriverKindLabel } from "../../providerModels";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner.logic";
 
 /** Unsupported and broken versions fail mid-turn, so they warn even when ready. */
 function getIncompatibleVersion(status: ServerProvider) {
@@ -49,43 +50,6 @@ export function shouldShowProviderStatusBanner(
 ): boolean {
   const bannerKey = getProviderStatusBannerKey(status);
   return bannerKey !== null && bannerKey !== dismissedBannerKey;
-}
-
-export function hasProviderSetup(status: ServerProvider): boolean {
-  return (
-    status.driver === "antigravity" ||
-    status.setup?.canAuthenticate === true ||
-    status.setup?.canInstall === true
-  );
-}
-
-/** Broken-version guidance takes precedence over startup failures it can cause. */
-export function getProviderStatusMessage(status: ServerProvider): string {
-  if (
-    status.auth.status !== "unauthenticated" &&
-    status.compatibilityAdvisory?.status === "broken" &&
-    status.compatibilityAdvisory.message
-  ) {
-    return status.compatibilityAdvisory.message;
-  }
-  if (status.message) return status.message;
-  const providerName = status.displayName?.trim() || formatProviderDriverKindLabel(status.driver);
-  if (!status.installed && hasProviderSetup(status)) {
-    return `Open provider setup to install ${formatProviderDriverKindLabel(status.driver)} on this environment.`;
-  }
-  if (status.auth.status === "unauthenticated") {
-    if (hasProviderSetup(status)) {
-      return status.driver === "antigravity"
-        ? "Open provider setup to sign in with Google."
-        : "Open provider setup to sign in.";
-    }
-    return "Sign in via the CLI to authenticate again.";
-  }
-  return status.status === "ready"
-    ? "No models are available for this provider."
-    : status.status === "error"
-      ? `${providerName} provider is unavailable.`
-      : `${providerName} provider has limited availability.`;
 }
 
 export const ProviderStatusBanner = memo(function ProviderStatusBanner({

@@ -41,8 +41,8 @@ import {
   ServerUpdateAction,
   ServerUpdateProgress,
   ServerUpdatesAction,
-  type ServerUpdateTarget,
 } from "./ServerUpdateAction";
+import type { ServerUpdateTarget } from "./ServerUpdateAction.logic";
 
 type ActionElement = ReactElement<{
   readonly onClick?: () => void;

@@ -3,6 +3,7 @@ import { type PanelAnimationDurationMs } from "@t3tools/contracts/settings";
 
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useClientSettings } from "./hooks/useSettings";
+import { responsiveBreakpointFadeDurationMs } from "./panelAnimations.logic";
 
 const PanelAnimationSuppressionContext = createContext(false);
 
@@ -56,7 +57,7 @@ export function observeResponsiveBreakpointFade(options: {
     expanded = nextExpanded;
     animation?.cancel();
     animation = target.animate([{ opacity: 0 }, { opacity: 1 }], {
-      duration: Math.min(100, durationMs),
+      duration: responsiveBreakpointFadeDurationMs(durationMs),
       easing: "ease-out",
     });
   });

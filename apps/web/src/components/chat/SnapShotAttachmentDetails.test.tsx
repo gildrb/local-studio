@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   snapShotAccessibilityDetails,
   snapShotIncludesAccessibility,
-} from "./SnapShotAttachmentDetails";
+} from "./SnapShotAttachmentDetails.logic";
 
 describe("SnapShotAttachmentDetails", () => {
   it("reports screenshot-only captures without inventing accessibility data", () => {

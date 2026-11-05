@@ -1,44 +1,17 @@
 import { useAtomValue } from "@effect/atom-react";
-import { resolveEnvironmentMachineKind } from "@t3tools/contracts";
-import {
-  gitHubRoutingConnectionKey,
-  gitHubRoutingPermissionFor,
-  type GitHubRoutingPermission,
-} from "@t3tools/client-runtime/connection";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { environmentCatalog } from "~/connection/catalog";
 import type { EnvironmentPresentation } from "~/state/environments";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { toastManager } from "../ui/toast";
-import { EnvironmentRow, environmentTransportLabel } from "./EnvironmentRow";
+import { EnvironmentRow } from "./EnvironmentRow";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
-import { searchableSetting } from "./settingsSearch";
-
-const options: ReadonlyArray<{ value: GitHubRoutingPermission; label: string }> = [
-  { value: "off", label: "Off" },
-  { value: "read", label: "Read PRs" },
-  { value: "read-write", label: "Read and act" },
-];
-
-const summaryLabels = { "read-write": "read and act", read: "read PRs" } as const;
-
-/**
- * Closed-header summary: the machines that share, grouped by permission.
- * Null when nothing is shared.
- */
-export function summarizeGitHubRouting(
-  entries: ReadonlyArray<{ readonly label: string; readonly permission: GitHubRoutingPermission }>,
-): string | null {
-  const groups = (["read-write", "read"] as const).flatMap((permission) => {
-    const labels = entries.filter((entry) => entry.permission === permission);
-    return labels.length === 0
-      ? []
-      : [`${labels.map((entry) => entry.label).join(", ")} ${summaryLabels[permission]}`];
-  });
-  return groups.length === 0 ? null : groups.join(" · ");
-}
+import {
+  buildGitHubRoutingSettingsModel,
+  resolveGitHubRoutingChange,
+} from "./GitHubRoutingSettings.logic";
 
 /**
  * Folded section under the environments list. One row per switched-on machine
@@ -55,65 +28,50 @@ export function GitHubRoutingSettings({
   const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
   const update = useAtomCommand(environmentCatalog.setGitHubRoutingPermission);
   const [saving, setSaving] = useState(false);
+  const model = useMemo(
+    () =>
+      buildGitHubRoutingSettingsModel({
+        environments,
+        permissions,
+        catalogReady: catalog.isReady,
+        saving,
+      }),
+    [environments, permissions, catalog.isReady, saving],
+  );
 
-  if (environments.length < 2) return null;
+  if (model === null) return null;
 
-  const { id, title } = searchableSetting("github-routing");
   return (
-    <FoldedSettingsSection
-      id={id}
-      title={title}
-      summary={
-        summarizeGitHubRouting(
-          environments.map((environment) => ({
-            label: environment.label,
-            permission: gitHubRoutingPermissionFor(environment.entry, permissions),
-          })),
-        ) ?? "Off"
-      }
-    >
-      <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">
-        Machines you trust here can read PR data through each other's GitHub access. Enable both
-        machines. Read and act may use broader permissions than the machine that owns them. This
-        applies only to this device.
-      </p>
-      {environments.map((environment) => (
-        <EnvironmentRow
-          key={environment.environmentId}
-          kind={resolveEnvironmentMachineKind(environment.serverConfig)}
-          label={environment.label}
-          subtitle={environmentTransportLabel(environment)}
-        >
+    <FoldedSettingsSection id={model.id} title={model.title} summary={model.summary}>
+      <p className="px-3 py-2.5 text-xs text-muted-foreground sm:px-4">{model.description}</p>
+      {model.rows.map((row) => (
+        <EnvironmentRow key={row.id} kind={row.kind} label={row.label} subtitle={row.subtitle}>
           <Select
-            items={options}
-            value={gitHubRoutingPermissionFor(environment.entry, permissions)}
-            disabled={
-              !catalog.isReady || saving || gitHubRoutingConnectionKey(environment.entry) === null
-            }
+            items={row.options}
+            value={row.value}
+            disabled={row.disabled}
             onValueChange={(permission) => {
-              if (permission === null) return;
+              const change = resolveGitHubRoutingChange({ environmentId: row.id, permission });
+              if (change.kind === "none") return;
               setSaving(true);
-              void update({ environmentId: environment.environmentId, permission }).then(
-                (result) => {
-                  setSaving(false);
-                  if (result._tag === "Failure")
-                    toastManager.add({
-                      type: "error",
-                      title: "Could not save GitHub routing permission",
-                    });
-                },
-              );
+              void update({
+                environmentId: change.environmentId,
+                permission: change.permission,
+              }).then((result) => {
+                setSaving(false);
+                if (result._tag === "Failure")
+                  toastManager.add({
+                    type: "error",
+                    title: change.failureToastTitle,
+                  });
+              });
             }}
           >
-            <SelectTrigger
-              size="xs"
-              className="w-32"
-              aria-label={`${environment.label} GitHub routing`}
-            >
+            <SelectTrigger size="xs" className="w-32" aria-label={row.ariaLabel}>
               <SelectValue />
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
-              {options.map(({ value, label }) => (
+              {row.options.map(({ value, label }) => (
                 <SelectItem key={value} value={value}>
                   {label}
                 </SelectItem>

@@ -3,6 +3,11 @@ import { memo } from "react";
 
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  buildPanelLayoutControlsModel,
+  buildRightPanelMaximizeModel,
+  DEFAULT_RIGHT_PANEL_UNAVAILABLE_LABEL,
+} from "./PanelLayoutControls.logic";
 
 interface PanelLayoutControlsProps {
   showTerminalControl?: boolean;
@@ -27,73 +32,68 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   rightPanelAvailable,
   rightPanelOpen,
   rightPanelShortcutLabel,
-  rightPanelUnavailableLabel = "Right panel is unavailable",
+  rightPanelUnavailableLabel = DEFAULT_RIGHT_PANEL_UNAVAILABLE_LABEL,
   liveAgentCount,
   onToggleTerminal,
   onToggleRightPanel,
 }: PanelLayoutControlsProps) {
+  const { terminal, rightPanel } = buildPanelLayoutControlsModel({
+    showTerminalControl,
+    terminalAvailable,
+    terminalOpen,
+    terminalShortcutLabel,
+    rightPanelAvailable,
+    rightPanelOpen,
+    rightPanelShortcutLabel,
+    rightPanelUnavailableLabel,
+    liveAgentCount,
+  });
   return (
     <div
       className="flex h-full shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
       data-panel-layout-controls
     >
-      {showTerminalControl ? (
+      {terminal.visible ? (
         <Tooltip>
           <TooltipTrigger render={<span className="flex shrink-0" />}>
             <Toggle
               className="shrink-0 [-webkit-app-region:no-drag]"
-              pressed={terminalOpen}
+              pressed={terminal.pressed}
               onPressedChange={onToggleTerminal}
-              aria-label="Toggle terminal drawer"
+              aria-label={terminal.ariaLabel}
               variant="ghost"
               size="sm"
-              disabled={!terminalAvailable}
+              disabled={terminal.disabled}
             >
               <PanelBottomIcon className="size-4" />
             </Toggle>
           </TooltipTrigger>
-          <TooltipPopup side="bottom">
-            {terminalAvailable
-              ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-              : "Terminal drawer is unavailable"}
-          </TooltipPopup>
+          <TooltipPopup side="bottom">{terminal.tooltip}</TooltipPopup>
         </Tooltip>
       ) : null}
       <Tooltip>
         <TooltipTrigger render={<span className="flex shrink-0" />}>
           <Toggle
             className="shrink-0 [-webkit-app-region:no-drag]"
-            pressed={rightPanelOpen}
+            pressed={rightPanel.pressed}
             onPressedChange={onToggleRightPanel}
-            aria-label={
-              liveAgentCount > 0
-                ? `Toggle right panel, ${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working`
-                : "Toggle right panel"
-            }
+            aria-label={rightPanel.ariaLabel}
             variant="ghost"
             size="sm"
-            disabled={!rightPanelAvailable}
+            disabled={rightPanel.disabled}
           >
             <PanelRightIcon className="size-4" />
-            {liveAgentCount > 0 ? (
+            {rightPanel.badgeCount !== null ? (
               <span
                 aria-hidden
                 className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-info px-1 text-3xs font-semibold tabular-nums text-white"
               >
-                {liveAgentCount}
+                {rightPanel.badgeCount}
               </span>
             ) : null}
           </Toggle>
         </TooltipTrigger>
-        <TooltipPopup side="bottom">
-          {rightPanelAvailable
-            ? `Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ""}${
-                liveAgentCount > 0
-                  ? ` · ${liveAgentCount} ${liveAgentCount === 1 ? "agent" : "agents"} working`
-                  : ""
-              }`
-            : rightPanelUnavailableLabel}
-        </TooltipPopup>
+        <TooltipPopup side="bottom">{rightPanel.tooltip}</TooltipPopup>
       </Tooltip>
     </div>
   );
@@ -106,20 +106,20 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
   maximized: boolean;
   onToggle: () => void;
 }) {
-  const label = maximized ? "Restore panel size" : "Maximize panel";
+  const model = buildRightPanelMaximizeModel(maximized);
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <Toggle
             className="shrink-0 [-webkit-app-region:no-drag]"
-            pressed={maximized}
+            pressed={model.pressed}
             onPressedChange={onToggle}
-            aria-label={label}
+            aria-label={model.label}
             variant="ghost"
             size="sm"
           >
-            {maximized ? (
+            {model.icon === "minimize-2" ? (
               <Minimize2Icon className="size-4" />
             ) : (
               <Maximize2Icon className="size-4" />
@@ -127,7 +127,7 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
           </Toggle>
         }
       />
-      <TooltipPopup side="bottom">{label}</TooltipPopup>
+      <TooltipPopup side="bottom">{model.label}</TooltipPopup>
     </Tooltip>
   );
 });

@@ -1,4 +1,4 @@
-import type { EDITORS } from "@t3tools/contracts";
+import { EDITORS, REMOTE_CAPABLE_EDITOR_IDS, type EditorId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -126,4 +126,17 @@ export const resolveEditorCommand = Effect.fn("editor.resolveEditorCommand")(fun
     }
   }
   return Option.none();
+});
+
+export const probeRemoteCapableEditors = Effect.fn("editor.probeRemoteCapableEditors")(function* (
+  env: NodeJS.ProcessEnv,
+) {
+  const available: Array<EditorId> = [];
+  for (const editorId of REMOTE_CAPABLE_EDITOR_IDS) {
+    const editor = EDITORS.find((editor) => editor.id === editorId);
+    if (editor && Option.isSome(yield* resolveEditorCommand(editor, env))) {
+      available.push(editorId);
+    }
+  }
+  return available;
 });

@@ -19,6 +19,12 @@ import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { MenuItem } from "../ui/menu";
 import { toastManager } from "../ui/toast";
 import { PullRequestGlyph } from "./pullRequestIcons";
+import {
+  buildPullRequestThreadLinksModel,
+  buildPullRequestThreadPickerModel,
+  pullRequestThreadLinkFailureToast,
+  resolvePullRequestThreadLinkMenuAction,
+} from "./PullRequestThreadLinks.logic";
 
 interface PullRequestThreadLinksProps {
   environmentId: EnvironmentId;
@@ -79,11 +85,7 @@ function EnabledPullRequestThreadLinks({
     try {
       await linking.changeLink(scopeThreadRef(environmentId, threadId), url, !remove);
     } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: remove ? "Could not unlink the pull request" : "Could not link the pull request",
-        description: error instanceof Error ? error.message : String(error),
-      });
+      toastManager.add(pullRequestThreadLinkFailureToast({ remove, error }));
       return;
     } finally {
       setPending(false);
@@ -102,20 +104,23 @@ function EnabledPullRequestThreadLinks({
   if (parsed === null || (!linkedHere && !linking.canLink(url))) return null;
   const linkedThreads =
     linking.mode === "multiple" ? ((relations.data ?? lastRelations)?.threads ?? []) : [];
-  const linkedThreadsLabel =
-    linkedThreads.length > 0
-      ? `Linked from ${linkedThreads.length} ${linkedThreads.length === 1 ? "thread" : "threads"}`
-      : "Linked threads";
+  const model = buildPullRequestThreadLinksModel({
+    linkedHere,
+    hasCurrentThread: currentThreadRef !== null,
+    linkedThreadCount: linkedThreads.length,
+    relationsError: relations.error !== null,
+    pending,
+  });
   return (
     <>
-      {display === "count" && (linkedThreads.length > 0 || relations.error !== null) ? (
+      {display === "count" && model.count.visible ? (
         <Tooltip>
           <TooltipTrigger
             render={
               <Button
                 size="xs"
                 variant="ghost"
-                aria-label={linkedThreadsLabel}
+                aria-label={model.count.ariaLabel}
                 onClick={() =>
                   openCommandPalette({
                     query: url,
@@ -126,40 +131,40 @@ function EnabledPullRequestThreadLinks({
                 }
               >
                 <MessageSquareIcon aria-hidden className="size-3.5" />
-                <span aria-hidden>{linkedThreads.length || "?"}</span>
+                <span aria-hidden>{model.count.countLabel}</span>
               </Button>
             }
           />
-          <TooltipPopup>{linkedThreadsLabel}. Search in the command palette.</TooltipPopup>
+          <TooltipPopup>{model.count.tooltip}</TooltipPopup>
         </Tooltip>
       ) : null}
       {display === "menu-item" ? (
         <MenuItem
-          disabled={pending}
+          disabled={model.menuItem.disabled}
           onClick={() => {
-            if (currentThreadRef !== null) {
-              void changeLink(currentThreadRef.threadId, linkedHere);
+            const action = resolvePullRequestThreadLinkMenuAction({
+              currentThreadId: currentThreadRef?.threadId ?? null,
+              linkedHere,
+            });
+            if (action.kind === "change") {
+              void changeLink(action.threadId, action.remove);
             } else {
               onPickerOpenChange?.(true);
             }
           }}
         >
-          {linkedHere ? (
+          {model.menuItem.icon === "unlink" ? (
             <PullRequestGlyph.unlink aria-hidden className="size-3.5" />
           ) : (
             <PullRequestGlyph.link aria-hidden className="size-3.5" />
           )}
-          {linkedHere
-            ? "Unlink from this thread"
-            : currentThreadRef
-              ? "Link to this thread"
-              : "Link to thread"}
+          {model.menuItem.label}
         </MenuItem>
       ) : null}
       {display === "picker" ? (
         <Dialog open onOpenChange={onPickerOpenChange}>
           <DialogPopup className="max-w-md" showCloseButton={false}>
-            <DialogTitle className="sr-only">Link pull request to a thread</DialogTitle>
+            <DialogTitle className="sr-only">{model.pickerTitle}</DialogTitle>
             <ThreadPicker
               environmentId={environmentId}
               url={url}
@@ -188,56 +193,43 @@ function ThreadPicker({
   const linking = usePullRequestLinking(environmentId);
   const projects = useProjects();
   const [query, setQuery] = useState("");
-  const projectNames = new Map(
-    projects
-      .filter((project) => project.environmentId === environmentId)
-      .map((project) => [project.id, project.title]),
-  );
-  const search = query.trim().toLocaleLowerCase();
-  const candidates = threads
-    .filter(
-      (thread) =>
-        thread.environmentId === environmentId &&
-        thread.archivedAt === null &&
-        `${thread.title} ${projectNames.get(thread.projectId) ?? ""}`
-          .toLocaleLowerCase()
-          .includes(search),
-    )
-    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const model = buildPullRequestThreadPickerModel({
+    environmentId,
+    threads,
+    projects,
+    query,
+    pending,
+    isLinked: (thread) => linking.isLinked(thread, url),
+  });
   return (
-    <Command mode="none" value={query} onValueChange={setQuery} aria-label="Choose a thread">
-      <CommandInput placeholder="Search threads or projects..." disabled={pending} />
+    <Command mode="none" value={query} onValueChange={setQuery} aria-label={model.ariaLabel}>
+      <CommandInput placeholder={model.searchPlaceholder} disabled={model.searchDisabled} />
       <CommandList className="max-h-80 overflow-y-auto">
-        {candidates.length === 0 ? (
+        {model.emptyLabel !== null ? (
           <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-            No active threads found.
+            {model.emptyLabel}
           </div>
         ) : (
-          candidates.map((thread) => {
-            const linked = linking.isLinked(thread, url);
-            return (
-              <CommandItem
-                key={thread.id}
-                value={thread.id}
-                disabled={pending || linked}
-                onClick={() => onSelect(thread.id)}
-              >
-                <MessageSquareIcon aria-hidden className="size-4 shrink-0" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate">{thread.title || "Untitled thread"}</span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {projectNames.get(thread.projectId)}
-                  </span>
-                </span>
-                {linked ? (
-                  <>
-                    <CheckIcon aria-hidden className="size-3.5" />
-                    <span className="text-xs text-muted-foreground">Linked</span>
-                  </>
-                ) : null}
-              </CommandItem>
-            );
-          })
+          model.rows.map((row) => (
+            <CommandItem
+              key={row.id}
+              value={row.id}
+              disabled={row.disabled}
+              onClick={() => onSelect(row.id)}
+            >
+              <MessageSquareIcon aria-hidden className="size-4 shrink-0" />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate">{row.title}</span>
+                <span className="truncate text-xs text-muted-foreground">{row.projectTitle}</span>
+              </span>
+              {row.linked ? (
+                <>
+                  <CheckIcon aria-hidden className="size-3.5" />
+                  <span className="text-xs text-muted-foreground">{row.linkedLabel}</span>
+                </>
+              ) : null}
+            </CommandItem>
+          ))
         )}
       </CommandList>
     </Command>

@@ -1,8 +1,7 @@
 import { DownloadIcon, ExternalLinkIcon } from "lucide-react";
 
-import { resolveExternalWebLinkHost } from "../chat/externalLinkContextMenu";
 import { Button } from "../ui/button";
-import { resolveProtocolRelativeMediaUrl } from "./mediaContent";
+import { resolveOpenMediaLink } from "./openMediaLink.logic";
 
 /** Navigates directly so the browser handles video playback and downloads, without fetching bytes. */
 export function OpenMediaLink(props: {
@@ -11,19 +10,8 @@ export function OpenMediaLink(props: {
   readonly fileName?: string | undefined;
   readonly className?: string | undefined;
 }) {
-  const originalUrl =
-    resolveExternalWebLinkHost(props.originalUrl) !== null ? props.originalUrl : undefined;
-  const source = originalUrl ?? props.src;
-  if (!source) return null;
-  const url = resolveProtocolRelativeMediaUrl(source);
-  let isBlob = false;
-  try {
-    const protocol = new URL(url).protocol;
-    if (protocol !== "http:" && protocol !== "https:" && protocol !== "blob:") return null;
-    isBlob = protocol === "blob:";
-  } catch {
-    return null;
-  }
+  const target = resolveOpenMediaLink({ originalUrl: props.originalUrl, src: props.src });
+  if (target === null) return null;
   return (
     <Button
       size="sm"
@@ -31,15 +19,15 @@ export function OpenMediaLink(props: {
       className={props.className}
       render={
         <a
-          href={url}
-          target={isBlob ? undefined : "_blank"}
-          download={isBlob ? props.fileName || true : undefined}
+          href={target.url}
+          target={target.isBlob ? undefined : "_blank"}
+          download={target.isBlob ? props.fileName || true : undefined}
           rel="noopener noreferrer"
         />
       }
     >
-      {isBlob ? <DownloadIcon /> : <ExternalLinkIcon />}
-      {originalUrl ? "Open original" : isBlob ? "Download video" : "Open in browser"}
+      {target.isBlob ? <DownloadIcon /> : <ExternalLinkIcon />}
+      {target.label}
     </Button>
   );
 }

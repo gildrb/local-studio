@@ -41,8 +41,9 @@ import {
 } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
-import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentThreadDetails } from "../state/threads";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import type { Atom, AtomRegistry } from "effect/unstable/reactivity";
 import { stripInlineContextReferences } from "~/lib/composerContextReferences";
 import { filterTerminalContextsWithText, type TerminalContextDraft } from "../lib/terminalContext";
 import type { DraftThreadEnvMode } from "../composerDraftStore";
@@ -50,7 +51,7 @@ import { collapseExpandedComposerCursor, type ComposerSubmissionIntent } from ".
 import type { ReviewCommentContext } from "../reviewCommentContext";
 import type { TimelineEntry } from "../session-logic";
 import type { PreviewMiniPlayerSource } from "../previewMiniPlayerStore";
-import type { DesktopPreviewOverlay } from "../previewStateStore";
+import type { DesktopPreviewOverlay } from "../previewState.logic";
 import type { RightPanelSurface } from "../rightPanelStore";
 import {
   NO_PROVIDER_MODEL_SELECTION,
@@ -64,6 +65,7 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const ENVIRONMENT_RECONNECT_WARNING_GRACE_MS = 2_000;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
+export type LastInvokedScriptByProject = typeof LastInvokedScriptByProjectSchema.Type;
 
 export function agentControlledBrowserCloseConfirmation(
   surfaces: readonly RightPanelSurface[],
@@ -114,7 +116,7 @@ export function shouldOpenProactivePullRequest(
   return targetKey !== null && targetKey !== previousTargetKey;
 }
 
-interface ProactivePanelObservation {
+export interface ProactivePanelObservation {
   threadKey: string;
   runningTurnId: TurnId | null | undefined;
   targetKey: string | null | undefined;
@@ -191,6 +193,191 @@ export function resolveProactiveTurnDiffAction(input: {
     0,
   );
   return input.checkpoint.files.length >= 3 || changedLines >= 50 ? "open" : "ignore";
+}
+
+export type ProactivePanelOpen =
+  | { readonly kind: "pull-request"; readonly reference: ThreadLinkedPullRequest }
+  | { readonly kind: "pull-requests" }
+  | { readonly kind: "diff" };
+
+export type ObservedThreadPullRequest = {
+  readonly threadKey: string;
+  readonly reference: ThreadLinkedPullRequest | null;
+};
+
+export type ProactivePanelStepInput = {
+  readonly observation: ProactivePanelObservation | null;
+  readonly observedPullRequest: ObservedThreadPullRequest | null;
+  readonly threadKey: string;
+  readonly runningTurnId: TurnId | null;
+  readonly userActionRevision: number;
+  readonly openSurface: RightPanelSurface | null;
+  readonly linkedThreadPullRequest: ThreadLinkedPullRequest | null;
+  readonly clientSettingsHydrated: boolean;
+  readonly proactivePanelsEnabled: boolean;
+  readonly proactivePullRequestsKey: string | null;
+  readonly pullRequestsCapabilityKnown: boolean;
+  readonly pullRequestsSurfaceAvailable: boolean;
+  readonly visiblePullRequestCount: number;
+  readonly hasLinkedPullRequestDetail: boolean;
+  readonly supportsPullRequests: boolean;
+  readonly threadDetailLoading: boolean;
+  readonly latestTurnSettled: boolean;
+  readonly latestTurn: { readonly turnId: TurnId; readonly state: string } | null;
+  readonly checkpoints: ReadonlyArray<TurnDiffSummary>;
+  readonly isGitRepo: boolean | undefined;
+};
+
+export type ProactivePanelStep = {
+  readonly observation: ProactivePanelObservation;
+  readonly observedPullRequest: ObservedThreadPullRequest;
+  readonly userActionRevision: number;
+  readonly opens: ReadonlyArray<ProactivePanelOpen>;
+};
+
+/**
+ * One pass of the proactive right-panel policy: which surfaces the app opens on
+ * its own for a thread (linked pull requests, a completed turn's diff), and the
+ * observation to carry into the next pass. The caller applies `opens` in order
+ * through `openProactive` with `userActionRevision`.
+ */
+export function resolveProactivePanelStep(input: ProactivePanelStepInput): ProactivePanelStep {
+  let observation = observeProactivePanelUserChoice(input.observation, {
+    threadKey: input.threadKey,
+    runningTurnId: input.runningTurnId,
+    userActionRevision: input.userActionRevision,
+  });
+  const {
+    runningTurnId: previousRunningTurnId,
+    targetKey: previousTargetKey,
+    userActionRevision,
+  } = observation;
+  const previousPullRequest = input.observedPullRequest;
+  const observedPullRequest: ObservedThreadPullRequest = {
+    threadKey: input.threadKey,
+    reference: input.linkedThreadPullRequest,
+  };
+  const followSelectedPullRequest =
+    previousPullRequest?.threadKey === input.threadKey &&
+    shouldRetargetThreadPullRequestPanel(
+      previousPullRequest.reference,
+      input.linkedThreadPullRequest,
+      input.openSurface,
+    );
+  const opens: ProactivePanelOpen[] = [];
+  // Following the selected linked PR does not open an unrelated panel, so it
+  // remains available with proactive panels off. It still respects a later choice.
+  if (followSelectedPullRequest && input.linkedThreadPullRequest !== null) {
+    opens.push({ kind: "pull-request", reference: input.linkedThreadPullRequest });
+  }
+  const step = (): ProactivePanelStep => ({
+    observation,
+    observedPullRequest,
+    userActionRevision,
+    opens,
+  });
+  if (!input.clientSettingsHydrated) return step();
+
+  const eligibleLink =
+    input.proactivePanelsEnabled &&
+    shouldOpenProactivePullRequest(previousTargetKey, input.proactivePullRequestsKey);
+  const shouldDeferLink = eligibleLink && !input.pullRequestsCapabilityKnown;
+  observation = {
+    ...observation,
+    targetKey: shouldDeferLink ? (previousTargetKey ?? null) : input.proactivePullRequestsKey,
+  };
+  if (eligibleLink && input.pullRequestsCapabilityKnown) {
+    if (
+      input.pullRequestsSurfaceAvailable &&
+      (input.visiblePullRequestCount > 1 ||
+        !input.hasLinkedPullRequestDetail ||
+        !input.supportsPullRequests)
+    ) {
+      opens.push({ kind: "pull-requests" });
+    } else if (
+      !followSelectedPullRequest &&
+      input.supportsPullRequests &&
+      input.linkedThreadPullRequest !== null
+    ) {
+      opens.push({ kind: "pull-request", reference: input.linkedThreadPullRequest });
+    }
+  }
+  if (input.threadDetailLoading) return step();
+
+  const settledTurnId = input.latestTurnSettled ? (input.latestTurn?.turnId ?? null) : null;
+  const newlyCompletedTurnId = shouldOpenProactiveTurnDiff({
+    previousRunningTurnId,
+    runningTurnId: input.runningTurnId,
+    settledTurnId,
+    turnCompleted: input.latestTurn?.state === "completed",
+  })
+    ? settledTurnId
+    : null;
+  const eligibleCompletion =
+    input.proactivePanelsEnabled &&
+    newlyCompletedTurnId !== null &&
+    !(
+      input.proactivePullRequestsKey !== null &&
+      (!input.pullRequestsCapabilityKnown ||
+        input.supportsPullRequests ||
+        input.pullRequestsSurfaceAvailable)
+    );
+  const completedCheckpoint = eligibleCompletion
+    ? input.checkpoints.find((checkpoint) => checkpoint.turnId === newlyCompletedTurnId)
+    : undefined;
+  const diffAction = eligibleCompletion
+    ? resolveProactiveTurnDiffAction({
+        checkpoint: completedCheckpoint,
+        isGitRepo: input.isGitRepo,
+      })
+    : "ignore";
+  observation = {
+    ...observation,
+    // Preserve first-entry eligibility while capabilities, checkpoint or repository load.
+    runningTurnId:
+      diffAction === "defer" || shouldDeferLink ? previousRunningTurnId : input.runningTurnId,
+  };
+  if (diffAction === "open" && newlyCompletedTurnId !== null) opens.push({ kind: "diff" });
+  return step();
+}
+
+const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
+
+/** Tracks which file surfaces have unsaved edits, per project, by `file:<path>` surface id. */
+export function updatePendingFileSurfaceIds(
+  currentByProject: ReadonlyMap<string, ReadonlySet<string>>,
+  projectKey: string,
+  relativePath: string,
+  pending: boolean,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const current = currentByProject.get(projectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
+  const surfaceId = `file:${relativePath}`;
+  if (current.has(surfaceId) === pending) return currentByProject;
+  const next = new Set(current);
+  if (pending) next.add(surfaceId);
+  else next.delete(surfaceId);
+  const nextByProject = new Map(currentByProject);
+  if (next.size === 0) nextByProject.delete(projectKey);
+  else nextByProject.set(projectKey, next);
+  return nextByProject;
+}
+
+export function buildProactivePullRequestsKey(input: {
+  readonly pullRequestsSurfaceAvailable: boolean;
+  readonly visiblePullRequests: ReadonlyArray<{
+    readonly host: string;
+    readonly repository: string;
+    readonly number: number;
+  }>;
+  readonly linkedThreadPullRequest: ThreadLinkedPullRequest | null;
+}): string | null {
+  if (input.pullRequestsSurfaceAvailable) {
+    return JSON.stringify(
+      input.visiblePullRequests.map((link) => [link.host, link.repository, link.number]).sort(),
+    );
+  }
+  const linked = input.linkedThreadPullRequest;
+  return linked ? JSON.stringify([linked.projectId, linked.repository, linked.number]) : null;
 }
 
 export function codexArtifactTemplatePromptToAppend(
@@ -819,16 +1006,18 @@ export function resolveSendEnvMode(input: {
   return input.isGitRepo ? input.requestedEnvMode : "local";
 }
 
-export function resolveBackgroundDraftWorkspaceOptions(input: {
-  envMode: DraftThreadEnvMode;
-  branch: string | null;
-  startFromOrigin: boolean;
-}): {
+export interface BackgroundDraftWorkspaceOptions {
   envMode: DraftThreadEnvMode;
   branch: string | null;
   worktreePath: null;
   startFromOrigin: boolean;
-} {
+}
+
+export function resolveBackgroundDraftWorkspaceOptions(input: {
+  envMode: DraftThreadEnvMode;
+  branch: string | null;
+  startFromOrigin: boolean;
+}): BackgroundDraftWorkspaceOptions {
   return {
     envMode: input.envMode,
     branch: input.branch,
@@ -1077,12 +1266,18 @@ export function getStartedThreadModelChangeBlockReason(input: {
   };
 }
 
+export type ThreadDetailSource = {
+  readonly registry: Pick<AtomRegistry.AtomRegistry, "get" | "subscribe">;
+  readonly detailAtom: (threadRef: ScopedThreadRef) => Atom.Atom<Thread | null>;
+};
+
 export async function waitForStartedServerThread(
+  source: ThreadDetailSource,
   threadRef: ScopedThreadRef,
   timeoutMs = 1_000,
 ): Promise<boolean> {
-  const threadAtom = environmentThreadDetails.detailAtom(threadRef);
-  const getThread = () => appAtomRegistry.get(threadAtom);
+  const threadAtom = source.detailAtom(threadRef);
+  const getThread = () => source.registry.get(threadAtom);
   const thread = getThread();
 
   if (threadHasStarted(thread)) {
@@ -1104,7 +1299,7 @@ export async function waitForStartedServerThread(
       resolve(result);
     };
 
-    const unsubscribe = appAtomRegistry.subscribe(threadAtom, (thread) => {
+    const unsubscribe = source.registry.subscribe(threadAtom, (thread) => {
       if (!threadHasStarted(thread)) {
         return;
       }
@@ -1123,14 +1318,15 @@ export async function waitForStartedServerThread(
 }
 
 export async function waitForRevertedMessage(
+  source: ThreadDetailSource,
   threadRef: ScopedThreadRef,
   messageId: MessageId,
   turnCount: number,
   revert: () => Promise<void>,
   timeoutMs = 120_000,
 ): Promise<void> {
-  const threadAtom = environmentThreadDetails.detailAtom(threadRef);
-  const initial = appAtomRegistry.get(threadAtom);
+  const threadAtom = source.detailAtom(threadRef);
+  const initial = source.registry.get(threadAtom);
   if (!initial?.messages.some((message) => message.id === messageId)) {
     throw new Error("The message to rewind is no longer available.");
   }
@@ -1153,7 +1349,7 @@ export async function waitForRevertedMessage(
       else resolve();
     };
     const inspect = () => {
-      const thread = appAtomRegistry.get(threadAtom);
+      const thread = source.registry.get(threadAtom);
       if (!thread) return;
       const failure = thread.activities.findLast(
         (activity) =>
@@ -1184,7 +1380,7 @@ export async function waitForRevertedMessage(
         finish();
       }
     };
-    unsubscribe = appAtomRegistry.subscribe(threadAtom, inspect);
+    unsubscribe = source.registry.subscribe(threadAtom, inspect);
     timeout = globalThis.setTimeout(() => {
       finish(new Error("Timed out waiting for the thread to rewind."));
     }, timeoutMs);
@@ -1383,4 +1579,128 @@ export function restorePlanFollowUpComposer(input: {
     prompt: input.snapshot.prompt,
     detectTrigger: true,
   });
+}
+
+export function resolveLocalDispatchAcknowledged(input: {
+  readonly localDispatch: LocalDispatchSnapshot | null;
+  readonly activeThread: Thread | undefined;
+  readonly activeLatestTurn: Thread["latestTurn"] | null;
+  readonly phase: SessionPhase;
+  readonly hasPendingApproval: boolean;
+  readonly hasPendingUserInput: boolean;
+  readonly threadError: string | null | undefined;
+}): boolean {
+  const latestUserMessageId =
+    input.activeThread?.messages.findLast((message) => message.role === "user")?.id ?? null;
+  return hasServerAcknowledgedLocalDispatch({
+    localDispatch: input.localDispatch,
+    phase: input.phase,
+    latestTurn: input.activeLatestTurn,
+    latestUserMessageId,
+    session: input.activeThread?.session ?? null,
+    hasPendingApproval: input.hasPendingApproval,
+    hasPendingUserInput: input.hasPendingUserInput,
+    latestTurnStartFailureId:
+      input.localDispatch === null
+        ? null
+        : latestTurnStartFailureId(input.activeThread, latestUserMessageId),
+    threadError: input.threadError,
+  });
+}
+
+export function nextLocalDispatch(
+  current: LocalDispatchSnapshot | null,
+  serverAcknowledged: boolean,
+  activeThread: Thread | undefined,
+  options?: { preparingWorktree?: boolean; submissionIntent?: ComposerSubmissionIntent },
+): LocalDispatchSnapshot {
+  const preparingWorktree = Boolean(options?.preparingWorktree);
+  const active = serverAcknowledged ? null : current;
+  if (active) {
+    const submissionIntent = options?.submissionIntent ?? active.submissionIntent;
+    return active.preparingWorktree === preparingWorktree &&
+      active.submissionIntent === submissionIntent
+      ? active
+      : { ...active, preparingWorktree, submissionIntent };
+  }
+  return createLocalDispatchSnapshot(activeThread, options);
+}
+
+export function resolveModelDisabledReason(input: {
+  readonly thread: Pick<Thread, "session" | "modelSelection"> | undefined;
+  readonly providers: ReadonlyArray<
+    Pick<ServerProvider, "instanceId" | "requiresNewThreadForModelChange">
+  >;
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string;
+}): string | null {
+  if (!input.thread) {
+    return null;
+  }
+  const reason = getStartedThreadModelChangeBlockReason({
+    providers: input.providers,
+    hasStartedSession: input.thread.session !== null,
+    currentModelSelection: input.thread.modelSelection,
+    currentProviderInstanceId: input.thread.session?.providerInstanceId ?? null,
+    nextModelSelection: { instanceId: input.instanceId, model: input.model },
+  });
+  return reason ? `${reason.description} Start a new thread to use this model.` : null;
+}
+
+export type ProviderModelSelectionResult =
+  | { readonly kind: "ignored" }
+  | { readonly kind: "blocked"; readonly title: string; readonly description: string }
+  | { readonly kind: "select"; readonly modelSelection: ModelSelection };
+
+export function resolveProviderModelSelection(input: {
+  readonly thread: Pick<Thread, "session" | "modelSelection">;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly lockedProvider: ProviderDriverKind | null;
+  readonly settings: UnifiedSettings;
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string;
+}): ProviderModelSelectionResult {
+  const { thread, providers, lockedProvider } = input;
+  const entry = providers.find((snapshot) => snapshot.instanceId === input.instanceId);
+  const resolvedDriverKind = entry?.driver ?? null;
+  if (
+    lockedProvider !== null &&
+    resolvedDriverKind !== null &&
+    resolvedDriverKind !== lockedProvider
+  ) {
+    return { kind: "ignored" };
+  }
+  if (lockedProvider !== null && thread.session?.providerInstanceId) {
+    const currentEntry = providers.find(
+      (snapshot) => snapshot.instanceId === thread.session?.providerInstanceId,
+    );
+    if (
+      currentEntry?.continuation?.groupKey &&
+      entry?.continuation?.groupKey &&
+      currentEntry.continuation.groupKey !== entry.continuation.groupKey
+    ) {
+      return { kind: "ignored" };
+    }
+  }
+  const resolvedModel = resolveAppModelSelectionForInstance(
+    input.instanceId,
+    input.settings,
+    providers,
+    input.model,
+  );
+  if (!resolvedModel) {
+    return { kind: "ignored" };
+  }
+  const modelSelection: ModelSelection = { instanceId: input.instanceId, model: resolvedModel };
+  const blockReason = getStartedThreadModelChangeBlockReason({
+    providers,
+    hasStartedSession: thread.session !== null,
+    currentModelSelection: thread.modelSelection,
+    currentProviderInstanceId: thread.session?.providerInstanceId ?? null,
+    nextModelSelection: modelSelection,
+  });
+  if (blockReason) {
+    return { kind: "blocked", title: blockReason.title, description: blockReason.description };
+  }
+  return { kind: "select", modelSelection };
 }

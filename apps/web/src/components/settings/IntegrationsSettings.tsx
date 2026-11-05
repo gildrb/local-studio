@@ -11,34 +11,7 @@ import { DeviceHostsSettings } from "./DeviceHostsSettings";
  *
  * @module IntegrationsSettings
  */
-import {
-  BrowserImportFailureReason,
-  BROWSER_PROFILE_MAX_COUNT,
-  type BrowserLinkTarget,
-  type BrowserProfile,
-  type EnvironmentId,
-  BROWSER_PROFILE_NAME_MAX_LENGTH,
-  BROWSER_RECORDING_FRAME_RATES,
-  DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
-  DEFAULT_BROWSER_PROFILE_ID,
-  DEFAULT_BROWSER_LINK_TARGET,
-  DEFAULT_BROWSER_RECORDING_FRAME_RATE,
-  DEFAULT_BROWSER_VIEWPORT,
-  DEFAULT_PREVIEW_APPEARANCE,
-  DEFAULT_PREVIEW_ZOOM_FACTOR,
-  FILL_PREVIEW_VIEWPORT,
-  PREVIEW_VIEWPORT_MAX_AREA,
-  PREVIEW_VIEWPORT_MAX_DIMENSION,
-  PREVIEW_VIEWPORT_MIN_DIMENSION,
-  PREVIEW_ZOOM_LEVELS,
-  findBrowserProfile,
-  isBuiltInBrowserProfileId,
-  resolveBrowserProfiles,
-  type BrowserImportSource,
-  type PreviewAppearancePreference,
-  type PreviewViewportSetting,
-} from "@t3tools/contracts";
-import { PREVIEW_VIEWPORT_PRESETS } from "@t3tools/shared/previewViewport";
+import type { BrowserImportSource, EnvironmentId } from "@t3tools/contracts";
 import { MoreVertical, Plus as PlusIcon } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
@@ -54,10 +27,12 @@ import {
   AgentDeviceSetupStatus,
   DeviceHubSetupStatus,
   PlatformStatus,
-  platformSetupStatus,
-  deviceHubDescription,
-  agentDeviceDescription,
 } from "~/components/device/DeviceSetup";
+import {
+  agentDeviceDescription,
+  deviceHubDescription,
+  platformSetupStatus,
+} from "~/components/device/DeviceSetup.logic";
 import { isElectron } from "../../env";
 
 import { Badge } from "../ui/badge";
@@ -111,66 +86,55 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
-import { searchableSetting } from "./settingsSearch";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { useSettingsScope } from "./SettingsScopeContext";
 import { BrowserImportWizard, type WizardTarget } from "./BrowserImportWizard";
 import type { ImportOutcome } from "./browserImportWizard.logic";
-
-const FILL_VALUE = "fill";
-const RESPONSIVE_VALUE = "responsive";
-
-type BrowserProfileDataBridge = Pick<
-  NonNullable<typeof previewBridge>,
-  "clearCookies" | "clearCache"
->;
-
-export async function clearBrowserProfileData(
-  bridge: BrowserProfileDataBridge | null,
-  environmentIds: ReadonlyArray<EnvironmentId>,
-  profileId: string,
-): Promise<void> {
-  if (bridge === null || environmentIds.length === 0) {
-    throw new Error("Browser profile data is not available to clear.");
-  }
-  await Promise.all(
-    environmentIds.flatMap((environmentId) => [
-      bridge.clearCookies(environmentId, profileId),
-      bridge.clearCache(environmentId, profileId),
-    ]),
-  );
-}
-
-export function browserProfileRemovalAvailable(
-  bridgeAvailable: boolean,
-  environmentsReady: boolean,
-  environmentCount: number,
-): boolean {
-  return bridgeAvailable && environmentsReady && environmentCount > 0;
-}
-
-/**
- * The size a "Responsive" default falls back to when the user switches away
- * from Fill and hasn't typed dimensions yet. Fill has no dimensions to carry
- * over, so the picker needs something concrete to seed the inputs with.
- */
-const RESPONSIVE_SEED_SIZE = { width: 1280, height: 800 } as const;
+import {
+  BROWSER_PROFILE_REMOVAL_FAILED_MESSAGE,
+  DEVICE_TOOL_UPDATE_FAILED_MESSAGE,
+  browserProfileRemovalPatch,
+  buildBrowserAppearanceRowModel,
+  buildBrowserAutoShowFloatingPreviewRowModel,
+  buildBrowserLinkTargetRowModel,
+  buildBrowserProfilesModel,
+  buildBrowserRecordingFrameRateRowModel,
+  buildBrowserRecordingInputRowModels,
+  buildBrowserViewportRowModel,
+  buildBrowserZoomRowModel,
+  buildDeviceIntegrationModel,
+  buildIntegrationsPageModel,
+  clearBrowserProfileData,
+  deviceConfigureRequest,
+  deviceSettingsFailureToast,
+  importFailureMessage,
+  importFailureReason,
+  resolveClearBrowserProfileData,
+  resolveCreateBrowserProfile,
+  resolveDeviceIntegrationToggle,
+  resolveDeviceListRequest,
+  resolveDevicePlatformsRevealed,
+  resolveImportedProfileRegistration,
+  resolveIntegrationsSettingsChange,
+  resolveRemoveBrowserProfile,
+  resolveRenameBrowserProfile,
+  resolveSetDefaultBrowserProfile,
+  resolveWizardImportBlock,
+  wizardImportTargetMissing,
+  type DeviceConfigureInput,
+  type DeviceIntegrationPending,
+  type DeviceListAction,
+  type DeviceTool,
+  type DeviceToolUpdateError,
+  type IntegrationsPageModel,
+  type IntegrationsResettableSetting,
+  type IntegrationsSelectRowModel,
+  type IntegrationsSettingsChange,
+  type IntegrationsSwitchRowModel,
+} from "./IntegrationsSettings.logic";
 
 const NO_GROUPING: Intl.NumberFormatOptions = { useGrouping: false };
 
-const APPEARANCE_LABELS: Readonly<Record<PreviewAppearancePreference, string>> = {
-  system: "System",
-  light: "Light",
-  dark: "Dark",
-};
-
-const zoomLabel = (zoomFactor: number) => `${Math.round(zoomFactor * 100)}%`;
-
-/**
- * IPC flattens the failure to its message, so the reason token travels inside
- * it. Anything unrecognised reads as a plain read failure rather than leaking
- * the raw message into a toast.
- */
 /** Thrown from the post-import settings updater when the cap was hit meanwhile. */
 class ProfileLimitReachedError extends Error {
   constructor() {
@@ -179,142 +143,62 @@ class ProfileLimitReachedError extends Error {
   }
 }
 
-export const importFailureReason = (cause: unknown): BrowserImportFailureReason => {
-  const message = String((cause as { message?: unknown } | undefined)?.message ?? "");
-  return (
-    BrowserImportFailureReason.literals.find((reason) => message.includes(`failed: ${reason}.`)) ??
-    "readFailed"
-  );
-};
-
-const viewportSelectValue = (viewport: PreviewViewportSetting): string => {
-  if (viewport._tag === "fill") return FILL_VALUE;
-  if (
-    viewport._tag === "preset" &&
-    PREVIEW_VIEWPORT_PRESETS.some((preset) => preset.id === viewport.presetId)
-  ) {
-    return viewport.presetId;
-  }
-  return RESPONSIVE_VALUE;
-};
-
-/**
- * The trigger renders this rather than a bare `SelectValue`, which would fall
- * back to printing the raw stored value ("fill") because the options are built
- * inline instead of from an `items` map.
- */
-const viewportSelectLabel = (viewport: PreviewViewportSetting): string => {
-  const value = viewportSelectValue(viewport);
-  if (value === FILL_VALUE) return "Fill panel";
-  if (value === RESPONSIVE_VALUE) return "Responsive";
-  return PREVIEW_VIEWPORT_PRESETS.find((preset) => preset.id === value)?.label ?? "Responsive";
-};
-
-const isValidDimension = (value: number) =>
-  Number.isInteger(value) &&
-  value >= PREVIEW_VIEWPORT_MIN_DIMENSION &&
-  value <= PREVIEW_VIEWPORT_MAX_DIMENSION;
-
-/**
- * A sized viewport with width and height swapped. Presets keep their identity
- * through a rotation — `resolvePreviewViewport` already stores rotated presets
- * as the preset id plus swapped dimensions — so a rotated iPad is still an
- * iPad, not an anonymous custom size.
- */
-const rotateViewport = (
-  viewport: Exclude<PreviewViewportSetting, { readonly _tag: "fill" }>,
-): PreviewViewportSetting => ({
-  ...viewport,
-  width: viewport.height,
-  height: viewport.width,
-});
+function useApplyIntegrationsChange() {
+  const updateSettings = useUpdatePrimarySettings();
+  return (change: IntegrationsSettingsChange) => {
+    const patch = resolveIntegrationsSettingsChange(change);
+    if (patch !== null) updateSettings(patch);
+  };
+}
 
 function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
   const viewport = useClientSettings((settings) => settings.browserDefaultViewport);
-  const updateSettings = useUpdatePrimarySettings();
-
-  const sized = viewport._tag === "fill" ? null : viewport;
-  const presentedSize = {
-    width: sized?.width ?? RESPONSIVE_SEED_SIZE.width,
-    height: sized?.height ?? RESPONSIVE_SEED_SIZE.height,
-  };
-
-  const selectViewport = (value: string | null) => {
-    if (value === FILL_VALUE) {
-      updateSettings({ browserDefaultViewport: FILL_PREVIEW_VIEWPORT });
-      return;
-    }
-    if (value === RESPONSIVE_VALUE) {
-      updateSettings({
-        browserDefaultViewport: {
-          _tag: "freeform",
-          width: sized?.width ?? RESPONSIVE_SEED_SIZE.width,
-          height: sized?.height ?? RESPONSIVE_SEED_SIZE.height,
-        },
-      });
-      return;
-    }
-    const preset = PREVIEW_VIEWPORT_PRESETS.find((candidate) => candidate.id === value);
-    if (!preset) return;
-    updateSettings({
-      browserDefaultViewport: {
-        _tag: "preset",
-        width: preset.width,
-        height: preset.height,
-        presetId: preset.id,
-      },
-    });
-  };
-
-  // Committed on blur rather than per keystroke: typing "2560" passes through
-  // "256", which is a legal dimension, so an onValueChange handler would
-  // persist that intermediate size and churn the settings file on every key.
-  const commitDimension = (axis: "width" | "height", value: number | null) => {
-    if (value === null || !isValidDimension(value)) return;
-    const next = { ...presentedSize, [axis]: value };
-    if (next.width * next.height > PREVIEW_VIEWPORT_MAX_AREA) return;
-    if (sized && next.width === sized.width && next.height === sized.height) return;
-    // Typing a size means the preset no longer describes it.
-    updateSettings({ browserDefaultViewport: { _tag: "freeform", ...next } });
-  };
+  const applyChange = useApplyIntegrationsChange();
+  const model = buildBrowserViewportRowModel({ viewport, disabled });
 
   return (
     <SettingsRow
-      {...searchableSetting("browser-default-viewport")}
-      description="Tab size for you and agents. Fill fits the panel; other sizes show the device toolbar."
+      id={model.id}
+      title={model.title}
+      description={model.description}
       resetAction={
-        !disabled && viewport._tag !== DEFAULT_BROWSER_VIEWPORT._tag ? (
+        model.reset ? (
           <SettingResetButton
-            label="default browser viewport"
-            onClick={() => updateSettings({ browserDefaultViewport: DEFAULT_BROWSER_VIEWPORT })}
+            label={model.reset.label}
+            onClick={() => applyChange({ kind: "reset", setting: "browserDefaultViewport" })}
           />
         ) : null
       }
       control={
         <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
           <Select
-            value={viewportSelectValue(viewport)}
-            onValueChange={selectViewport}
-            disabled={disabled}
+            value={model.value}
+            onValueChange={(value) =>
+              applyChange({ kind: "viewportSelect", current: viewport, value })
+            }
+            disabled={model.disabled}
           >
             <SelectTrigger
               size="sm"
               className="w-full min-w-0 sm:w-44"
-              aria-label="Default browser viewport"
+              aria-label={model.ariaLabel}
             >
-              <SelectValue>{viewportSelectLabel(viewport)}</SelectValue>
+              <SelectValue>{model.valueLabel}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="end" alignItemWithTrigger={false}>
-              <SelectItem value={FILL_VALUE}>Fill panel</SelectItem>
-              <SelectItem value={RESPONSIVE_VALUE}>Responsive</SelectItem>
+              {model.options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
               <SelectGroup>
-                <SelectGroupLabel>Standard</SelectGroupLabel>
-                {PREVIEW_VIEWPORT_PRESETS.map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
+                <SelectGroupLabel>{model.presetGroup.label}</SelectGroupLabel>
+                {model.presetGroup.options.map((preset) => (
+                  <SelectItem key={preset.value} value={preset.value}>
                     <span className="flex w-full items-center justify-between gap-5">
                       <span>{preset.label}</span>
                       <span className="text-xs tabular-nums text-muted-foreground">
-                        {preset.detail}
+                        {preset.description}
                       </span>
                     </span>
                   </SelectItem>
@@ -323,36 +207,50 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
             </SelectPopup>
           </Select>
 
-          {sized ? (
+          {model.size ? (
             <div className="flex min-w-0 items-center gap-1">
               <NumberField
-                value={presentedSize.width}
-                min={PREVIEW_VIEWPORT_MIN_DIMENSION}
-                max={PREVIEW_VIEWPORT_MAX_DIMENSION}
-                disabled={disabled}
+                value={model.size.width}
+                min={model.size.min}
+                max={model.size.max}
+                disabled={model.disabled}
                 // Pixel counts read as raw numbers; grouping would show "1,024".
                 format={NO_GROUPING}
                 size="sm"
                 className="w-20"
-                onValueCommitted={(value) => commitDimension("width", value)}
+                onValueCommitted={(value) =>
+                  applyChange({
+                    kind: "viewportDimension",
+                    current: viewport,
+                    axis: "width",
+                    value,
+                  })
+                }
               >
                 <NumberFieldGroup>
-                  <NumberFieldInput aria-label="Default viewport width" />
+                  <NumberFieldInput aria-label={model.size.widthAriaLabel} />
                 </NumberFieldGroup>
               </NumberField>
-              <span className="text-xs text-muted-foreground">×</span>
+              <span className="text-xs text-muted-foreground">{model.size.separator}</span>
               <NumberField
-                value={presentedSize.height}
-                min={PREVIEW_VIEWPORT_MIN_DIMENSION}
-                max={PREVIEW_VIEWPORT_MAX_DIMENSION}
-                disabled={disabled}
+                value={model.size.height}
+                min={model.size.min}
+                max={model.size.max}
+                disabled={model.disabled}
                 format={NO_GROUPING}
                 size="sm"
                 className="w-20"
-                onValueCommitted={(value) => commitDimension("height", value)}
+                onValueCommitted={(value) =>
+                  applyChange({
+                    kind: "viewportDimension",
+                    current: viewport,
+                    axis: "height",
+                    value,
+                  })
+                }
               >
                 <NumberFieldGroup>
-                  <NumberFieldInput aria-label="Default viewport height" />
+                  <NumberFieldInput aria-label={model.size.heightAriaLabel} />
                 </NumberFieldGroup>
               </NumberField>
               <Tooltip>
@@ -361,19 +259,15 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
                     <Button
                       size="icon-sm"
                       variant="ghost-muted"
-                      disabled={disabled}
-                      aria-label={`Rotate to ${
-                        presentedSize.height >= presentedSize.width ? "landscape" : "portrait"
-                      }`}
-                      onClick={() =>
-                        updateSettings({ browserDefaultViewport: rotateViewport(sized) })
-                      }
+                      disabled={model.disabled}
+                      aria-label={model.size.rotate.ariaLabel}
+                      onClick={() => applyChange({ kind: "viewportRotate", current: viewport })}
                     >
                       <ScreenRotationIcon />
                     </Button>
                   }
                 />
-                <TooltipPopup side="top">Rotate</TooltipPopup>
+                <TooltipPopup side="top">{model.size.rotate.tooltip}</TooltipPopup>
               </Tooltip>
             </div>
           ) : null}
@@ -383,128 +277,131 @@ function BrowserViewportSetting({ disabled }: { readonly disabled: boolean }) {
   );
 }
 
-function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
-  const zoomFactor = useClientSettings((settings) => settings.browserDefaultZoomFactor);
-  const updateSettings = useUpdatePrimarySettings();
+function BrowserSelectRow({
+  model,
+  resetSetting,
+  toChange,
+}: {
+  readonly model: IntegrationsSelectRowModel;
+  readonly resetSetting: IntegrationsResettableSetting;
+  readonly toChange: (value: string | null) => IntegrationsSettingsChange;
+}) {
+  const applyChange = useApplyIntegrationsChange();
 
   return (
     <SettingsRow
-      {...searchableSetting("browser-default-zoom")}
-      description="Page zoom applied to new browser tabs."
+      id={model.id}
+      title={model.title}
+      description={model.description}
       resetAction={
-        !disabled && zoomFactor !== DEFAULT_PREVIEW_ZOOM_FACTOR ? (
+        model.reset ? (
           <SettingResetButton
-            label="default browser zoom"
-            onClick={() =>
-              updateSettings({ browserDefaultZoomFactor: DEFAULT_PREVIEW_ZOOM_FACTOR })
-            }
+            label={model.reset.label}
+            onClick={() => applyChange({ kind: "reset", setting: resetSetting })}
           />
         ) : null
       }
       control={
         <Select
-          disabled={disabled}
-          value={String(zoomFactor)}
-          onValueChange={(value) => {
-            const next = PREVIEW_ZOOM_LEVELS.find((level) => String(level) === value);
-            if (next !== undefined) updateSettings({ browserDefaultZoomFactor: next });
-          }}
+          disabled={model.disabled}
+          value={model.value}
+          onValueChange={(value) => applyChange(toChange(value))}
         >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Default browser zoom">
-            <SelectValue>{zoomLabel(zoomFactor)}</SelectValue>
+          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label={model.ariaLabel}>
+            <SelectValue>{model.valueLabel}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            {PREVIEW_ZOOM_LEVELS.map((level) => (
-              <SelectItem hideIndicator key={level} value={String(level)}>
-                {zoomLabel(level)}
+            {model.options.map((option) => (
+              <SelectItem hideIndicator key={option.value} value={option.value}>
+                {option.label}
               </SelectItem>
             ))}
           </SelectPopup>
         </Select>
       }
+    />
+  );
+}
+
+function BrowserSwitchRow({
+  model,
+  resetSetting,
+  toChange,
+}: {
+  readonly model: IntegrationsSwitchRowModel;
+  readonly resetSetting?: IntegrationsResettableSetting;
+  readonly toChange: (checked: boolean) => IntegrationsSettingsChange;
+}) {
+  const applyChange = useApplyIntegrationsChange();
+
+  return (
+    <SettingsRow
+      id={model.id}
+      title={model.title}
+      description={model.description}
+      {...(resetSetting === undefined
+        ? {}
+        : {
+            resetAction: model.reset ? (
+              <SettingResetButton
+                label={model.reset.label}
+                onClick={() => applyChange({ kind: "reset", setting: resetSetting })}
+              />
+            ) : null,
+          })}
+      control={
+        <Switch
+          disabled={model.disabled}
+          checked={model.checked}
+          aria-label={model.ariaLabel}
+          onCheckedChange={(checked) => applyChange(toChange(Boolean(checked)))}
+        />
+      }
+    />
+  );
+}
+
+function BrowserZoomSetting({ disabled }: { readonly disabled: boolean }) {
+  const zoomFactor = useClientSettings((settings) => settings.browserDefaultZoomFactor);
+  return (
+    <BrowserSelectRow
+      model={buildBrowserZoomRowModel({ zoomFactor, disabled })}
+      resetSetting="browserDefaultZoomFactor"
+      toChange={(value) => ({ kind: "zoomSelect", value })}
     />
   );
 }
 
 function BrowserAppearanceSetting({ disabled }: { readonly disabled: boolean }) {
   const appearance = useClientSettings((settings) => settings.browserDefaultAppearance);
-  const updateSettings = useUpdatePrimarySettings();
-
   return (
-    <SettingsRow
-      {...searchableSetting("browser-default-appearance")}
-      description="The color scheme pages are told to prefer. System follows your OS setting."
-      resetAction={
-        !disabled && appearance !== DEFAULT_PREVIEW_APPEARANCE ? (
-          <SettingResetButton
-            label="default browser appearance"
-            onClick={() => updateSettings({ browserDefaultAppearance: DEFAULT_PREVIEW_APPEARANCE })}
-          />
-        ) : null
-      }
-      control={
-        <Select
-          disabled={disabled}
-          value={appearance}
-          onValueChange={(value) => {
-            if (value === "system" || value === "light" || value === "dark") {
-              updateSettings({ browserDefaultAppearance: value });
-            }
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            className="w-full sm:w-40"
-            aria-label="Default browser appearance"
-          >
-            <SelectValue>{APPEARANCE_LABELS[appearance]}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {Object.entries(APPEARANCE_LABELS).map(([value, label]) => (
-              <SelectItem hideIndicator key={value} value={value}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      }
+    <BrowserSelectRow
+      model={buildBrowserAppearanceRowModel({ appearance, disabled })}
+      resetSetting="browserDefaultAppearance"
+      toChange={(value) => ({ kind: "appearanceSelect", value })}
     />
   );
 }
 
 function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolean }) {
-  const showKeys = useClientSettings((settings) => settings.browserRecordingShowKeyPresses);
-  const showMouse = useClientSettings((settings) => settings.browserRecordingShowMousePresses);
-  const updateSettings = useUpdatePrimarySettings();
+  const showKeyPresses = useClientSettings((settings) => settings.browserRecordingShowKeyPresses);
+  const showMousePresses = useClientSettings(
+    (settings) => settings.browserRecordingShowMousePresses,
+  );
+  const [keyPresses, mousePresses] = buildBrowserRecordingInputRowModels({
+    showKeyPresses,
+    showMousePresses,
+    disabled,
+  });
   return (
     <>
-      <SettingsRow
-        {...searchableSetting("browser-recording-key-presses")}
-        description="Show pressed keys and shortcuts in new recordings. Password fields are excluded."
-        control={
-          <Switch
-            disabled={disabled}
-            checked={showKeys}
-            aria-label="Show key presses in recordings"
-            onCheckedChange={(checked) =>
-              updateSettings({ browserRecordingShowKeyPresses: Boolean(checked) })
-            }
-          />
-        }
+      <BrowserSwitchRow
+        model={keyPresses}
+        toChange={(checked) => ({ kind: "recordingKeyPressesToggle", checked })}
       />
-      <SettingsRow
-        {...searchableSetting("browser-recording-mouse-presses")}
-        description="Highlight mouse presses and held buttons in new recordings."
-        control={
-          <Switch
-            disabled={disabled}
-            checked={showMouse}
-            aria-label="Show mouse presses in recordings"
-            onCheckedChange={(checked) =>
-              updateSettings({ browserRecordingShowMousePresses: Boolean(checked) })
-            }
-          />
-        }
+      <BrowserSwitchRow
+        model={mousePresses}
+        toChange={(checked) => ({ kind: "recordingMousePressesToggle", checked })}
       />
     </>
   );
@@ -512,108 +409,38 @@ function BrowserRecordingInputSettings({ disabled }: { readonly disabled: boolea
 
 function BrowserRecordingFrameRateSetting({ disabled }: { readonly disabled: boolean }) {
   const frameRate = useClientSettings((settings) => settings.browserRecordingFrameRate);
-  const updateSettings = useUpdatePrimarySettings();
-
   return (
-    <SettingsRow
-      {...searchableSetting("browser-recording-frame-rate")}
-      description="Maximum recording rate. 30 fps saves CPU and storage; 60 fps is smoother."
-      resetAction={
-        !disabled && frameRate !== DEFAULT_BROWSER_RECORDING_FRAME_RATE ? (
-          <SettingResetButton
-            label="browser recording frame rate"
-            onClick={() =>
-              updateSettings({ browserRecordingFrameRate: DEFAULT_BROWSER_RECORDING_FRAME_RATE })
-            }
-          />
-        ) : null
-      }
-      control={
-        <Select
-          disabled={disabled}
-          value={String(frameRate)}
-          onValueChange={(value) => {
-            const next = BROWSER_RECORDING_FRAME_RATES.find((rate) => String(rate) === value);
-            if (next !== undefined) {
-              updateSettings({ browserRecordingFrameRate: next });
-            }
-          }}
-        >
-          <SelectTrigger
-            size="sm"
-            className="w-full sm:w-40"
-            aria-label="Browser recording frame rate"
-          >
-            <SelectValue>{frameRate} fps</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {BROWSER_RECORDING_FRAME_RATES.map((rate) => (
-              <SelectItem hideIndicator key={rate} value={String(rate)}>
-                {rate} fps
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      }
+    <BrowserSelectRow
+      model={buildBrowserRecordingFrameRateRowModel({ frameRate, disabled })}
+      resetSetting="browserRecordingFrameRate"
+      toChange={(value) => ({ kind: "frameRateSelect", value })}
     />
   );
 }
-
-const LINK_TARGET_LABELS: Readonly<Record<BrowserLinkTarget, string>> = {
-  system: "Your default browser",
-  app: "Local Studio",
-};
 
 function BrowserLinkTargetSetting({ disabled }: { readonly disabled: boolean }) {
   const linkTarget = useClientSettings((settings) => settings.browserLinkTarget);
-  const updateSettings = useUpdatePrimarySettings();
-
   return (
-    <SettingsRow
-      {...searchableSetting("browser-link-target")}
-      description="Where links in the chat and terminal open. Hold ⌘ or Ctrl while clicking a link to open it in your default browser either way."
-      resetAction={
-        !disabled && linkTarget !== DEFAULT_BROWSER_LINK_TARGET ? (
-          <SettingResetButton
-            label="link target"
-            onClick={() => updateSettings({ browserLinkTarget: DEFAULT_BROWSER_LINK_TARGET })}
-          />
-        ) : null
-      }
-      control={
-        <Select
-          disabled={disabled}
-          value={linkTarget}
-          onValueChange={(value) => {
-            if (value === "system" || value === "app") {
-              updateSettings({ browserLinkTarget: value });
-            }
-          }}
-        >
-          <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Open links in">
-            <SelectValue>{LINK_TARGET_LABELS[linkTarget]}</SelectValue>
-          </SelectTrigger>
-          <SelectPopup align="end" alignItemWithTrigger={false}>
-            {(Object.keys(LINK_TARGET_LABELS) as ReadonlyArray<BrowserLinkTarget>).map((target) => (
-              <SelectItem hideIndicator key={target} value={target}>
-                {LINK_TARGET_LABELS[target]}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      }
+    <BrowserSelectRow
+      model={buildBrowserLinkTargetRowModel({ linkTarget, disabled })}
+      resetSetting="browserLinkTarget"
+      toChange={(value) => ({ kind: "linkTargetSelect", value })}
     />
   );
 }
 
-function DeviceIntegrationSettings() {
+function DeviceIntegrationSettings({
+  section,
+}: {
+  readonly section: IntegrationsPageModel["devices"];
+}) {
   const { search, environment: selected } = useSettingsScope();
   const settings = useScopedSettings();
   const connected = selected?.connection.phase === "connected" && selected.serverConfig !== null;
   const environmentId = connected ? selected.environmentId : null;
 
   return (
-    <SettingsSection id="devices" title="Devices">
+    <SettingsSection id={section.id} title={section.title}>
       <DeviceIntegrationControls
         key={`${environmentId}:${JSON.stringify(search)}`}
         environmentId={environmentId}
@@ -642,21 +469,31 @@ function DeviceIntegrationControls({
   );
   const configure = useAtomCommand(deviceEnvironment.configure, { reportFailure: false });
   const list = useAtomCommand(deviceEnvironment.list, { reportFailure: false });
-  const [pending, setPending] = useState<
-    "hub" | "check" | "agent" | "update-hub" | "update-agent" | null
-  >(null);
-  const busy = state.hostStatus === "installing" || state.hostStatus === "starting";
+  const [pending, setPending] = useState<DeviceIntegrationPending | null>(null);
   const [platformsRevealed, setPlatformsRevealed] = useState(false);
-  // Keep diagnostics visible through subsequent agent setup and refresh phases.
-  if (platformsRevealed && !enabled) setPlatformsRevealed(false);
-  if (enabled && !platformsRevealed && state.hostStatus === "ready" && pending !== "hub") {
-    setPlatformsRevealed(true);
-  }
+  const nextPlatformsRevealed = resolveDevicePlatformsRevealed({
+    platformsRevealed,
+    enabled,
+    hostStatus: state.hostStatus,
+    pending,
+  });
+  if (nextPlatformsRevealed !== platformsRevealed) setPlatformsRevealed(nextPlatformsRevealed);
+  const [updateError, setUpdateError] = useState<DeviceToolUpdateError | null>(null);
+  const model = buildDeviceIntegrationModel({
+    environmentId,
+    enabled,
+    agentAccessEnabled,
+    loaded,
+    state,
+    projectScope,
+    connectedEnvironments,
+    anyHubEnabled,
+    pending,
+    updateError,
+    platformsRevealed: nextPlatformsRevealed,
+  });
 
-  const update = async (
-    kind: NonNullable<typeof pending>,
-    input: { enabled?: boolean; agentAccessEnabled?: boolean },
-  ) => {
+  const update = async (kind: "hub" | "agent", input: DeviceConfigureInput) => {
     if (!environmentId) return;
     setPending(kind);
     try {
@@ -667,7 +504,7 @@ function DeviceIntegrationControls({
           }
           return configure({
             environmentId: environment.environmentId,
-            input: { ...input, ...(input.enabled ? { onboardingCompleted: true } : {}) },
+            input: deviceConfigureRequest(input),
           });
         }),
       );
@@ -676,70 +513,63 @@ function DeviceIntegrationControls({
         return result?.status !== "fulfilled" || result.value._tag === "Failure";
       });
       if (failed.length > 0) {
-        toastManager.add({
-          type: "error",
-          title: "Device settings not saved on all environments",
-          description: `Could not update ${failed.map((environment) => environment.label).join(", ")}.`,
-        });
+        toastManager.add(
+          deviceSettingsFailureToast(failed.map((environment) => environment.label)),
+        );
       }
     } finally {
       setPending(null);
     }
   };
 
-  const [updateError, setUpdateError] = useState<{ tool: "hub" | "agent"; message: string } | null>(
-    null,
-  );
-  const localTools = state.hosts.find((host) => host.kind === "local")?.tools;
-  const versionActions = (tool: "hub" | "agent") => {
-    const version = localTools?.[tool];
-    const needsUpdate = version && !version.installedVersions.includes(version.requiredVersion);
+  const toggle = (target: DeviceTool, checked: boolean) => {
+    const decision = resolveDeviceIntegrationToggle({ target, checked, projectScope });
+    if (decision.kind === "scopedPatch") updateSettings(decision.patch);
+    else void update(decision.pending, decision.input);
+  };
+
+  const runList = (action: DeviceListAction) => {
+    if (!environmentId) return;
+    const request = resolveDeviceListRequest(action);
+    if (action.kind === "update") setUpdateError(null);
+    setPending(request.pending);
+    void list({ environmentId, input: request.input })
+      .then((result) => {
+        if (action.kind === "update" && result._tag === "Failure") {
+          setUpdateError({ tool: action.tool, message: DEVICE_TOOL_UPDATE_FAILED_MESSAGE });
+        }
+      })
+      .finally(() => setPending(null));
+  };
+
+  const versionActions = (tool: DeviceTool) => {
+    const actions = tool === "hub" ? model.hub.toolActions : model.agent.toolActions;
     return (
       <div className="space-y-2">
         <div className="flex flex-wrap gap-2">
-          {state.supportsToolUpdate && needsUpdate ? (
+          {actions.update ? (
             <Button
               size="sm"
-              disabled={!environmentId || pending !== null || busy}
-              onClick={() => {
-                if (!environmentId) return;
-                setUpdateError(null);
-                setPending(`update-${tool}`);
-                void list({ environmentId, input: { updateTool: tool } })
-                  .then((result) => {
-                    if (result._tag === "Failure")
-                      setUpdateError({
-                        tool,
-                        message:
-                          "Update failed. Check this host's network connection and try again.",
-                      });
-                  })
-                  .finally(() => setPending(null));
-              }}
+              disabled={actions.update.disabled}
+              onClick={() => runList({ kind: "update", tool })}
             >
-              {pending === `update-${tool}` ? "Updating…" : `Update to v${version.requiredVersion}`}
+              {actions.update.label}
             </Button>
           ) : null}
-          {state.supportsToolInspection ? (
+          {actions.check ? (
             <Button
               size="sm"
               variant="outline"
-              disabled={!environmentId || pending !== null || busy}
-              onClick={() => {
-                if (!environmentId) return;
-                setPending("check");
-                void list({ environmentId, input: { inspectOnly: true } }).finally(() =>
-                  setPending(null),
-                );
-              }}
+              disabled={actions.check.disabled}
+              onClick={() => runList({ kind: "inspect" })}
             >
-              {pending === "check" ? "Checking…" : "Check versions"}
+              {actions.check.label}
             </Button>
           ) : null}
         </div>
-        {updateError?.tool === tool ? (
+        {actions.error !== null ? (
           <p role="alert" className="text-xs text-destructive">
-            {updateError.message}
+            {actions.error}
           </p>
         ) : null}
       </div>
@@ -749,42 +579,37 @@ function DeviceIntegrationControls({
   return (
     <>
       <SettingsRow
-        {...searchableSetting("device-hub")}
+        id={model.hub.id}
+        title={model.hub.title}
         serverScoped
-        settingKeys={["enableDeviceSupport"]}
+        settingKeys={model.hub.settingKeys}
         description={deviceHubDescription}
         control={
           <>
             <DeviceToolVersions
               action={versionActions("hub")}
               kind="hub"
-              tools={state.hosts.find((host) => host.kind === "local")?.tools}
+              tools={model.localTools ?? undefined}
             />
-            {pending === "hub" ? <DeviceHubSetupStatus state={state} pending compact /> : null}
+            {model.hub.showSetupStatus ? (
+              <DeviceHubSetupStatus state={state} pending compact />
+            ) : null}
             <ScopedSwitch
-              settingKeys={["enableDeviceSupport"]}
-              checked={enabled}
-              disabled={projectScope || !loaded || !environmentId || busy || pending !== null}
-              aria-label="Device hub"
-              onCheckedChange={(checked) =>
-                void update("hub", {
-                  enabled: Boolean(checked),
-                  ...(checked ? {} : { agentAccessEnabled: false }),
-                })
-              }
+              settingKeys={model.hub.settingKeys}
+              checked={model.hub.checked}
+              disabled={model.hub.disabled}
+              aria-label={model.hub.ariaLabel}
+              onCheckedChange={(checked) => toggle("hub", Boolean(checked))}
             />
           </>
         }
       />
       <AnimatedHeight>
-        {platformsRevealed ? (
+        {model.platforms.visible ? (
           <SettingsRow
-            {...searchableSetting("device-platform-support")}
-            description={
-              connectedEnvironments.length > 1
-                ? `Status for ${connectedEnvironments.find((environment) => environment.environmentId === environmentId)?.label}. Select an environment to inspect its simulator support.`
-                : undefined
-            }
+            id={model.platforms.id}
+            title={model.platforms.title}
+            description={model.platforms.description ?? undefined}
             status={
               <div className="flex flex-wrap gap-x-5 gap-y-2">
                 <PlatformStatus compact platform="iOS" status={platformSetupStatus(state, "ios")} />
@@ -799,51 +624,42 @@ function DeviceIntegrationControls({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={!environmentId || !enabled || busy || pending !== null}
-                onClick={() => {
-                  if (!environmentId) return;
-                  setPending("check");
-                  void list({ environmentId, input: {} }).finally(() => setPending(null));
-                }}
+                disabled={model.platforms.refresh.disabled}
+                onClick={() => runList({ kind: "refresh" })}
               >
-                {pending === "check" ? "Checking…" : "Refresh"}
+                {model.platforms.refresh.label}
               </Button>
             }
           />
         ) : null}
       </AnimatedHeight>
       <SettingsRow
-        {...searchableSetting("agent-device-access")}
+        id={model.agent.id}
+        title={model.agent.title}
         serverScoped
-        settingKeys={["enableAgentDeviceAccess"]}
+        settingKeys={model.agent.settingKeys}
         description={agentDeviceDescription}
         control={
           <>
             <DeviceToolVersions
               action={versionActions("agent")}
               kind="agent"
-              tools={state.hosts.find((host) => host.kind === "local")?.tools}
+              tools={model.localTools ?? undefined}
             />
-            {pending === "agent" ? <AgentDeviceSetupStatus state={state} pending compact /> : null}
+            {model.agent.showSetupStatus ? (
+              <AgentDeviceSetupStatus state={state} pending compact />
+            ) : null}
             <ScopedSwitch
-              settingKeys={["enableAgentDeviceAccess"]}
-              checked={agentAccessEnabled}
-              disabled={
-                connectedEnvironments.length === 0 ||
-                (!projectScope && (!loaded || !anyHubEnabled || busy)) ||
-                pending !== null
-              }
-              aria-label="Agent device access"
-              onCheckedChange={(checked) =>
-                projectScope
-                  ? updateSettings({ enableAgentDeviceAccess: Boolean(checked) })
-                  : void update("agent", { agentAccessEnabled: Boolean(checked) })
-              }
+              settingKeys={model.agent.settingKeys}
+              checked={model.agent.checked}
+              disabled={model.agent.disabled}
+              aria-label={model.agent.ariaLabel}
+              onCheckedChange={(checked) => toggle("agent", Boolean(checked))}
             />
           </>
         }
       />
-      {environmentId ? (
+      {model.showHostUpdates && environmentId ? (
         <DeviceHostUpdates
           state={{ ...state, hosts: state.hosts.filter((host) => host.kind === "local") }}
           environmentId={environmentId}
@@ -856,34 +672,11 @@ function DeviceIntegrationControls({
 
 function BrowserAutoShowFloatingPreviewSetting({ disabled }: { readonly disabled: boolean }) {
   const autoShow = useClientSettings((settings) => settings.browserAutoShowFloatingPreview);
-  const updateSettings = useUpdatePrimarySettings();
-
   return (
-    <SettingsRow
-      {...searchableSetting("browser-auto-show-floating-preview")}
-      description="Show the floating preview when an agent opens a browser or device unless the agent says otherwise."
-      resetAction={
-        !disabled && autoShow !== DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW ? (
-          <SettingResetButton
-            label="auto-show floating preview"
-            onClick={() =>
-              updateSettings({
-                browserAutoShowFloatingPreview: DEFAULT_BROWSER_AUTO_SHOW_FLOATING_PREVIEW,
-              })
-            }
-          />
-        ) : null
-      }
-      control={
-        <Switch
-          disabled={disabled}
-          checked={autoShow}
-          onCheckedChange={(checked) =>
-            updateSettings({ browserAutoShowFloatingPreview: Boolean(checked) })
-          }
-          aria-label="Auto-show floating preview"
-        />
-      }
+    <BrowserSwitchRow
+      model={buildBrowserAutoShowFloatingPreviewRowModel({ autoShow, disabled })}
+      resetSetting="browserAutoShowFloatingPreview"
+      toChange={(checked) => ({ kind: "autoShowFloatingPreviewToggle", checked })}
     />
   );
 }
@@ -917,62 +710,65 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     readonly environmentId: EnvironmentId;
     readonly environmentName: string;
   } | null>(null);
-  const [profilePendingRemoval, setProfilePendingRemoval] = useState<BrowserProfile | null>(null);
+  const [profilePendingRemoval, setProfilePendingRemoval] = useState<{
+    readonly id: string;
+    readonly name: string;
+  } | null>(null);
   const [profileRemovalError, setProfileRemovalError] = useState<string | null>(null);
   const [profileRemovalInFlight, setProfileRemovalInFlight] = useState(false);
-  const removalAvailable = browserProfileRemovalAvailable(
-    previewBridge !== null,
-    environmentsReady,
-    environments.length,
-  );
   const importInFlightRef = useRef(false);
   const [importInFlight, setImportInFlight] = useState(false);
-  const profileWritesDisabled = disabled || !settingsHydrated;
-
-  const profiles = resolveBrowserProfiles(userProfiles);
-  // Incognito is deliberately not a row — it holds nothing to manage — so the
-  // default has to resolve against the list that renders. A stored
-  // `browserDefaultProfileId` of "incognito" would otherwise leave the section
-  // with no Default badge at all.
-  const listedProfiles = profiles.filter((profile) => profile.kind !== "incognito");
-  const resolvedDefaultId =
-    findBrowserProfile(listedProfiles, defaultProfileId)?.id ?? DEFAULT_BROWSER_PROFILE_ID;
+  const model = buildBrowserProfilesModel({
+    userProfiles,
+    defaultProfileId,
+    settingsHydrated,
+    disabled,
+    bridgeAvailable: previewBridge !== null,
+    environmentsReady,
+    environmentCount: environments.length,
+    primaryEnvironmentAvailable: primaryEnvironment != null,
+    importInFlight,
+    sources,
+    pendingRemoval: profilePendingRemoval,
+    removalError: profileRemovalError,
+    removalInFlight: profileRemovalInFlight,
+  });
+  const { removalAvailable } = model;
 
   const createProfile = (baseName: string) => {
-    if (!settingsHydrated || importInFlightRef.current) return undefined;
-    const currentProfiles = getClientSettings().browserProfiles;
-    // Checked against the live settings, not the rendered list: two clicks
-    // before a re-render would otherwise both pass the disabled control.
-    if (currentProfiles.length >= BROWSER_PROFILE_MAX_COUNT) return undefined;
-    const resolvedProfiles = resolveBrowserProfiles(currentProfiles);
-    const taken = new Set(resolvedProfiles.map((profile) => profile.name));
-    let name = baseName;
-    for (let index = 2; taken.has(name); index += 1) name = `${baseName} ${index}`;
-    const profile = { id: `profile-${randomUUID()}`, name, kind: "persistent" as const };
-    updateSettings({ browserProfiles: [...currentProfiles, profile] });
-    return profile;
+    const creation = resolveCreateBrowserProfile({
+      settingsHydrated,
+      importInFlight: importInFlightRef.current,
+      currentProfiles: getClientSettings().browserProfiles,
+      baseName,
+      profileId: `profile-${randomUUID()}`,
+    });
+    if (creation !== null) updateSettings(creation.patch);
   };
 
   const renameProfile = (id: string, next: string) => {
-    if (!settingsHydrated || importInFlightRef.current) return;
-    const name = next.trim().slice(0, BROWSER_PROFILE_NAME_MAX_LENGTH);
-    if (name === "") return;
-    const currentProfiles = getClientSettings().browserProfiles;
-    updateSettings({
-      browserProfiles: currentProfiles.map((profile) =>
-        profile.id === id ? { ...profile, name } : profile,
-      ),
+    const patch = resolveRenameBrowserProfile({
+      settingsHydrated,
+      importInFlight: importInFlightRef.current,
+      currentProfiles: getClientSettings().browserProfiles,
+      profileId: id,
+      next,
     });
+    if (patch !== null) updateSettings(patch);
   };
 
   const clearProfileData = (id: string, name: string) => {
-    if (!settingsHydrated || importInFlightRef.current) return;
-    if (!previewBridge || !environmentsReady || environments.length === 0) {
-      toastManager.add({
-        type: "error",
-        title: `Could not clear ${name}'s data`,
-        description: "You're not connected to a server yet.",
-      });
+    const decision = resolveClearBrowserProfileData({
+      settingsHydrated,
+      importInFlight: importInFlightRef.current,
+      bridgeAvailable: previewBridge !== null,
+      environmentsReady,
+      environmentCount: environments.length,
+      name,
+    });
+    if (decision.kind === "ignore") return;
+    if (decision.kind === "unavailable") {
+      toastManager.add(decision.toast);
       return;
     }
     void clearBrowserProfileData(
@@ -981,17 +777,22 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       id,
     )
       .then(() => {
-        toastManager.add({ type: "success", title: `Cleared ${name}'s cookies and cache` });
+        toastManager.add(decision.successToast);
       })
       .catch(() => {
-        toastManager.add({ type: "error", title: `Could not clear ${name}'s data` });
+        toastManager.add(decision.failureToast);
       });
   };
 
   const removeProfile = async (id: string) => {
-    if (!settingsHydrated || importInFlightRef.current) return;
-    if (!removalAvailable) {
-      setProfileRemovalError("Connect to an environment before removing this profile.");
+    const decision = resolveRemoveBrowserProfile({
+      settingsHydrated,
+      importInFlight: importInFlightRef.current,
+      removalAvailable,
+    });
+    if (decision.kind === "ignore") return;
+    if (decision.kind === "unavailable") {
+      setProfileRemovalError(decision.error);
       return;
     }
     setProfileRemovalError(null);
@@ -1005,31 +806,14 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         id,
       );
     } catch {
-      setProfileRemovalError("Profile data could not be deleted. Try again.");
+      setProfileRemovalError(BROWSER_PROFILE_REMOVAL_FAILED_MESSAGE);
       setProfileRemovalInFlight(false);
       return;
     }
-    const currentSettings = getClientSettings();
-    updateSettings({
-      browserProfiles: currentSettings.browserProfiles.filter((profile) => profile.id !== id),
-      // Reassign the default rather than leaving it pointing at nothing.
-      ...(currentSettings.browserDefaultProfileId === id
-        ? { browserDefaultProfileId: DEFAULT_BROWSER_PROFILE_ID }
-        : {}),
-    });
+    updateSettings(browserProfileRemovalPatch(getClientSettings(), id));
     setProfileRemovalInFlight(false);
     setProfilePendingRemoval(null);
   };
-
-  // A browser that is not on this machine is left out rather than listed as a
-  // dead row: there is nothing to act on, and the menu is a list of things you
-  // can import from. An unsupported one is left out for the same reason — the
-  // blocked wizard step can't be fixed from here. Every other unavailable
-  // reason stays, since each names a step the user can take.
-  const importableSources = (sources ?? []).filter(
-    (source) =>
-      source.unavailable !== "notInstalled" && source.unavailable !== "unsupportedPlatform",
-  );
 
   // Refreshed without blanking the last result: the menu shows the cached list
   // straight away so it doesn't reflow on open, and the source list is stable
@@ -1050,17 +834,16 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     environmentId: EnvironmentId,
     input: { readonly sourceProfileDirectory: string; readonly target: WizardTarget },
   ): Promise<ImportOutcome> => {
-    if (!previewBridge) return { kind: "blocked", reason: "sessionUnavailable" };
-    if (!settingsHydrated) return { kind: "blocked", reason: "sessionUnavailable" };
-    if (
-      input.target.kind === "existing" &&
-      !resolveBrowserProfiles(getClientSettings().browserProfiles).some(
-        (profile) => profile.id === input.target.profileId,
-      )
-    ) {
-      return { kind: "blocked", reason: "readFailed" };
+    const blocked = resolveWizardImportBlock({
+      bridgeAvailable: previewBridge !== null,
+      settingsHydrated,
+      importInFlight: importInFlightRef.current,
+      target: input.target,
+      currentProfiles: getClientSettings().browserProfiles,
+    });
+    if (blocked !== null || previewBridge === null) {
+      return blocked ?? { kind: "blocked", reason: "sessionUnavailable" };
     }
-    if (importInFlightRef.current) return { kind: "blocked", reason: "readFailed" };
     importInFlightRef.current = true;
     setImportInFlight(true);
     try {
@@ -1070,12 +853,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         sourceProfileDirectory: input.sourceProfileDirectory,
         targetProfileId: input.target.profileId,
       });
-      if (
-        input.target.kind === "existing" &&
-        !resolveBrowserProfiles(getClientSettings().browserProfiles).some(
-          (profile) => profile.id === input.target.profileId,
-        )
-      ) {
+      if (wizardImportTargetMissing(input.target, getClientSettings().browserProfiles)) {
         return { kind: "blocked", reason: "readFailed" };
       }
       let targetName: string;
@@ -1085,28 +863,14 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         if (result.imported > 0) {
           try {
             const persisted = await persistClientSettingsUpdate((current) => {
-              const existing = current.browserProfiles.find(
-                (profile) => profile.id === input.target.profileId,
+              const registration = resolveImportedProfileRegistration(
+                current.browserProfiles,
+                input.target.profileId,
+                source.name,
               );
-              if (existing) return current;
-              // The wizard refuses a new target at the cap, but the cap can be
-              // reached while the import runs; the updater sees the newest
-              // settings, so this is the check that holds.
-              if (current.browserProfiles.length >= BROWSER_PROFILE_MAX_COUNT) {
-                throw new ProfileLimitReachedError();
-              }
-              const taken = new Set(
-                resolveBrowserProfiles(current.browserProfiles).map((profile) => profile.name),
-              );
-              let name = source.name;
-              for (let index = 2; taken.has(name); index += 1) name = `${source.name} ${index}`;
-              return {
-                ...current,
-                browserProfiles: [
-                  ...current.browserProfiles,
-                  { id: input.target.profileId, name, kind: "persistent" as const },
-                ],
-              };
+              if (registration.kind === "existing") return current;
+              if (registration.kind === "limitReached") throw new ProfileLimitReachedError();
+              return { ...current, browserProfiles: registration.browserProfiles };
             });
             targetName =
               persisted.browserProfiles.find((profile) => profile.id === input.target.profileId)
@@ -1125,7 +889,7 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
             // token form `importFailureReason` recovers from a bridge error.
             const reason =
               cause instanceof ProfileLimitReachedError ? "profileLimitReached" : "profileNotSaved";
-            throw new Error(`Importing cookies from ${source.id} failed: ${reason}.`, { cause });
+            throw new Error(importFailureMessage(source.id, reason), { cause });
           }
         } else {
           targetName = source.name;
@@ -1163,54 +927,46 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
     }
   };
 
-  const atProfileLimit = userProfiles.length >= BROWSER_PROFILE_MAX_COUNT;
-
   return (
     <SettingsRow
-      {...searchableSetting("browser-profiles")}
-      description="Profiles separate cookies and logins. Incognito data is cleared when the app closes."
+      id={model.id}
+      title={model.title}
+      description={model.description}
       control={
         <Menu onOpenChange={(open) => open && loadSources()}>
           <MenuTrigger
-            render={
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={profileWritesDisabled || importInFlight}
-              />
-            }
+            render={<Button size="sm" variant="outline" disabled={model.addMenu.disabled} />}
           >
             <PlusIcon />
-            Add profile
+            {model.addMenu.label}
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem
-              disabled={!settingsHydrated || atProfileLimit}
+              disabled={model.addMenu.blankProfile.disabled}
               onClick={() => createProfile("New profile")}
             >
-              Blank profile
+              {model.addMenu.blankProfile.label}
             </MenuItem>
-            {atProfileLimit ? (
-              <MenuItem disabled>You&rsquo;ve reached the profile limit</MenuItem>
+            {model.addMenu.limitNotice !== null ? (
+              <MenuItem disabled>{model.addMenu.limitNotice}</MenuItem>
             ) : null}
             <MenuSeparator />
             <MenuGroup>
-              <MenuGroupLabel>Import from</MenuGroupLabel>
-              {sources === null ? (
-                <MenuItem disabled>Looking for browsers…</MenuItem>
-              ) : importableSources.length === 0 ? (
-                <MenuItem disabled>No supported browsers found</MenuItem>
+              <MenuGroupLabel>{model.addMenu.importGroupLabel}</MenuGroupLabel>
+              {model.addMenu.importPlaceholder !== null ? (
+                <MenuItem disabled>{model.addMenu.importPlaceholder}</MenuItem>
               ) : (
                 // Every source is a plain row — running, needs-permission and
                 // ready all look the same here. The wizard picks up whatever
                 // state the source is in and walks the user forward from there.
                 <>
-                  {importableSources.map((source) => (
+                  {model.addMenu.importSources.map((item) => (
                     <MenuItem
-                      key={source.id}
-                      disabled={!settingsHydrated || primaryEnvironment == null}
+                      key={item.id}
+                      disabled={item.disabled}
                       onClick={() => {
-                        if (!settingsHydrated || primaryEnvironment == null) return;
+                        const source = sources?.find((candidate) => candidate.id === item.id);
+                        if (item.disabled || primaryEnvironment == null || !source) return;
                         setImportSession({
                           source,
                           environmentId: primaryEnvironment.environmentId,
@@ -1222,11 +978,11 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
                         });
                       }}
                     >
-                      {source.name}
+                      {item.label}
                     </MenuItem>
                   ))}
-                  {primaryEnvironment == null ? (
-                    <MenuItem disabled>Connect to an environment to import cookies</MenuItem>
+                  {model.addMenu.importNotice !== null ? (
+                    <MenuItem disabled>{model.addMenu.importNotice}</MenuItem>
                   ) : null}
                 </>
               )}
@@ -1241,109 +997,93 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         (`pt-3 pb-1`).
       */}
       <div className="mt-2 mb-2 overflow-hidden rounded-lg border border-border/60">
-        {listedProfiles.map((profile, index) => {
-          const builtIn = isBuiltInBrowserProfileId(profile.id);
-          const isDefault = profile.id === resolvedDefaultId;
-          return (
-            <div
-              key={profile.id}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2",
-                index > 0 && "border-t border-border/60",
-              )}
-            >
-              <span className="flex min-w-0 flex-1 items-center gap-2">
-                {builtIn ? (
-                  // Dimmed here rather than on the table: a wrapper-level dim
-                  // stacks with the rename field's and the row menu button's
-                  // own, landing them near 0.41 while every other disabled
-                  // control in the block sits at 0.64.
-                  <span
-                    className={cn(
-                      "truncate text-sm text-foreground",
-                      profileWritesDisabled && "opacity-64",
-                    )}
-                  >
-                    {profile.name}
-                  </span>
-                ) : (
-                  <DraftInput
-                    nativeInput
-                    size="sm"
-                    className="w-full max-w-56"
-                    aria-label={`Rename ${profile.name}`}
-                    disabled={profileWritesDisabled || importInFlight}
-                    maxLength={BROWSER_PROFILE_NAME_MAX_LENGTH}
-                    value={profile.name}
-                    onCommit={(next) => renameProfile(profile.id, next)}
-                  />
-                )}
-                {/* Dimmed with the rest of the row, whose controls are all disabled. */}
-                {isDefault ? (
-                  <span className={cn("flex", profileWritesDisabled && "opacity-64")}>
-                    <Badge>Default</Badge>
-                  </span>
-                ) : null}
-              </span>
-              <Menu>
-                <MenuTrigger
-                  render={
-                    <Button
-                      size="icon-xs"
-                      variant="ghost-muted"
-                      disabled={profileWritesDisabled || importInFlight}
-                      aria-label={`${profile.name} options`}
-                    />
-                  }
+        {model.profiles.map((profile, index) => (
+          <div
+            key={profile.id}
+            className={cn(
+              "flex items-center gap-3 px-3 py-2",
+              index > 0 && "border-t border-border/60",
+            )}
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              {profile.rename === null ? (
+                // Dimmed here rather than on the table: a wrapper-level dim
+                // stacks with the rename field's and the row menu button's
+                // own, landing them near 0.41 while every other disabled
+                // control in the block sits at 0.64.
+                <span
+                  className={cn("truncate text-sm text-foreground", profile.dimmed && "opacity-64")}
                 >
-                  <MoreVertical />
-                </MenuTrigger>
-                <MenuPopup align="end">
+                  {profile.name}
+                </span>
+              ) : (
+                <DraftInput
+                  nativeInput
+                  size="sm"
+                  className="w-full max-w-56"
+                  aria-label={profile.rename.ariaLabel}
+                  disabled={profile.rename.disabled}
+                  maxLength={profile.rename.maxLength}
+                  value={profile.name}
+                  onCommit={(next) => renameProfile(profile.id, next)}
+                />
+              )}
+              {/* Dimmed with the rest of the row, whose controls are all disabled. */}
+              {profile.defaultBadge !== null ? (
+                <span className={cn("flex", profile.dimmed && "opacity-64")}>
+                  <Badge>{profile.defaultBadge}</Badge>
+                </span>
+              ) : null}
+            </span>
+            <Menu>
+              <MenuTrigger
+                render={
+                  <Button
+                    size="icon-xs"
+                    variant="ghost-muted"
+                    disabled={profile.menu.disabled}
+                    aria-label={profile.menu.ariaLabel}
+                  />
+                }
+              >
+                <MoreVertical />
+              </MenuTrigger>
+              <MenuPopup align="end">
+                {profile.menu.items.map((item) => (
                   <MenuItem
-                    disabled={!settingsHydrated || isDefault}
+                    key={item.action}
+                    {...(item.destructive ? { variant: "destructive" as const } : {})}
+                    disabled={item.disabled}
                     onClick={() => {
-                      if (settingsHydrated) {
-                        updateSettings({ browserDefaultProfileId: profile.id });
+                      if (item.action === "setDefault") {
+                        const patch = resolveSetDefaultBrowserProfile({
+                          settingsHydrated,
+                          profileId: profile.id,
+                        });
+                        if (patch !== null) updateSettings(patch);
+                      } else if (item.action === "clearData") {
+                        clearProfileData(profile.id, profile.name);
+                      } else if (settingsHydrated) {
+                        setProfilePendingRemoval({ id: profile.id, name: profile.name });
                       }
                     }}
                   >
-                    Set as default
+                    {item.label}
                   </MenuItem>
-                  <MenuItem
-                    disabled={!settingsHydrated || !removalAvailable}
-                    onClick={() => clearProfileData(profile.id, profile.name)}
-                  >
-                    Clear cookies and cache
-                  </MenuItem>
-                  {builtIn ? null : (
-                    <MenuItem
-                      variant="destructive"
-                      disabled={!settingsHydrated || !removalAvailable}
-                      onClick={() => {
-                        if (settingsHydrated) setProfilePendingRemoval(profile);
-                      }}
-                    >
-                      Remove profile and data
-                    </MenuItem>
-                  )}
-                  {!removalAvailable ? (
-                    <>
-                      <MenuSeparator />
-                      <MenuItem disabled>
-                        {environmentsReady
-                          ? "Connect to an environment to clear profile data"
-                          : "Checking environments…"}
-                      </MenuItem>
-                    </>
-                  ) : null}
-                </MenuPopup>
-              </Menu>
-            </div>
-          );
-        })}
+                ))}
+                {profile.menu.notice !== null ? (
+                  <>
+                    <MenuSeparator />
+                    <MenuItem disabled>{profile.menu.notice}</MenuItem>
+                  </>
+                ) : null}
+              </MenuPopup>
+            </Menu>
+          </div>
+        ))}
       </div>
       <AlertDialog
-        open={profilePendingRemoval !== null}
+        open={model.removalDialog.open}
         onOpenChange={(open) => {
           if (!open && !profileRemovalInFlight) {
             setProfilePendingRemoval(null);
@@ -1353,39 +1093,36 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
       >
         <AlertDialogPopup>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove “{profilePendingRemoval?.name}”?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its cookies and logins are deleted. Tabs already open in this profile stay open until
-              you close them.
-            </AlertDialogDescription>
-            {profileRemovalError ? (
+            <AlertDialogTitle>{model.removalDialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>{model.removalDialog.description}</AlertDialogDescription>
+            {model.removalDialog.error ? (
               <p aria-live="polite" className="text-sm text-destructive">
-                {profileRemovalError}
+                {model.removalDialog.error}
               </p>
             ) : null}
-            {!removalAvailable ? (
+            {model.removalDialog.unavailableNotice !== null ? (
               <p className="text-sm text-muted-foreground">
-                Connect to an environment to remove this profile and its data.
+                {model.removalDialog.unavailableNotice}
               </p>
             ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogClose
-              disabled={profileRemovalInFlight}
-              render={<Button variant="outline" disabled={profileRemovalInFlight} />}
+              disabled={model.removalDialog.cancel.disabled}
+              render={<Button variant="outline" disabled={model.removalDialog.cancel.disabled} />}
             >
-              Cancel
+              {model.removalDialog.cancel.label}
             </AlertDialogClose>
             <Button
               variant="destructive"
-              disabled={profileRemovalInFlight || !settingsHydrated || !removalAvailable}
+              disabled={model.removalDialog.confirm.disabled}
               onClick={() => {
                 if (profilePendingRemoval && settingsHydrated && removalAvailable) {
                   void removeProfile(profilePendingRemoval.id);
                 }
               }}
             >
-              {profileRemovalInFlight ? "Removing…" : "Remove profile"}
+              {model.removalDialog.confirm.label}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
@@ -1394,8 +1131,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
         <BrowserImportWizard
           source={importSession.source}
           destinationEnvironmentName={importSession.environmentName}
-          targetProfiles={listedProfiles.map((profile) => ({ id: profile.id, name: profile.name }))}
-          canCreateProfile={settingsHydrated && !atProfileLimit}
+          targetProfiles={model.wizardTargetProfiles}
+          canCreateProfile={model.canCreateProfile}
           onImport={(input) =>
             runWizardImport(importSession.source, importSession.environmentId, input)
           }
@@ -1426,8 +1163,8 @@ function BrowserProfilesSetting({ disabled }: { readonly disabled: boolean }) {
 }
 
 export function IntegrationsSettingsPanel() {
-  // Client-local preview defaults are editable only where the preview exists.
-  const previewDefaultsDisabled = !isElectron;
+  const page = buildIntegrationsPageModel({ isElectron });
+  const previewDefaultsDisabled = page.previewDefaultsDisabled;
   const previewDefaults = (
     <>
       <BrowserProfilesSetting disabled={previewDefaultsDisabled} />
@@ -1445,17 +1182,17 @@ export function IntegrationsSettingsPanel() {
     <SettingsPageContainer>
       {/* Server-authoritative agent access is scoped by the header selection;
           the preview defaults below are device-local and ignore it. */}
-      <ProjectDefaultsSettings category="integrations" />
-      <SettingsSection id="browser" title="Browser">
-        {previewDefaultsDisabled ? (
-          <SettingsUnavailableGroup message="Only available in the desktop app.">
+      <ProjectDefaultsSettings category={page.projectDefaultsCategory} />
+      <SettingsSection id={page.browser.id} title={page.browser.title}>
+        {page.browser.unavailableMessage !== null ? (
+          <SettingsUnavailableGroup message={page.browser.unavailableMessage}>
             {previewDefaults}
           </SettingsUnavailableGroup>
         ) : (
           previewDefaults
         )}
       </SettingsSection>
-      <DeviceIntegrationSettings />
+      <DeviceIntegrationSettings section={page.devices} />
     </SettingsPageContainer>
   );
 }

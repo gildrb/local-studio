@@ -42,15 +42,20 @@ import { parsePullRequestReference } from "../pullRequestReference";
 import { getSourceControlPresentation } from "../sourceControlPresentation";
 import { useComposerMenuProps } from "./chat/composerEventScope";
 import {
-  deriveLocalBranchNameFromRemoteRef,
+  resolveActiveBranchIsRemote,
+  resolveBranchPickerBadge,
+  resolveBranchPickerItems,
+  resolveBranchSelectionPlan,
+  resolveBranchStatusText,
   resolveBranchTriggerLabel,
   resolveBranchToolbarPrBranch,
-  resolveBranchSelectionTarget,
   resolveBranchToolbarValue,
-  resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
+  resolveSwitchedBranchName,
+  resolveThreadBranchChangePlan,
+  resolveWorktreeBaseBranchCandidate,
   sanitizeNewRefName,
-  shouldIncludeBranchPickerItem,
+  shouldAutoSelectWorktreeBaseBranch,
 } from "./BranchToolbar.logic";
 import {
   ThreadPullRequestBadgeControl,
@@ -176,13 +181,22 @@ export function BranchToolbarBranchSelector({
   const setThreadBranch = useCallback(
     (branch: string | null, worktreePath: string | null, automatic = false) => {
       if (!activeThreadId || !activeProject) return;
-      if (serverSession && worktreePath !== activeWorktreePath) {
+      const plan = resolveThreadBranchChangePlan({
+        hasServerThread,
+        hasServerSession: serverSession !== null,
+        worktreePath,
+        activeWorktreePath,
+        effectiveEnvMode,
+        automatic,
+        draftEnvironmentSelection: draftThread?.environmentSelection,
+      });
+      if (plan.stopSession) {
         void stopThreadSession({
           environmentId,
           input: { threadId: activeThreadId },
         });
       }
-      if (hasServerThread) {
+      if (plan.updateServerMetadata) {
         void updateThreadMetadata({
           environmentId,
           input: {
@@ -192,20 +206,15 @@ export function BranchToolbarBranchSelector({
           },
         });
       }
-      if (hasServerThread) {
+      if (plan.draftContext === null) {
         onActiveThreadBranchOverrideChange?.(branch);
         return;
       }
-      const nextDraftEnvMode = resolveDraftEnvModeAfterBranchChange({
-        nextWorktreePath: worktreePath,
-        currentWorktreePath: activeWorktreePath,
-        effectiveEnvMode,
-      });
       setDraftThreadContext(draftId ?? threadRef, {
         branch,
         worktreePath,
-        envMode: nextDraftEnvMode,
-        environmentSelection: automatic ? (draftThread?.environmentSelection ?? "auto") : "manual",
+        envMode: plan.draftContext.envMode,
+        environmentSelection: plan.draftContext.environmentSelection,
         projectRef: scopeProjectRef(environmentId, activeProject.id),
       });
     },
@@ -281,48 +290,33 @@ export function BranchToolbarBranchSelector({
     () => new Map(refs.map((refName) => [refName.name, refName] as const)),
     [refs],
   );
-  const normalizedDeferredBranchQuery = deferredTrimmedBranchQuery.toLowerCase();
   const prReference = parsePullRequestReference(trimmedBranchQuery);
   const isSelectingWorktreeBase =
     effectiveEnvMode === "worktree" && !envLocked && !activeWorktreePath;
-  const checkoutPullRequestItemValue =
-    prReference && onCheckoutPullRequestRequest ? `__checkout_pull_request__:${prReference}` : null;
-  const canCreateBranch = !isSelectingWorktreeBase && trimmedBranchQuery.length > 0;
-  // The ref is created under its sanitized name, so the collision check has to
-  // use that name too. Matching on the raw query would offer to create a ref
-  // that already exists whenever sanitizing changes the name.
-  const newRefName = sanitizeNewRefName(trimmedBranchQuery);
-  const hasExactBranchMatch = branchByName.has(newRefName);
-  const createBranchItemValue = canCreateBranch
-    ? `__create_new_branch__:${trimmedBranchQuery}`
-    : null;
-  const branchPickerItems = useMemo(() => {
-    const items = [...branchNames];
-    if (createBranchItemValue && !hasExactBranchMatch) {
-      items.push(createBranchItemValue);
-    }
-    if (checkoutPullRequestItemValue) {
-      items.unshift(checkoutPullRequestItemValue);
-    }
-    return items;
-  }, [branchNames, checkoutPullRequestItemValue, createBranchItemValue, hasExactBranchMatch]);
-  const filteredBranchPickerItems = useMemo(
+  const canCheckoutPullRequest = onCheckoutPullRequestRequest !== undefined;
+  const {
+    items: branchPickerItems,
+    filteredItems: filteredBranchPickerItems,
+    createBranchItemValue,
+    checkoutPullRequestItemValue,
+    newRefName,
+  } = useMemo(
     () =>
-      normalizedDeferredBranchQuery.length === 0
-        ? branchPickerItems
-        : branchPickerItems.filter((itemValue) =>
-            shouldIncludeBranchPickerItem({
-              itemValue,
-              normalizedQuery: normalizedDeferredBranchQuery,
-              createBranchItemValue,
-              checkoutPullRequestItemValue,
-            }),
-          ),
+      resolveBranchPickerItems({
+        refNames: branchNames,
+        trimmedQuery: trimmedBranchQuery,
+        deferredTrimmedQuery: deferredTrimmedBranchQuery,
+        isSelectingWorktreeBase,
+        prReference,
+        canCheckoutPullRequest,
+      }),
     [
-      branchPickerItems,
-      checkoutPullRequestItemValue,
-      createBranchItemValue,
-      normalizedDeferredBranchQuery,
+      branchNames,
+      canCheckoutPullRequest,
+      deferredTrimmedBranchQuery,
+      isSelectingWorktreeBase,
+      prReference,
+      trimmedBranchQuery,
     ],
   );
   const [resolvedActiveBranch, setOptimisticBranch] = useOptimistic(
@@ -346,21 +340,19 @@ export function BranchToolbarBranchSelector({
   const queriedActiveBranch = activeBranchRefQuery.data?.refs.find(
     (refName) => refName.name === resolvedActiveBranch,
   );
-  const resolvedActiveBranchIsRemote =
-    listedActiveBranch !== null
-      ? listedActiveBranch.isRemote === true
-      : queriedActiveBranch
-        ? queriedActiveBranch.isRemote === true
-        : null;
+  const resolvedActiveBranchIsRemote = resolveActiveBranchIsRemote({
+    listedActiveBranch,
+    queriedActiveBranch,
+  });
   const [isBranchActionPending, startBranchActionTransition] = useTransition();
   const totalBranchCount = branchRefState.data?.totalCount ?? 0;
-  const branchStatusText = isInitialBranchesLoadPending
-    ? "Loading refs..."
-    : isFetchingNextPage
-      ? "Loading more refs..."
-      : hasNextPage
-        ? `Showing ${refs.length} of ${totalBranchCount} refs`
-        : null;
+  const branchStatusText = resolveBranchStatusText({
+    isInitialBranchesLoadPending,
+    isFetchingNextPage,
+    hasNextPage,
+    loadedCount: refs.length,
+    totalCount: totalBranchCount,
+  });
 
   // ---------------------------------------------------------------------------
   // Branch actions
@@ -415,29 +407,28 @@ export function BranchToolbarBranchSelector({
   const selectBranch = (refName: VcsRef) => {
     if (!branchCwd || !activeProjectCwd || isBranchActionPending) return;
 
-    if (isSelectingWorktreeBase) {
+    const plan = resolveBranchSelectionPlan({
+      isSelectingWorktreeBase,
+      activeProjectCwd,
+      activeWorktreePath,
+      refName,
+    });
+
+    if (plan.kind === "set-worktree-base") {
       setThreadBranch(refName.name, null);
       setIsBranchMenuOpen(false);
       onComposerFocusRequest?.();
       return;
     }
 
-    const selectionTarget = resolveBranchSelectionTarget({
-      activeProjectCwd,
-      activeWorktreePath,
-      refName,
-    });
-
-    if (selectionTarget.reuseExistingWorktree) {
-      setThreadBranch(refName.name, selectionTarget.nextWorktreePath);
+    if (plan.kind === "reuse-worktree") {
+      setThreadBranch(refName.name, plan.nextWorktreePath);
       setIsBranchMenuOpen(false);
       onComposerFocusRequest?.();
       return;
     }
 
-    const selectedBranchName = refName.isRemote
-      ? deriveLocalBranchNameFromRemoteRef(refName.name)
-      : refName.name;
+    const selectedBranchName = plan.selectedBranchName;
 
     setIsBranchMenuOpen(false);
     onComposerFocusRequest?.();
@@ -448,16 +439,18 @@ export function BranchToolbarBranchSelector({
       const checkoutResult = await switchRef({
         environmentId,
         input: {
-          cwd: selectionTarget.checkoutCwd,
+          cwd: plan.checkoutCwd,
           refName: refName.name,
         },
       });
       if (checkoutResult._tag === "Success") {
-        const nextBranchName = refName.isRemote
-          ? (checkoutResult.value.refName ?? selectedBranchName)
-          : selectedBranchName;
+        const nextBranchName = resolveSwitchedBranchName({
+          refName,
+          selectedBranchName,
+          switchedRefName: checkoutResult.value.refName,
+        });
         setOptimisticBranch(nextBranchName);
-        setThreadBranch(nextBranchName, selectionTarget.nextWorktreePath);
+        setThreadBranch(nextBranchName, plan.nextWorktreePath);
         return;
       }
       setOptimisticBranch(previousBranch);
@@ -509,22 +502,25 @@ export function BranchToolbarBranchSelector({
     });
   };
 
-  // Default the worktree base to the repo default branch (origin/HEAD), only
-  // falling back to the checked-out branch when no default is known.
-  const defaultBranchName = useMemo(
-    () => refs.find((refName) => refName.isDefault)?.name ?? null,
-    [refs],
+  const worktreeBaseBranchCandidate = useMemo(
+    () =>
+      resolveWorktreeBaseBranchCandidate({
+        isInitialBranchesLoadPending,
+        refs,
+        currentGitBranch,
+      }),
+    [currentGitBranch, isInitialBranchesLoadPending, refs],
   );
-  const worktreeBaseBranchCandidate = isInitialBranchesLoadPending
-    ? null
-    : (defaultBranchName ?? currentGitBranch);
 
   useEffect(() => {
     if (
-      effectiveEnvMode !== "worktree" ||
-      activeWorktreePath ||
-      activeThreadBranch ||
-      !worktreeBaseBranchCandidate
+      !worktreeBaseBranchCandidate ||
+      !shouldAutoSelectWorktreeBaseBranch({
+        effectiveEnvMode,
+        activeWorktreePath,
+        activeThreadBranch,
+        worktreeBaseBranchCandidate,
+      })
     ) {
       return;
     }
@@ -735,17 +731,7 @@ export function BranchToolbarBranchSelector({
     const refName = branchByName.get(itemValue);
     if (!refName) return null;
 
-    const hasSecondaryWorktree =
-      refName.worktreePath && activeProjectCwd && refName.worktreePath !== activeProjectCwd;
-    const badge = refName.current
-      ? "current"
-      : hasSecondaryWorktree
-        ? "worktree"
-        : refName.isRemote
-          ? "remote"
-          : refName.isDefault
-            ? "default"
-            : null;
+    const badge = resolveBranchPickerBadge(refName, activeProjectCwd);
     return (
       <ComboboxItem
         hideIndicator

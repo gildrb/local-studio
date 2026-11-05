@@ -1,6 +1,6 @@
 import { ClientSettingsSchema, type ClientSettings } from "@t3tools/contracts";
 
-import { getLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
+import { getLocalStorageItem, setLocalStorageItem } from "./lib/localStorageItem";
 
 const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 

@@ -1,3 +1,4 @@
+import { terminalCloseConfirmMessage } from "~/components/ThreadTerminalDrawer.logic";
 import { readLocalApi } from "~/localApi";
 
 let pendingConfirmations = 0;
@@ -20,20 +21,9 @@ export async function confirmTerminalClose(
   if (!localApi) return true;
   pendingConfirmations += 1;
   try {
-    return await localApi.dialogs.confirm(
-      labels.length === 1
-        ? [
-            `Close terminal "${labels[0]}"?`,
-            "This stops the running process and clears its history.",
-          ].join("\n")
-        : [
-            `Close ${labels.length} terminals?`,
-            `This stops their running processes and clears their histories: ${labels
-              .map((label) => `"${label}"`)
-              .join(", ")}.`,
-          ].join("\n"),
-      { variant: "destructive" },
-    );
+    return await localApi.dialogs.confirm(terminalCloseConfirmMessage(labels), {
+      variant: "destructive",
+    });
   } catch {
     return false;
   } finally {

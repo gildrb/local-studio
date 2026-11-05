@@ -1,17 +1,11 @@
-import {
-  ENVIRONMENT_MACHINE_KINDS,
-  isEnvironmentMachineKind,
-  resolveEnvironmentMachineKind,
-  type EnvironmentId,
-  type ServerConfig,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 
 import { isElectron } from "../../env";
 import { usePrimarySessionState } from "../../environments/primary";
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentSessionState } from "../../state/session";
-import { ENVIRONMENT_MACHINE_KIND_LABELS, EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
+import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import {
   MenuItem,
   MenuRadioGroup,
@@ -22,29 +16,10 @@ import {
   MenuSubTrigger,
 } from "../ui/menu";
 import {
-  resolvePrimaryOperateAccess,
-  resolveRemoteOperateAccess,
-} from "./ProviderSettingsPanel.logic";
-
-/**
- * Why the picker is inert, in the order the user can do something about it.
- * Null means it can be changed.
- */
-export function resolveEnvironmentIconPickerLock(input: {
-  readonly serverConfig: ServerConfig | null;
-  readonly operateAccess: "granted" | "denied" | "pending";
-}): string | null {
-  if (input.serverConfig === null) {
-    return "Connect to this environment to change its icon.";
-  }
-  if (input.serverConfig.environment.capabilities.environmentIcon !== true) {
-    return "This environment's server is too old to keep an icon. Update it to choose one.";
-  }
-  if (input.operateAccess === "denied") {
-    return "Your session on this environment cannot change its settings.";
-  }
-  return null;
-}
+  buildEnvironmentIconMenuModel,
+  resolveEnvironmentIconSelection,
+  resolveEnvironmentOperateAccess,
+} from "./EnvironmentIconPicker.logic";
 
 // Same split the provider settings use: the desktop app owns its primary
 // server outright, a browser session on the primary checks its cookie
@@ -53,21 +28,19 @@ function useEnvironmentOperateAccess(environmentId: EnvironmentId) {
   const isPrimary = usePrimaryEnvironmentId() === environmentId;
   const primarySession = usePrimarySessionState();
   const remoteSession = useEnvironmentSessionState(environmentId);
-  if (isPrimary) {
-    return isElectron
-      ? "granted"
-      : resolvePrimaryOperateAccess({
-          isPrimary: true,
-          hasDesktopBridge: false,
-          session: primarySession.data,
-          isPending: primarySession.isPending,
-          hasError: primarySession.error !== null,
-        });
-  }
-  return resolveRemoteOperateAccess({
-    session: remoteSession.data,
-    isPending: remoteSession.isPending,
-    hasError: remoteSession.hasError,
+  return resolveEnvironmentOperateAccess({
+    isPrimary,
+    isElectron,
+    primarySession: {
+      session: primarySession.data,
+      isPending: primarySession.isPending,
+      hasError: primarySession.error !== null,
+    },
+    remoteSession: {
+      session: remoteSession.data,
+      isPending: remoteSession.isPending,
+      hasError: remoteSession.hasError,
+    },
   });
 }
 
@@ -87,45 +60,42 @@ export function EnvironmentIconMenu({
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
   const operateAccess = useEnvironmentOperateAccess(environmentId);
-  const lock = resolveEnvironmentIconPickerLock({ serverConfig, operateAccess });
-  // With no detection the server falls back to "server", so picking that
-  // kind clears the override the same way picking the detected kind does.
-  const detected = serverConfig?.environment.platform.machine ?? "server";
-  const resolved = resolveEnvironmentMachineKind(serverConfig);
+  const model = buildEnvironmentIconMenuModel({ serverConfig, operateAccess });
 
   return (
     <MenuSub>
       <MenuSubTrigger>
-        <EnvironmentMachineIcon kind={resolved} />
-        Icon
+        <EnvironmentMachineIcon kind={model.icon} />
+        {model.label}
       </MenuSubTrigger>
       <MenuSubPopup>
-        {lock !== null ? (
+        {model.lock !== null ? (
           <>
             <MenuItem disabled className="whitespace-normal">
-              {lock}
+              {model.lock}
             </MenuItem>
             <MenuSeparator />
           </>
         ) : null}
         <MenuRadioGroup
-          value={resolved}
+          value={model.value}
           onValueChange={(next) => {
-            if (lock !== null || !isEnvironmentMachineKind(next)) return;
-            updateSettings({ environmentIcon: next === detected ? null : next });
+            const selection = resolveEnvironmentIconSelection({
+              lock: model.lock,
+              detected: model.detected,
+              next,
+            });
+            if (selection.kind === "none") return;
+            updateSettings(selection.patch);
           }}
         >
-          {ENVIRONMENT_MACHINE_KINDS.map((kind) => (
-            <MenuRadioItem key={kind} value={kind} disabled={lock !== null}>
+          {model.options.map((option) => (
+            <MenuRadioItem key={option.value} value={option.value} disabled={option.disabled}>
               <span className="flex min-w-0 items-center gap-2">
-                <EnvironmentMachineIcon kind={kind} className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">
-                  {ENVIRONMENT_MACHINE_KIND_LABELS[kind]}
-                </span>
-                {kind === detected ? (
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {serverConfig?.environment.platform.machine ? "detected" : "default"}
-                  </span>
+                <EnvironmentMachineIcon kind={option.icon} className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                {option.badge !== null ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">{option.badge}</span>
                 ) : null}
               </span>
             </MenuRadioItem>

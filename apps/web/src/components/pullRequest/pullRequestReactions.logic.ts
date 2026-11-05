@@ -106,3 +106,89 @@ export function applyPendingPullRequestReactions(
   }
   return PULL_REQUEST_REACTION_ORDER.flatMap((content) => byContent.get(content) ?? []);
 }
+
+export function pullRequestReactionsSignature(
+  reactions: ReadonlyArray<PullRequestReaction>,
+): string {
+  return reactions
+    .map((reaction) => `${reaction.content}:${reaction.count}:${reaction.viewerHasReacted ? 1 : 0}`)
+    .join(" ");
+}
+
+export type PullRequestReactionPillModel = {
+  readonly content: PullRequestReactionContent;
+  readonly emoji: string;
+  readonly count: number;
+  readonly pressed: boolean;
+  readonly ariaLabel: string;
+  readonly tooltip: string;
+  readonly disabled: boolean;
+};
+
+export type PullRequestReactionPickerOptionModel = {
+  readonly content: PullRequestReactionContent;
+  readonly emoji: string;
+  readonly ariaLabel: string;
+  readonly pressed: boolean;
+};
+
+export type PullRequestReactionBarInput = {
+  readonly reactions: ReadonlyArray<PullRequestReaction>;
+  readonly pending: ReadonlyMap<PullRequestReactionContent, boolean>;
+  readonly canReact: boolean;
+};
+
+export type PullRequestReactionBarModel = {
+  readonly visible: boolean;
+  readonly pills: ReadonlyArray<PullRequestReactionPillModel>;
+  readonly picker: {
+    readonly visible: boolean;
+    readonly ariaLabel: string;
+    readonly icon: "smile-plus";
+    readonly options: ReadonlyArray<PullRequestReactionPickerOptionModel>;
+  };
+};
+
+export function buildPullRequestReactionBarModel(
+  input: PullRequestReactionBarInput,
+): PullRequestReactionBarModel {
+  const shown = applyPendingPullRequestReactions(input.reactions, input.pending);
+  return {
+    visible: shown.length > 0 || input.canReact,
+    pills: shown.map((reaction) => ({
+      content: reaction.content,
+      emoji: pullRequestReactionEmoji(reaction.content),
+      count: reaction.count,
+      pressed: reaction.viewerHasReacted,
+      ariaLabel: `${pullRequestReactionName(reaction.content)}, ${reaction.count}`,
+      tooltip: pullRequestReactionTooltip(reaction),
+      disabled: !input.canReact,
+    })),
+    picker: {
+      visible: input.canReact,
+      ariaLabel: "Add a reaction",
+      icon: "smile-plus",
+      options: PULL_REQUEST_REACTION_ORDER.map((content) => ({
+        content,
+        emoji: pullRequestReactionEmoji(content),
+        ariaLabel: pullRequestReactionName(content),
+        pressed: shown.find((reaction) => reaction.content === content)?.viewerHasReacted ?? false,
+      })),
+    },
+  };
+}
+
+export type PullRequestReactionToggle = {
+  readonly content: PullRequestReactionContent;
+  readonly reacted: boolean;
+};
+
+export function resolvePullRequestReactionToggle(
+  model: PullRequestReactionBarModel,
+  content: PullRequestReactionContent,
+): PullRequestReactionToggle {
+  const pressed = model.picker.options.find((option) => option.content === content)?.pressed;
+  return { content, reacted: !(pressed ?? false) };
+}
+
+export const PULL_REQUEST_REACTION_FAILURE_TITLE = "The reaction could not be saved";

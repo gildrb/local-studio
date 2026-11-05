@@ -5,6 +5,7 @@ import { Button } from "~/components/ui/button";
 import { Textarea } from "~/components/ui/textarea";
 
 import { isCommentSubmitShortcut } from "./commentSubmitShortcut";
+import { DIFF_COMMENT_COPY, diffCommentAriaLabel } from "./DiffCommentAnnotation.logic";
 
 interface DiffCommentSecondaryAction {
   readonly label: string;
@@ -37,8 +38,8 @@ export function DiffCommentAnnotation({
   onCancel,
   onComment,
   onDelete,
-  placeholder = "Add a comment…",
-  submitLabel = "Comment",
+  placeholder = DIFF_COMMENT_COPY.placeholder,
+  submitLabel = DIFF_COMMENT_COPY.submitLabel,
   pending = false,
   secondaryAction,
   focusOnMount = true,
@@ -71,7 +72,7 @@ export function DiffCommentAnnotation({
             <Button
               variant="ghost-muted"
               size="icon-xs"
-              aria-label="Delete comment"
+              aria-label={DIFF_COMMENT_COPY.deleteLabel}
               onClick={onDelete}
             >
               <Trash2 className="size-3" />
@@ -95,7 +96,7 @@ export function DiffCommentAnnotation({
         size="sm"
         value={displayedText}
         placeholder={placeholder}
-        aria-label={`Comment on lines ${rangeLabel}`}
+        aria-label={diffCommentAriaLabel(rangeLabel)}
         onChange={(event) => (onTextChange ?? setLocalDraftText)(event.target.value)}
         onFocus={(event) => {
           const end = event.currentTarget.value.length;
@@ -113,9 +114,11 @@ export function DiffCommentAnnotation({
         }}
       />
       <div className="mt-1.5 flex items-center gap-1">
-        <span className="mr-auto text-3xs text-muted-foreground/70">⌘/Ctrl Enter to send</span>
+        <span className="mr-auto text-3xs text-muted-foreground/70">
+          {DIFF_COMMENT_COPY.sendHint}
+        </span>
         <Button variant="ghost-muted" size="xs" onClick={onCancel}>
-          Cancel
+          {DIFF_COMMENT_COPY.cancelLabel}
         </Button>
         {secondaryAction ? (
           <Button

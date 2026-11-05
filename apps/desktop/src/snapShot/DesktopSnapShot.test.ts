@@ -18,7 +18,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as TestClock from "effect/testing/TestClock";
 import type * as Electron from "electron";
-import type { PortalShortcutState } from "./PortalCaptureShortcut.ts";
+import type { PortalShortcutState } from "@t3tools/shared/snapShot/PortalCaptureShortcut";
 import { beforeEach, vi } from "vite-plus/test";
 
 beforeEach(() => {
@@ -81,10 +81,13 @@ const {
   accessibilityProcessCloseMock: vi.fn(),
   accessibilityProcessCoolMock: vi.fn(),
   accessibilityProcessReadMock: vi.fn<
-    (request: import("./SnapShotAccessibility.ts").SnapShotAccessibilityRequest) => {
+    (
+      request: import("@t3tools/shared/snapShot/SnapShotAccessibility").SnapShotAccessibilityRequest,
+    ) => {
       started: Promise<void>;
       result: Promise<
-        import("./SnapShotAccessibility.ts").CapturedWindowAccessibilityContext | undefined
+        | import("@t3tools/shared/snapShot/SnapShotAccessibility").CapturedWindowAccessibilityContext
+        | undefined
       >;
     }
   >(),
@@ -118,7 +121,7 @@ const {
   getSourcesMock: vi.fn(),
   macCaptureMock: vi.fn(),
   linuxCaptureMock: vi.fn<
-    () => Promise<import("./LinuxSnapShot.ts").LinuxWindowSnapshot | undefined>
+    () => Promise<import("@t3tools/shared/snapShot/LinuxSnapShot").LinuxWindowSnapshot | undefined>
   >(async () => undefined),
   linuxBackendMock: vi.fn(async () => "picker"),
   niriShortcutStopMock: vi.fn(),
@@ -167,7 +170,7 @@ const {
   transitionSnapshotMock: vi.fn<() => Promise<void>>(),
 }));
 
-vi.mock("./SnapShotAccessibilityProcess.ts", () => ({
+vi.mock("@t3tools/shared/snapShot/SnapShotAccessibilityProcess", () => ({
   makeSnapShotAccessibilityProcessPool: () => ({
     warm: accessibilityProcessWarmMock,
     cool: accessibilityProcessCoolMock,
@@ -176,8 +179,8 @@ vi.mock("./SnapShotAccessibilityProcess.ts", () => ({
   }),
 }));
 vi.mock("./ActiveWindow.ts", () => ({ activeWindow: activeWindowMock }));
-vi.mock("./RegionSnapShot.ts", async (original) => ({
-  ...(await original<typeof import("./RegionSnapShot.ts")>()),
+vi.mock("@t3tools/shared/snapShot/RegionSnapShot", async (original) => ({
+  ...(await original<typeof import("@t3tools/shared/snapShot/RegionSnapShot")>()),
   makeRegionSnapShotPool: () => ({
     warm: vi.fn(),
     cool: vi.fn(),
@@ -188,20 +191,22 @@ vi.mock("./RegionSnapShot.ts", async (original) => ({
 vi.mock("./WindowsCaptureFeedback.ts", () => ({
   showWindowsCaptureOverlay: (window: Electron.BaseWindow) => window.showInactive(),
 }));
-vi.mock("./MacSnapShot.ts", () => ({ captureMacWindowSnapshot: macCaptureMock }));
-vi.mock("./LinuxSnapShot.ts", () => ({
+vi.mock("@t3tools/shared/snapShot/MacSnapShot", () => ({
+  captureMacWindowSnapshot: macCaptureMock,
+}));
+vi.mock("@t3tools/shared/snapShot/LinuxSnapShot", () => ({
   captureLinuxWindow: linuxCaptureMock,
   getLinuxCaptureSupport: async () => ({
     linuxBackend: await linuxBackendMock(),
     linuxFeedbackAvailable: false,
   }),
 }));
-vi.mock("./NiriCaptureShortcut.ts", async (original) => ({
-  ...(await original<typeof import("./NiriCaptureShortcut.ts")>()),
+vi.mock("@t3tools/shared/snapShot/NiriCaptureShortcut", async (original) => ({
+  ...(await original<typeof import("@t3tools/shared/snapShot/NiriCaptureShortcut")>()),
   startNiriCaptureShortcut: niriShortcutMock,
 }));
-vi.mock("./PortalCaptureShortcut.ts", async (original) => ({
-  ...(await original<typeof import("./PortalCaptureShortcut.ts")>()),
+vi.mock("@t3tools/shared/snapShot/PortalCaptureShortcut", async (original) => ({
+  ...(await original<typeof import("@t3tools/shared/snapShot/PortalCaptureShortcut")>()),
   PortalCaptureShortcut: class {
     state: PortalShortcutState = nextPortalState.value ?? {
       shortcutRegistered: true,
@@ -427,7 +432,8 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopClientSettings from "../settings/DesktopClientSettings.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
 import * as DesktopSnapShot from "./DesktopSnapShot.ts";
-import * as SnapShotAccessibility from "./SnapShotAccessibility.ts";
+import * as SnapShotAccessibility from "@t3tools/shared/snapShot/SnapShotAccessibility";
+import { snapShotThumbnailSize } from "@t3tools/shared/snapShot/SnapShotEngine";
 
 // The accessibility reader normally runs in a worker with the real xa11y `App`.
 // Tests hand it this stand-in so the mocks above drive window lookups.
@@ -465,8 +471,8 @@ accessibilityProcessReadMock.mockImplementation((request) => ({
     request.imageSize,
   ),
 }));
-vi.mock("./GnomeCaptureSetup.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./GnomeCaptureSetup.ts")>()),
+vi.mock("@t3tools/shared/snapShot/GnomeCaptureSetup", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@t3tools/shared/snapShot/GnomeCaptureSetup")>()),
   GnomeCaptureSetup: class {
     state = async () => ({ status: "enabled" as const, message: "Extension running" });
     perform = async () => undefined;
@@ -478,12 +484,12 @@ const decodePendingMetadata = Schema.decodeUnknownEffect(
   Schema.fromJsonString(DesktopPendingSnapShot),
 );
 
+import { SnapShotTransition } from "./SnapShotTransition.ts";
 import {
-  SnapShotTransition,
   snapShotAnimationDurationMs,
   snapShotAnimationDisplayBounds,
   snapShotAnimationOverlayBounds,
-} from "./SnapShotTransition.ts";
+} from "@t3tools/shared/snapShot/snapShotTransitionGeometry";
 const testLayer = (
   platform: NodeJS.Platform,
   fileSystemOverrides: Parameters<typeof FileSystem.layerNoop>[0] = {},
@@ -2437,9 +2443,9 @@ it("does not let a failed transition fail landing or capture completion", async 
 
 it("bounds source thumbnails for large windows", () => {
   assert.deepEqual(
-    DesktopSnapShot.snapShotThumbnailSize({
+    snapShotThumbnailSize({
       bounds: { x: 0, y: 0, width: 6_000, height: 4_000 },
-    } as Parameters<typeof DesktopSnapShot.snapShotThumbnailSize>[0]),
+    } as Parameters<typeof snapShotThumbnailSize>[0]),
     { width: 2_560, height: 1_600 },
   );
 });

@@ -1,10 +1,6 @@
 import { PermissionChecklist, PermissionContinueButton } from "../permissions/PermissionChecklist";
 import { usePermissionStatus } from "../permissions/usePermissionStatus";
-import {
-  isModifierPairShortcut,
-  type DesktopSnapShotSetupAction,
-  type DesktopSnapShotState,
-} from "@t3tools/contracts";
+import type { DesktopSnapShotSetupAction, DesktopSnapShotState } from "@t3tools/contracts";
 import { useState, type ReactNode } from "react";
 import { MacAccessibilityIcon, MacScreenRecordingIcon } from "../Icons";
 import { CaptureShortcutConfig } from "./CaptureShortcutConfig";
@@ -12,54 +8,19 @@ import { Button } from "../ui/button";
 import { Dialog, DialogDescription } from "../ui/dialog";
 import { WizardSteps, WizardPopup, WizardHeader, WizardPanel, WizardFooter } from "../ui/wizard";
 import {
-  captureSetupAccessReady,
-  captureSetupBackend,
-  captureSetupCheckMessage,
-  captureSetupDesktopName,
+  buildSnapShotSetupDialogModel,
+  captureSetupInitialMacPermissions,
   captureSetupInitialStep,
-  captureSetupShortcutReady,
+  captureSetupPollsMacPermissions,
+  resolveCaptureSetupStepChange,
   type CaptureSetupStep,
+  type SnapShotSetupDialogIntent,
+  type SnapShotSetupDialogPermission,
 } from "./SnapShotSetupDialog.logic";
 
-const SETUP_STEPS = [
-  { id: "access", label: "Access" },
-  { id: "shortcut", label: "Shortcut" },
-] as const;
-
-const GNOME_ACCESS_COPY = {
-  "not-installed": {
-    title: "Install the extension",
-    description:
-      "The T3 Code GNOME extension lets you capture other windows and bring them into your draft. Sign out once after installing.",
-  },
-  "restart-required": {
-    title: "Extension installed",
-    description: "Save your work, then sign out and back in. Your setup will be waiting here.",
-  },
-  "update-required": {
-    title: "Update the extension",
-    description: "Install the update, then sign out and back in.",
-  },
-  "extensions-disabled": {
-    title: "Allow GNOME extensions",
-    description: "Open GNOME Extensions and turn on extensions, then check again.",
-  },
-  disabled: {
-    title: "Enable the extension",
-    description: "Enable T3 Code SnapShots to start capturing windows.",
-  },
-  enabled: {
-    title: "Capture is ready",
-    description: "Next, choose your shortcut.",
-  },
-  unsupported: {
-    title: "Automatic capture isn't available",
-    description: "Use Take snapshot from the command palette to choose a window.",
-  },
-  error: {
-    title: "Couldn't set up the extension",
-    description: "Check T3 Code SnapShots in GNOME Extensions, then try again.",
-  },
+const PERMISSION_ICONS: Record<SnapShotSetupDialogPermission["icon"], ReactNode> = {
+  "mac-screen-recording": <MacScreenRecordingIcon className="size-8 shrink-0 drop-shadow-sm" />,
+  "mac-accessibility": <MacAccessibilityIcon className="size-8 shrink-0 drop-shadow-sm" />,
 };
 
 export function SnapShotSetupDialog({
@@ -102,33 +63,31 @@ export function SnapShotSetupDialog({
   const [checked, setChecked] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const busy = actionBusy || checking || configBusy;
-  const backend = captureSetupBackend(state);
-  const configShortcut = backend === "niri" || backend === "hyprland";
-  const desktop = captureSetupDesktopName(state);
-  const extension = state.gnomeExtension;
-  const helper = backend === "hyprland" ? state.hyprlandHelper : state.kdeHelper;
-  const helperBackend = backend === "kde" || backend === "hyprland";
-  const installHelper = backend === "hyprland" ? "install-hyprland-helper" : "install-kde-helper";
-  const removeHelper = backend === "hyprland" ? "remove-hyprland-helper" : "remove-kde-helper";
-  const accessReady = captureSetupAccessReady(state);
   const permissionStatus = usePermissionStatus(
     async () => {
       const refreshed = await onRefresh();
       if (!refreshed?.macPermissions) throw new Error("Permission status unavailable");
       return refreshed.macPermissions;
     },
-    state.macPermissions ?? { screenRecording: false, accessibility: false },
-    Boolean(state.macPermissions) && step === "access" && !busy,
+    captureSetupInitialMacPermissions(state),
+    captureSetupPollsMacPermissions(state, step, busy),
   );
-  const macPermissions = state.macPermissions ? permissionStatus.status : undefined;
-  const macPermissionsReady =
-    !macPermissions ||
-    permissionStatus.isReady(
-      includeAccessibility ? ["screenRecording", "accessibility"] : ["screenRecording"],
-    );
-  const shortcutReady = captureSetupShortcutReady(state, shortcutChanged);
-  const install = extension?.status === "not-installed" || extension?.status === "update-required";
-  const enable = extension?.status === "disabled";
+  const model = buildSnapShotSetupDialogModel({
+    state,
+    step,
+    wasEnabled,
+    includeAccessibility,
+    actionBusy,
+    checking,
+    checked,
+    configBusy,
+    error,
+    permissionStatus: permissionStatus.status,
+    permissionError: permissionStatus.error,
+    shortcutStatus: shortcutStatus ?? null,
+    shortcutChanged,
+    canSaveShortcut,
+  });
   const changeStep = (next: CaptureSetupStep) => {
     onLeaveStep();
     setChecked(false);
@@ -144,237 +103,167 @@ export function SnapShotSetupDialog({
       setChecking(false);
     }
   };
-  const accessCopy =
-    state.message && !macPermissions
-      ? {
-          title: "Let's try that again",
-          description: "Couldn't check snapshots. Try again to continue.",
-        }
-      : backend === "gnome" && extension
-        ? extension.status === "enabled" && !accessReady
-          ? {
-              title: "Check capture access",
-              description: "The extension isn't ready yet. Try again in a moment.",
-            }
-          : GNOME_ACCESS_COPY[extension.status]
-        : helperBackend
-          ? helper?.status === "ready"
-            ? {
-                title: "Capture is ready",
-                description: "Next, choose your shortcut.",
-              }
-            : helper?.status === "error"
-              ? {
-                  title: "Let's fix capture access",
-                  description: "Try reinstalling the capture helper, then check again.",
-                }
-              : {
-                  title:
-                    helper?.status === "update-required"
-                      ? "Update the capture helper"
-                      : "Allow snapshots",
-                  description:
-                    "T3 Code's capture helper lets you capture other apps and return to your draft. It's included with T3 Code.",
-                }
-          : backend === "niri"
-            ? {
-                title: "Capture is ready",
-                description: "Next, choose your shortcut.",
-              }
-            : backend === "picker"
-              ? {
-                  title: "Choose a window each time",
-                  description:
-                    "Your desktop doesn't support automatic capture. You'll choose the window to capture instead.",
-                }
-              : {
-                  title: "Allow snapshots",
-                  description:
-                    backend === "portal"
-                      ? "Your desktop may ask for permission when you first capture."
-                      : macPermissions
-                        ? macPermissionsReady
-                          ? "Test a snapshot of the current window. If macOS asks to bypass its window picker, choose Allow. The test image is discarded."
-                          : "Allow each permission, then continue."
-                        : "Allow access when prompted to start capturing windows.",
-                };
-  const title = step === "access" ? accessCopy.title : "Choose your shortcut";
-  const description =
-    step === "access"
-      ? accessCopy.description
-      : configShortcut
-        ? "Click the shortcut, then press the keys you want."
-        : state.mode === "portal"
-          ? "Choose your keys, then approve the permission prompt if asked."
-          : "Use both Shift keys, or record a different shortcut.";
-  const stepIndex = SETUP_STEPS.findIndex(({ id }) => id === step);
-  const details = [
-    ...new Set(
-      [
-        error,
-        ...(step === "access"
-          ? [
-              state.message,
-              backend === "gnome" &&
-              (extension?.status === "error" || extension?.status === "unsupported")
-                ? extension.message
-                : null,
-              helperBackend && helper?.status === "error" ? helper.message : null,
-            ]
-          : []),
-      ].filter((detail) => detail !== null),
-    ),
-  ];
+  const runIntent = async (intent: SnapShotSetupDialogIntent) => {
+    switch (intent.kind) {
+      case "action":
+        return onAction(intent.action);
+      case "check-again":
+        return checkAgain();
+      case "enable-and-continue":
+        if (await onEnable()) changeStep("shortcut");
+        return;
+      case "finish":
+        if (!intent.saveShortcut || (await onSaveShortcut())) await onClose(true);
+        return;
+    }
+  };
+  const access = model.access;
+  const shortcut = model.shortcut;
+  const advanced = model.advanced;
+  const primary = model.primaryButton;
 
   return (
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open && !busy) void onClose(false);
+        if (!open && model.dismissible) void onClose(false);
       }}
     >
-      <WizardPopup showCloseButton={!busy}>
-        <WizardHeader title={desktop ? `Set up snapshots for ${desktop}` : "Set up snapshots"}>
+      <WizardPopup showCloseButton={model.dismissible}>
+        <WizardHeader title={model.title}>
           <WizardSteps
-            steps={SETUP_STEPS.map((item) => item.label)}
-            currentStep={stepIndex}
-            isStepDisabled={(index) => busy || index > stepIndex}
+            steps={model.steps.map((item) => item.label)}
+            currentStep={model.currentStepIndex}
+            isStepDisabled={(index) => model.steps[index]?.disabled ?? true}
             onStepChange={(index) => {
-              const next = SETUP_STEPS[index];
-              if (next && next.id !== step) changeStep(next.id);
+              const next = resolveCaptureSetupStepChange(index, step);
+              if (next) changeStep(next);
             }}
           />
         </WizardHeader>
         <WizardPanel>
           <div className="space-y-4 text-sm">
             <div className="space-y-2" aria-live="polite">
-              <h3 className="flex items-center gap-2 font-medium">{title}</h3>
-              <DialogDescription>{description}</DialogDescription>
+              <h3 className="flex items-center gap-2 font-medium">{model.heading.title}</h3>
+              <DialogDescription>{model.heading.description}</DialogDescription>
             </div>
-            {step === "access" ? (
+            {access ? (
               <>
                 <p
                   role="status"
                   aria-atomic="true"
                   className={
-                    checked && !busy && !error ? "text-xs text-muted-foreground" : "sr-only"
+                    access.checkMessage !== null ? "text-xs text-muted-foreground" : "sr-only"
                   }
                 >
-                  {checked && !busy && !error ? captureSetupCheckMessage(state) : null}
+                  {access.checkMessage}
                 </p>
-                {macPermissions ? (
+                {access.permissions ? (
                   <PermissionChecklist
-                    busy={busy}
-                    permissions={[
-                      {
-                        id: "screenRecording",
-                        icon: <MacScreenRecordingIcon className="size-8 shrink-0 drop-shadow-sm" />,
-                        title: "Screen Recording",
-                        description: "Capture the window you're using.",
-                        granted: macPermissions.screenRecording,
-                        onAllow: () => void onAction("allow-screen-recording"),
-                      },
-                      {
-                        id: "accessibility",
-                        icon: <MacAccessibilityIcon className="size-8 shrink-0 drop-shadow-sm" />,
-                        title: "Accessibility",
-                        description: includeAccessibility
-                          ? "Include text and controls from the captured app."
-                          : "Optional. Include text and controls from the captured app.",
-                        granted: macPermissions.accessibility,
-                        onAllow: () => void onAction("allow-accessibility"),
-                      },
-                    ]}
+                    busy={model.busy}
+                    permissions={access.permissions.map((permission) => ({
+                      id: permission.id,
+                      icon: PERMISSION_ICONS[permission.icon],
+                      title: permission.title,
+                      description: permission.description,
+                      granted: permission.granted,
+                      onAllow: () => void onAction(permission.action),
+                    }))}
                   />
                 ) : null}
-                {permissionStatus.error && macPermissions ? (
+                {access.permissionError ? (
                   <p role="status" className="text-xs text-muted-foreground">
-                    {permissionStatus.error}
+                    {access.permissionError}
                   </p>
                 ) : null}
-                {helperBackend && helper?.status === "error" ? (
+                {access.reinstallHelperButton ? (
                   <Button
                     size="xs"
                     variant="outline"
-                    disabled={busy}
-                    onClick={() => void onAction(installHelper)}
+                    disabled={access.reinstallHelperButton.disabled}
+                    onClick={() => {
+                      if (access.reinstallHelperButton)
+                        void onAction(access.reinstallHelperButton.action);
+                    }}
                   >
-                    Reinstall helper
+                    {access.reinstallHelperButton.label}
                   </Button>
                 ) : null}
               </>
-            ) : configShortcut ? (
+            ) : shortcut?.kind === "config" ? (
               <CaptureShortcutConfig
                 state={state}
-                disabled={actionBusy || checking || !accessReady}
+                disabled={shortcut.disabled}
                 onBusyChange={setConfigBusy}
                 onSaved={onRefresh}
                 onComplete={() => onClose(true)}
               />
-            ) : (
+            ) : shortcut?.kind === "inline" ? (
               <div className="space-y-3">
                 {shortcutInput}
-                {shortcutStatus ? (
+                {shortcut.status ? (
                   <p className="text-xs text-muted-foreground" role="status">
-                    {shortcutStatus}
+                    {shortcut.status}
                   </p>
                 ) : null}
-                {!shortcutChanged &&
-                !state.shortcutRegistered &&
-                !state.shortcutPending &&
-                state.shortcutCanRetry !== false &&
-                !isModifierPairShortcut(state.shortcut) ? (
+                {shortcut.retryButton ? (
                   <Button
                     variant="ghost"
                     size="sm"
-                    disabled={busy}
-                    onClick={() => void onAction("retry-shortcut")}
+                    disabled={shortcut.retryButton.disabled}
+                    onClick={() => {
+                      if (shortcut.retryButton) void onAction(shortcut.retryButton.action);
+                    }}
                   >
-                    {state.mode === "portal" ? "Shortcut permissions" : "Try again"}
+                    {shortcut.retryButton.label}
                   </Button>
                 ) : null}
               </div>
-            )}
-            {step === "shortcut" && !accessReady ? (
+            ) : null}
+            {model.accessAlert !== null ? (
               <p role="alert" className="text-destructive">
-                Capture needs attention. Go back to check access.
+                {model.accessAlert}
               </p>
             ) : null}
-            {error ? (
+            {model.errorAlert !== null ? (
               <p role="alert" className="text-destructive">
-                Couldn't finish this step. Try again or check Advanced for help.
+                {model.errorAlert}
               </p>
             ) : null}
-            {details.length > 0 || (step === "access" && (backend === "gnome" || helperBackend)) ? (
+            {advanced ? (
               <details className="text-xs text-muted-foreground">
-                <summary className="cursor-pointer">Advanced</summary>
+                <summary className="cursor-pointer">{advanced.summary}</summary>
                 <div className="mt-3 space-y-3">
-                  {details.map((detail) => (
+                  {advanced.details.map((detail) => (
                     <p key={detail} className="break-words">
                       {detail}
                     </p>
                   ))}
-                  {step === "access" && (backend === "gnome" || helperBackend) ? (
-                    <p>Included with T3 Code. No download needed.</p>
-                  ) : null}
-                  {step === "access" && backend === "gnome" && extension?.status === "enabled" ? (
+                  {advanced.includedNote !== null ? <p>{advanced.includedNote}</p> : null}
+                  {advanced.disableExtensionButton ? (
                     <Button
                       size="xs"
                       variant="ghost"
-                      disabled={busy}
-                      onClick={() => void onAction("disable-extension")}
+                      disabled={advanced.disableExtensionButton.disabled}
+                      onClick={() => {
+                        if (advanced.disableExtensionButton)
+                          void onAction(advanced.disableExtensionButton.action);
+                      }}
                     >
-                      Disable extension
+                      {advanced.disableExtensionButton.label}
                     </Button>
                   ) : null}
-                  {step === "access" && helperBackend && helper?.status !== "not-installed" ? (
+                  {advanced.removeHelperButton ? (
                     <Button
                       size="xs"
                       variant="ghost"
-                      disabled={busy}
-                      onClick={() => void onAction(removeHelper)}
+                      disabled={advanced.removeHelperButton.disabled}
+                      onClick={() => {
+                        if (advanced.removeHelperButton)
+                          void onAction(advanced.removeHelperButton.action);
+                      }}
                     >
-                      Remove capture helper
+                      {advanced.removeHelperButton.label}
                     </Button>
                   ) : null}
                 </div>
@@ -383,90 +272,37 @@ export function SnapShotSetupDialog({
           </div>
         </WizardPanel>
         <WizardFooter>
-          {step !== "access" ? (
-            <Button variant="ghost" disabled={busy} onClick={() => changeStep("access")}>
-              Back
+          {model.backButton ? (
+            <Button
+              variant="ghost"
+              disabled={model.backButton.disabled}
+              onClick={() => changeStep("access")}
+            >
+              {model.backButton.label}
             </Button>
           ) : null}
-          <Button variant="ghost" disabled={busy} onClick={() => void onClose(false)}>
-            {wasEnabled ? "Close" : "Finish later"}
+          <Button
+            variant="ghost"
+            disabled={model.closeButton.disabled}
+            onClick={() => void onClose(false)}
+          >
+            {model.closeButton.label}
           </Button>
-          {step === "access" ? (
-            helperBackend && !accessReady && helper?.status !== "ready" ? (
-              <Button
-                disabled={busy}
-                aria-busy={busy}
-                onClick={() =>
-                  void (helper?.status === "error" ? checkAgain() : onAction(installHelper))
-                }
-              >
-                {checking
-                  ? "Checking…"
-                  : busy
-                    ? "Installing…"
-                    : helper?.status === "error"
-                      ? "Check again"
-                      : helper?.status === "update-required"
-                        ? "Update helper"
-                        : "Install helper"}
-              </Button>
-            ) : backend === "gnome" && !accessReady && extension?.status !== "enabled" ? (
-              <Button
-                disabled={busy}
-                aria-busy={checking}
-                onClick={() =>
-                  void (install
-                    ? onAction("install-extension")
-                    : enable
-                      ? onAction("enable-extension")
-                      : checkAgain())
-                }
-              >
-                {checking
-                  ? "Checking…"
-                  : busy
-                    ? install
-                      ? "Installing…"
-                      : enable
-                        ? "Enabling…"
-                        : "Working…"
-                    : install
-                      ? extension?.status === "update-required"
-                        ? "Update extension"
-                        : "Install extension"
-                      : enable
-                        ? "Enable extension"
-                        : "Check again"}
-              </Button>
-            ) : (
-              <PermissionContinueButton
-                ready={macPermissionsReady}
-                busy={busy}
-                onClick={async () => {
-                  if (await onEnable()) changeStep("shortcut");
-                }}
-              >
-                {busy
-                  ? "Working…"
-                  : macPermissions
-                    ? "Test capture and continue"
-                    : backend === "direct"
-                      ? "Allow capture"
-                      : !accessReady && !macPermissions
-                        ? "Try again"
-                        : "Continue"}
-              </PermissionContinueButton>
-            )
-          ) : !configShortcut ? (
-            <Button
-              disabled={
-                busy || !accessReady || (shortcutChanged ? !canSaveShortcut : !shortcutReady)
-              }
-              onClick={async () => {
-                if (!shortcutChanged || (await onSaveShortcut())) await onClose(true);
-              }}
+          {primary?.kind === "permission-continue" ? (
+            <PermissionContinueButton
+              ready={primary.ready}
+              busy={primary.busy}
+              onClick={() => runIntent(primary.intent)}
             >
-              {busy ? "Saving…" : shortcutChanged ? "Save and finish" : "Done"}
+              {primary.label}
+            </PermissionContinueButton>
+          ) : primary?.kind === "button" ? (
+            <Button
+              disabled={primary.disabled}
+              aria-busy={primary.ariaBusy ?? undefined}
+              onClick={() => void runIntent(primary.intent)}
+            >
+              {primary.label}
             </Button>
           ) : null}
         </WizardFooter>

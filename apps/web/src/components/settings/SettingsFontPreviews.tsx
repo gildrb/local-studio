@@ -8,6 +8,13 @@ import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import { resolveDiffThemeName, type DiffThemeName } from "../../lib/diffRendering";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import { GhosttyTerminalSurface } from "~/terminal/ghostty/surface";
+import {
+  DIFF_PREVIEW_PATCH,
+  previewTerminalFont,
+  PROMPT_PREVIEW_TEXT,
+  resolveTerminalPreviewEcho,
+  TERMINAL_PREVIEW_TRANSCRIPT,
+} from "./SettingsFontPreviews.logic";
 
 // The font previews are the real surfaces, not lookalikes: the composer's
 // Tiptap editor, the diff panel's file diff, and the Ghostty canvas
@@ -16,14 +23,6 @@ import { GhosttyTerminalSurface } from "~/terminal/ghostty/surface";
 // exactly what the app renders.
 
 const EMPTY_SKILLS: ReadonlyArray<never> = [];
-
-// Serialized the way the composer stores inline tokens: the $skill and the
-// markdown-style file links render as chips, so the preview shows prompt
-// text and pills exactly as the real composer draws them.
-const PROMPT_PREVIEW_TEXT =
-  "Use $frontend-design to fix the flaky test in " +
-  "[surface.test.ts](apps/web/src/terminal/ghostty/surface.test.ts) and align the header with " +
-  "[SettingsPanels.tsx](apps/web/src/components/settings/SettingsPanels.tsx) before shipping.";
 
 function noop() {}
 
@@ -54,18 +53,6 @@ export function PromptFontPreview() {
     </div>
   );
 }
-
-const DIFF_PREVIEW_PATCH = [
-  "diff --git a/src/formatUser.ts b/src/formatUser.ts",
-  "--- a/src/formatUser.ts",
-  "+++ b/src/formatUser.ts",
-  "@@ -1,3 +1,3 @@",
-  " export function formatUser(user: User) {",
-  "-  return user.name.toUpperCase();",
-  "+  return `${user.name} <${user.email}>`; // 0O 1lI",
-  " }",
-  "",
-].join("\n");
 
 // Rendered once per theme through the SSR pipeline, which always awaits the
 // shared highlighter before producing HTML. The interactive FileDiff's mount
@@ -145,34 +132,6 @@ export function CodeFontPreview() {
   );
 }
 
-// A zsh-style prompt: green arrow, cyan project, blue/red git segment,
-// yellow dirty marker. It doubles as the echo loop's fresh-line prompt.
-const TERMINAL_PROMPT =
-  "\x1b[1;32m→\x1b[0m \x1b[1;36mt3code\x1b[0m \x1b[1;34mgit:(\x1b[1;31mmain\x1b[1;34m)\x1b[0m \x1b[1;33m✗\x1b[0m ";
-// A dev-server startup: brand line, addresses, a test summary, and a READY
-// badge. Together the lines cover bold, dim, underline, the six accent
-// colors, and a background cell, so a font choice shows every SGR the
-// terminal actually renders.
-const TERMINAL_PREVIEW_TRANSCRIPT =
-  `${TERMINAL_PROMPT}vpr dev\r\n` +
-  "\r\n" +
-  "  \x1b[1;32mVITE\x1b[0m \x1b[32mv7.1.1\x1b[0m  \x1b[2mready in\x1b[0m \x1b[1m1.24s\x1b[0m\r\n" +
-  "\r\n" +
-  "  \x1b[32m→\x1b[0m  \x1b[2mLocal:\x1b[0m    \x1b[4;36mhttp://127.0.0.1:5173/\x1b[0m\r\n" +
-  "  \x1b[32m→\x1b[0m  \x1b[2mNetwork:\x1b[0m  \x1b[4;36mhttp://192.168.1.24:5173/\x1b[0m\r\n" +
-  "\r\n" +
-  "  \x1b[32m✓ 85 passed\x1b[0m   \x1b[33m△ 2 warnings\x1b[0m   \x1b[31m✗ 0 failed\x1b[0m\r\n" +
-  "\r\n" +
-  "  \x1b[42;30m READY \x1b[0m \x1b[2mwatching for changes — press\x1b[0m \x1b[1mq\x1b[0m \x1b[2mto quit\x1b[0m\r\n" +
-  "\r\n" +
-  TERMINAL_PROMPT;
-
-/** The surface treats an omitted family or size as "use the built-in default". */
-function previewTerminalFont(family: string, size: number): { family?: string; size: number } {
-  const trimmed = family.trim();
-  return trimmed.length > 0 ? { family: trimmed, size } : { size };
-}
-
 /**
  * The real Ghostty canvas renderer against a local echo loop instead of a
  * PTY: keys print, Enter starts a new prompt line, Backspace erases. That
@@ -205,33 +164,14 @@ export function TerminalFontPreview({ family, size }: { family: string; size: nu
     const mount = mountRef.current;
     if (!mount) return;
     let cancelled = false;
-    // Column of the caret on the current input line, so Backspace stops at
-    // the prompt instead of eating it.
     let lineLength = 0;
 
     const echo = (data: string) => {
       const surface = surfaceRef.current;
       if (!surface) return;
-      if (data === "\r") {
-        surface.write(`\r\n${TERMINAL_PROMPT}`);
-        lineLength = 0;
-        return;
-      }
-      if (data === "\x7f" || data === "\b") {
-        if (lineLength > 0) {
-          surface.write("\b \b");
-          lineLength -= 1;
-        }
-        return;
-      }
-      // Arrow keys and other escape reports have no cursor to move here.
-      if (data.startsWith("\x1b")) return;
-      const printable = [...data]
-        .filter((character) => character >= " " && character !== "\x7f")
-        .join("");
-      if (printable.length === 0) return;
-      surface.write(printable);
-      lineLength += printable.length;
+      const result = resolveTerminalPreviewEcho(data, lineLength);
+      lineLength = result.lineLength;
+      if (result.write !== null) surface.write(result.write);
     };
 
     void GhosttyTerminalSurface.create(mount, {

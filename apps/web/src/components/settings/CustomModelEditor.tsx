@@ -11,22 +11,15 @@ import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import {
-  DESCRIPTOR_PRESETS_BY_KIND,
   type CustomModelDraft,
-  type EditorChoice,
-  type EditorDescriptor,
-  choiceFromPreset,
-  definitionFromDraft,
-  descriptorFromPreset,
-  descriptorsFromCapabilities,
+  type CustomModelEditorChoiceRow,
+  type CustomModelEditorDescriptorRow,
+  type CustomModelEditorIntent,
+  buildCustomModelEditorModel,
   draftFromDefinition,
-  emptyEditorChoice,
-  emptyEditorDescriptor,
-  validateDraft,
+  resolveCustomModelEditorChange,
+  resolveCustomModelEditorSubmit,
 } from "./customModelEditor.logic";
-
-const CUSTOM_ID_VALUE = "__custom__";
-const START_FROM_NONE = "__none__";
 
 interface CustomModelEditorProps {
   readonly instanceId: string;
@@ -53,141 +46,86 @@ export function CustomModelEditor({
 }: CustomModelEditorProps) {
   const [draft, setDraft] = useState<CustomModelDraft>(() => draftFromDefinition(entry));
   const [error, setError] = useState<string | null>(null);
-  const presets = useMemo(
-    () => (driverKind ? (DESCRIPTOR_PRESETS_BY_KIND[driverKind] ?? []) : []),
-    [driverKind],
+  const model = useMemo(
+    () => buildCustomModelEditorModel({ instanceId, driverKind, builtInModels, draft, error }),
+    [builtInModels, draft, driverKind, error, instanceId],
   );
-  const startFromCandidates = useMemo(
-    () => builtInModels.filter((model) => (model.capabilities?.optionDescriptors?.length ?? 0) > 0),
-    [builtInModels],
-  );
-  const domId = (suffix: string) => `provider-instance-${instanceId}-custom-model-${suffix}`;
 
-  const updateDescriptor = (key: string, patch: Partial<EditorDescriptor>) => {
-    setError(null);
-    setDraft((current) => ({
-      ...current,
-      descriptors: current.descriptors.map((descriptor) =>
-        descriptor.key === key ? { ...descriptor, ...patch } : descriptor,
-      ),
-    }));
-  };
-
-  const updateChoice = (descriptorKey: string, choiceKey: string, patch: Partial<EditorChoice>) => {
-    setError(null);
-    setDraft((current) => ({
-      ...current,
-      descriptors: current.descriptors.map((descriptor) => {
-        if (descriptor.key !== descriptorKey) return descriptor;
-        return {
-          ...descriptor,
-          choices: descriptor.choices.map((choice) => {
-            if (choice.key === choiceKey) return { ...choice, ...patch };
-            // Only one choice can be the default.
-            return patch.isDefault ? { ...choice, isDefault: false } : choice;
-          }),
-        };
-      }),
-    }));
-  };
-
-  const removeDescriptor = (key: string) => {
-    setError(null);
-    setDraft((current) => ({
-      ...current,
-      descriptors: current.descriptors.filter((descriptor) => descriptor.key !== key),
-    }));
-  };
-
-  const addDescriptor = (descriptor: EditorDescriptor) => {
-    setError(null);
-    setDraft((current) => ({ ...current, descriptors: [...current.descriptors, descriptor] }));
-  };
-
-  // Selecting a preset id replaces the descriptor's label/type/choices so the
-  // usual values are one click away; "Custom…" leaves the row blank to type into.
-  const applyPresetId = (descriptor: EditorDescriptor, value: string | null) => {
-    if (value === null) return;
-    if (value === CUSTOM_ID_VALUE) {
-      updateDescriptor(descriptor.key, { id: "" });
-      return;
-    }
-    const preset = presets.find((candidate) => candidate.id === value);
-    if (!preset) return;
-    updateDescriptor(descriptor.key, {
-      id: preset.id,
-      label: preset.label,
-      type: preset.type,
-      choices: (preset.choices ?? []).map(choiceFromPreset),
-      currentBooleanValue: undefined,
-      description: undefined,
-    });
-  };
-
-  const handleStartFrom = (slug: string | null) => {
-    if (slug === null || slug === START_FROM_NONE) return;
-    const model = startFromCandidates.find((candidate) => candidate.slug === slug);
-    if (!model) return;
-    setError(null);
-    setDraft((current) => ({
-      ...current,
-      descriptors: descriptorsFromCapabilities(model.capabilities, driverKind),
-    }));
+  const dispatch = (intent: CustomModelEditorIntent) => {
+    const change = resolveCustomModelEditorChange({ driverKind, builtInModels, draft }, intent);
+    if (change.kind === "none") return;
+    if (change.clearError) setError(null);
+    setDraft(change.draft);
   };
 
   const handleSave = () => {
-    const problem = validateDraft(draft);
-    if (problem) {
-      setError(problem);
+    const submit = resolveCustomModelEditorSubmit(draft);
+    if (submit.kind === "invalid") {
+      setError(submit.error);
       return;
     }
-    onSave(definitionFromDraft(draft));
+    onSave(submit.definition);
   };
 
-  const idSelectValue = (descriptor: EditorDescriptor) =>
-    presets.some((preset) => preset.id === descriptor.id) ? descriptor.id : CUSTOM_ID_VALUE;
-
-  const renderChoice = (descriptor: EditorDescriptor, choice: EditorChoice) => (
+  const renderChoice = (
+    descriptor: CustomModelEditorDescriptorRow,
+    choice: CustomModelEditorChoiceRow,
+  ) => (
     <div key={choice.key} className="flex items-center gap-2">
       <Input
         size="compact"
-        value={choice.id}
-        onChange={(event) => updateChoice(descriptor.key, choice.key, { id: event.target.value })}
-        placeholder="value"
+        value={choice.value}
+        onChange={(event) =>
+          dispatch({
+            kind: "set-choice-id",
+            descriptorKey: descriptor.key,
+            choiceKey: choice.key,
+            id: event.target.value,
+          })
+        }
+        placeholder={choice.valuePlaceholder}
         font="mono"
         className="w-28"
         spellCheck={false}
-        aria-label="Choice value"
+        aria-label={choice.valueAriaLabel}
       />
       <Input
         size="compact"
         value={choice.label}
         onChange={(event) =>
-          updateChoice(descriptor.key, choice.key, { label: event.target.value })
+          dispatch({
+            kind: "set-choice-label",
+            descriptorKey: descriptor.key,
+            choiceKey: choice.key,
+            label: event.target.value,
+          })
         }
-        placeholder="Label"
+        placeholder={choice.labelPlaceholder}
         className="min-w-0 flex-1"
-        aria-label="Choice label"
+        aria-label={choice.labelAriaLabel}
       />
       <label className="flex shrink-0 items-center gap-1.5 text-2xs text-muted-foreground">
         <Switch
           size="sm"
           checked={choice.isDefault}
           onCheckedChange={(checked) =>
-            updateChoice(descriptor.key, choice.key, { isDefault: checked })
+            dispatch({
+              kind: "set-choice-default",
+              descriptorKey: descriptor.key,
+              choiceKey: choice.key,
+              isDefault: checked,
+            })
           }
-          aria-label="Default choice"
+          aria-label={choice.defaultAriaLabel}
         />
-        Default
+        {choice.defaultLabel}
       </label>
       <Button
         size="icon-micro"
         variant="ghost-muted"
-        aria-label="Remove choice"
+        aria-label={choice.removeAriaLabel}
         onClick={() =>
-          updateDescriptor(descriptor.key, {
-            choices: descriptor.choices.filter((candidate) => candidate.key !== choice.key),
-          })
+          dispatch({ kind: "remove-choice", descriptorKey: descriptor.key, choiceKey: choice.key })
         }
       >
         <XIcon className="size-3" />
@@ -195,80 +133,103 @@ export function CustomModelEditor({
     </div>
   );
 
-  const renderDescriptor = (descriptor: EditorDescriptor, index: number) => (
+  const renderDescriptor = (descriptor: CustomModelEditorDescriptorRow) => (
     <div
       key={descriptor.key}
       className="flex flex-col gap-2 rounded-md border border-border/60 bg-background/40 p-2.5"
     >
       <div className="flex flex-wrap items-center gap-2">
-        <span className="w-14 shrink-0 text-2xs text-muted-foreground">Option {index + 1}</span>
-        {presets.length > 0 ? (
+        <span className="w-14 shrink-0 text-2xs text-muted-foreground">
+          {descriptor.positionLabel}
+        </span>
+        {descriptor.idSelect.visible ? (
           <Select
-            value={idSelectValue(descriptor)}
-            onValueChange={(value) => applyPresetId(descriptor, value)}
+            value={descriptor.idSelect.value}
+            onValueChange={(value) =>
+              dispatch({ kind: "select-descriptor-preset", descriptorKey: descriptor.key, value })
+            }
           >
-            <SelectTrigger size="compact" className="w-40" aria-label="Option id">
-              <SelectValue>
-                {idSelectValue(descriptor) === CUSTOM_ID_VALUE ? "Custom…" : descriptor.id}
-              </SelectValue>
+            <SelectTrigger
+              size="compact"
+              className="w-40"
+              aria-label={descriptor.idSelect.ariaLabel}
+            >
+              <SelectValue>{descriptor.idSelect.displayLabel}</SelectValue>
             </SelectTrigger>
             <SelectPopup align="start" alignItemWithTrigger={false}>
-              {presets.map((preset) => (
-                <SelectItem key={preset.id} value={preset.id}>
+              {descriptor.idSelect.presetOptions.map((preset) => (
+                <SelectItem key={preset.value} value={preset.value}>
                   <span className="flex items-baseline gap-2">
-                    <code className="font-mono text-xs">{preset.id}</code>
+                    <code className="font-mono text-xs">{preset.value}</code>
                     <span className="text-muted-foreground">{preset.label}</span>
                   </span>
                 </SelectItem>
               ))}
-              <SelectItem value={CUSTOM_ID_VALUE}>Custom…</SelectItem>
+              <SelectItem value={descriptor.idSelect.customOption.value}>
+                {descriptor.idSelect.customOption.label}
+              </SelectItem>
             </SelectPopup>
           </Select>
         ) : null}
-        {idSelectValue(descriptor) === CUSTOM_ID_VALUE ? (
+        {descriptor.idInput.visible ? (
           <Input
             size="compact"
-            value={descriptor.id}
-            onChange={(event) => updateDescriptor(descriptor.key, { id: event.target.value })}
-            placeholder="optionId"
+            value={descriptor.idInput.value}
+            onChange={(event) =>
+              dispatch({
+                kind: "set-descriptor-id",
+                descriptorKey: descriptor.key,
+                id: event.target.value,
+              })
+            }
+            placeholder={descriptor.idInput.placeholder}
             font="mono"
             className="w-36"
             spellCheck={false}
-            aria-label="Option id"
+            aria-label={descriptor.idInput.ariaLabel}
           />
         ) : null}
         <Input
           size="compact"
-          value={descriptor.label}
-          onChange={(event) => updateDescriptor(descriptor.key, { label: event.target.value })}
-          placeholder="Label"
+          value={descriptor.label.value}
+          onChange={(event) =>
+            dispatch({
+              kind: "set-descriptor-label",
+              descriptorKey: descriptor.key,
+              label: event.target.value,
+            })
+          }
+          placeholder={descriptor.label.placeholder}
           className="min-w-0 flex-1"
-          aria-label="Option label"
+          aria-label={descriptor.label.ariaLabel}
         />
         <Select
-          value={descriptor.type}
+          value={descriptor.type.value}
           onValueChange={(value) =>
-            updateDescriptor(descriptor.key, { type: value === "boolean" ? "boolean" : "select" })
+            dispatch({ kind: "set-descriptor-type", descriptorKey: descriptor.key, value })
           }
         >
-          <SelectTrigger size="compact" className="w-24" aria-label="Option type">
-            <SelectValue>{descriptor.type === "boolean" ? "Toggle" : "Choices"}</SelectValue>
+          <SelectTrigger size="compact" className="w-24" aria-label={descriptor.type.ariaLabel}>
+            <SelectValue>{descriptor.type.displayLabel}</SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            <SelectItem value="select">Choices</SelectItem>
-            <SelectItem value="boolean">Toggle</SelectItem>
+            {descriptor.type.options.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
           </SelectPopup>
         </Select>
         <Button
           size="icon-micro"
           variant="ghost-muted"
-          aria-label={`Remove option ${index + 1}`}
-          onClick={() => removeDescriptor(descriptor.key)}
+          aria-label={descriptor.removeAriaLabel}
+          onClick={() => dispatch({ kind: "remove-descriptor", descriptorKey: descriptor.key })}
         >
           <XIcon className="size-3" />
         </Button>
       </div>
-      {descriptor.type === "select" ? (
+      {descriptor.choices ? (
         <div className="flex flex-col gap-1.5 pl-16">
           {descriptor.choices.map((choice) => renderChoice(descriptor, choice))}
           <Button
@@ -276,14 +237,10 @@ export function CustomModelEditor({
             size="xs"
             variant="ghost-muted"
             className="-ml-2 self-start"
-            onClick={() =>
-              updateDescriptor(descriptor.key, {
-                choices: [...descriptor.choices, emptyEditorChoice()],
-              })
-            }
+            onClick={() => dispatch({ kind: "add-choice", descriptorKey: descriptor.key })}
           >
             <PlusIcon className="size-3" />
-            Add choice
+            {descriptor.addChoiceLabel}
           </Button>
         </div>
       ) : null}
@@ -301,16 +258,16 @@ export function CustomModelEditor({
       }}
     >
       <div className="flex flex-col gap-1">
-        <label htmlFor={domId("name")} className="text-xs text-muted-foreground">
-          Display name
+        <label htmlFor={model.name.id} className="text-xs text-muted-foreground">
+          {model.name.label}
         </label>
         <Input
-          id={domId("name")}
+          id={model.name.id}
           size="sm"
           autoFocus
-          value={draft.name}
-          onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-          placeholder={draft.slug}
+          value={model.name.value}
+          onChange={(event) => dispatch({ kind: "set-name", name: event.target.value })}
+          placeholder={model.name.placeholder}
           className="sm:w-72"
           spellCheck={false}
         />
@@ -318,70 +275,63 @@ export function CustomModelEditor({
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">Options shown in the composer</span>
-          {startFromCandidates.length > 0 ? (
-            <Select value={START_FROM_NONE} onValueChange={handleStartFrom}>
-              <SelectTrigger
-                size="compact"
-                className="w-44"
-                aria-label="Copy options from a built-in model"
-              >
-                <SelectValue>Copy from…</SelectValue>
+          <span className="text-xs text-muted-foreground">{model.optionsHeading}</span>
+          {model.copyFrom ? (
+            <Select
+              value={model.copyFrom.value}
+              onValueChange={(slug) => dispatch({ kind: "copy-from-model", slug })}
+            >
+              <SelectTrigger size="compact" className="w-44" aria-label={model.copyFrom.ariaLabel}>
+                <SelectValue>{model.copyFrom.placeholder}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                {startFromCandidates.map((model) => (
-                  <SelectItem key={model.slug} value={model.slug}>
-                    {model.name}
+                {model.copyFrom.options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectPopup>
             </Select>
           ) : null}
         </div>
-        {draft.descriptors.length === 0 ? (
-          <p className="text-xs text-muted-foreground/70">
-            No custom options. The composer uses the provider's default options.
-          </p>
+        {model.emptyMessage ? (
+          <p className="text-xs text-muted-foreground/70">{model.emptyMessage}</p>
         ) : null}
-        {draft.descriptors.map(renderDescriptor)}
+        {model.descriptors.map(renderDescriptor)}
         <div className="flex flex-wrap gap-1">
-          {presets
-            .filter(
-              (preset) => !draft.descriptors.some((descriptor) => descriptor.id === preset.id),
-            )
-            .map((preset) => (
-              <Button
-                key={preset.id}
-                type="button"
-                size="xs"
-                variant="ghost-muted"
-                className={cn("-ml-2 first:ml-0")}
-                onClick={() => addDescriptor(descriptorFromPreset(preset))}
-              >
-                <PlusIcon className="size-3" />
-                {preset.label}
-              </Button>
-            ))}
+          {model.presetButtons.map((preset) => (
+            <Button
+              key={preset.value}
+              type="button"
+              size="xs"
+              variant="ghost-muted"
+              className={cn("-ml-2 first:ml-0")}
+              onClick={() => dispatch({ kind: "add-preset-descriptor", presetId: preset.value })}
+            >
+              <PlusIcon className="size-3" />
+              {preset.label}
+            </Button>
+          ))}
           <Button
             type="button"
             size="xs"
             variant="ghost-muted"
-            onClick={() => addDescriptor(emptyEditorDescriptor())}
+            onClick={() => dispatch({ kind: "add-custom-descriptor" })}
           >
             <PlusIcon className="size-3" />
-            Custom option
+            {model.customOptionLabel}
           </Button>
         </div>
       </div>
 
-      {error ? <p className="text-xs text-destructive">{error}</p> : null}
+      {model.error ? <p className="text-xs text-destructive">{model.error}</p> : null}
 
       <div className="flex gap-2">
         <Button size="sm" variant="outline" onClick={handleSave}>
-          Save
+          {model.saveLabel}
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>
-          Cancel
+          {model.cancelLabel}
         </Button>
       </div>
     </div>

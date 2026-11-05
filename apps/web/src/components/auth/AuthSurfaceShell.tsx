@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 
 import { APP_DISPLAY_NAME, APP_STAGE_LABEL } from "../../branding";
-import { resolveSidebarStageBackdropVariant, StageBackdropArt } from "../SidebarStageBackdrop";
+import { StageBackdropArt } from "../SidebarStageBackdrop";
+import { resolveSidebarStageBackdropVariant } from "../SidebarStageBackdrop.logic";
 import { StandalonePage } from "../ui/standalone-page";
 
 /**

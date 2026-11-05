@@ -2,7 +2,7 @@ import type { ScopedThreadRef } from "@t3tools/contracts";
 import { DiscoveryListRow } from "../ui/discovery-list";
 
 import { PreviewFaviconIcon } from "./PreviewFaviconIcon";
-import type { PreviewableServer } from "./useDiscoveredLocalServers";
+import type { PreviewableServer } from "./discoveredLocalServers.logic";
 
 interface Props {
   threadRef: ScopedThreadRef;

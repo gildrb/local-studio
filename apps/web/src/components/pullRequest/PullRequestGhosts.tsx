@@ -23,7 +23,6 @@ import type { ReactNode } from "react";
 
 import { readLocalApi } from "~/localApi";
 import { cn } from "~/lib/utils";
-import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import { Button, InlineButton } from "../ui/button";
 import { Toggle, ToggleGroup } from "../ui/toggle-group";
@@ -35,8 +34,12 @@ import {
   PullRequestLabelChip,
   PullRequestMetaLine,
   pullRequestChecksStatePresentation,
-  resolvePullRequestState,
 } from "./pullRequestPresentation";
+import {
+  buildPullRequestDetailGhostModel,
+  PULL_REQUEST_DETAIL_GHOST_TABS,
+} from "./PullRequestGhosts.logic";
+import type { PullRequestListGhostModel } from "./PullRequestsPage.logic";
 
 function GhostBar({ className }: { className?: string | undefined }) {
   return <div aria-hidden className={cn("h-3 rounded bg-muted-foreground/15", className)} />;
@@ -45,31 +48,19 @@ function GhostBar({ className }: { className?: string | undefined }) {
 /** Widths cycle rather than randomize, so the ghost renders the same on every pass. */
 const TITLE_WIDTHS = ["w-3/5", "w-2/5", "w-1/2", "w-2/3", "w-2/5", "w-3/5", "w-1/2"];
 const META_WIDTHS = ["w-2/5", "w-1/3", "w-2/5", "w-1/4", "w-1/3", "w-2/5", "w-1/3"];
-const DEFAULT_DETAIL_TABS = [
-  { value: "summary", label: "Summary" },
-  { value: "timeline", label: "Timeline" },
-  { value: "code", label: "Code" },
-] as const;
 
 /** Rows in the list's own grid — glyph, title over meta, time over diffstat. */
-export function PullRequestListGhost({
-  rows = 7,
-  caption,
-}: {
-  rows?: number;
-  /** Said where the group headers speak, for the states with something to say — a search. */
-  caption?: string;
-}) {
+export function PullRequestListGhost({ ghost }: { ghost: PullRequestListGhostModel }) {
   return (
     <div
       role="status"
-      aria-label={caption ?? "Loading pull requests"}
+      aria-label={ghost.label}
       className="motion-safe:animate-skeleton space-y-0.5"
     >
-      {caption ? (
-        <p className="px-3 pb-1 text-xs font-medium text-muted-foreground/70">{caption}</p>
+      {ghost.caption ? (
+        <p className="px-3 pb-1 text-xs font-medium text-muted-foreground/70">{ghost.caption}</p>
       ) : null}
-      {Array.from({ length: rows }, (_, index) => (
+      {Array.from({ length: ghost.rows }, (_, index) => (
         <div
           key={index}
           className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-md px-3 py-2.5"
@@ -99,7 +90,7 @@ export function PullRequestDetailGhost({
   summary,
   actions,
   checkoutCommand,
-  tabs = DEFAULT_DETAIL_TABS,
+  tabs = PULL_REQUEST_DETAIL_GHOST_TABS,
   activeTab,
   number,
   onBack,
@@ -118,28 +109,21 @@ export function PullRequestDetailGhost({
   onClose?: (() => void) | undefined;
   onCheckoutError?: ((error: Error) => void) | undefined;
 }) {
-  const seed = summary
-    ? {
-        ...entry,
-        ...summary,
-        isDraft: summary.isDraft ?? entry?.isDraft,
-      }
-    : entry;
-  const statePresentation = seed
-    ? resolvePullRequestState({
-        state: seed.state,
-        isDraft: seed.isDraft ?? false,
-      })
-    : null;
+  const model = buildPullRequestDetailGhostModel({
+    seed: entry ?? null,
+    summary: summary ?? null,
+    checkoutCommand: checkoutCommand ?? null,
+    tabs,
+    activeTab,
+    number,
+    nowMs: Date.now(),
+  });
+  const seed = model.seed;
   // Passing list rollups can omit workflows awaiting approval; wait for detail to claim success.
   const checksPresentation =
-    seed?.checksState === "failing" || seed?.checksState === "pending"
-      ? pullRequestChecksStatePresentation(seed.checksState)
-      : null;
-  const checkout = checkoutCommand ?? null;
-  const changedFiles = summary?.changedFiles ?? null;
-  const selectedTab =
-    tabs.find((item) => item.value === activeTab)?.value ?? tabs[0]?.value ?? "summary";
+    model.checksState === null ? null : pullRequestChecksStatePresentation(model.checksState);
+  const checkout = model.checkoutCommand;
+  const selectedTab = model.selectedTab;
 
   return (
     <div
@@ -169,16 +153,16 @@ export function PullRequestDetailGhost({
                 <span className="min-w-0 truncate font-medium">{seed.repository}</span>
                 <InlineButton
                   onClick={() => void readLocalApi()?.shell.openExternal(seed.url)}
-                  aria-label={`Open pull request #${seed.number} on host`}
+                  aria-label={seed.openAriaLabel}
                 >
-                  <span className={statePresentation?.toneClassName}>#{seed.number}</span>
+                  <span className={seed.state.toneClassName}>#{seed.number}</span>
                   <ExternalLinkIcon aria-hidden className="size-2.5" />
                 </InlineButton>
               </>
             ) : (
               <>
                 <GhostBar className="w-24" />
-                <span className="shrink-0 text-xs text-muted-foreground">#{number ?? "…"}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">{model.numberLabel}</span>
               </>
             )}
           </div>
@@ -215,8 +199,8 @@ export function PullRequestDetailGhost({
               <div className="mt-2 flex min-h-5 min-w-0 items-center gap-2 text-xs text-muted-foreground">
                 {seed ? (
                   <PullRequestMetaLine className="min-w-0 whitespace-nowrap">
-                    <PullRequestActorLabel actor={seed.author ?? null} tooltip={false} />
-                    <span>updated {formatRelativeTimeLabel(seed.updatedAt)}</span>
+                    <PullRequestActorLabel actor={seed.authorActor} tooltip={false} />
+                    <span>{seed.updatedLabel}</span>
                   </PullRequestMetaLine>
                 ) : (
                   <PullRequestMetaLine className="min-w-0 whitespace-nowrap">
@@ -274,16 +258,16 @@ export function PullRequestDetailGhost({
                 <span className="ml-auto inline-flex shrink-0 items-center justify-end gap-2">
                   <span className="inline-flex min-w-16 items-center justify-end gap-1.5 tabular-nums">
                     <FileDiffIcon aria-hidden className="size-3.5" />
-                    {changedFiles === null ? (
+                    {model.changedFilesLabel === null ? (
                       <GhostBar className="h-3 w-10" />
                     ) : (
-                      `${changedFiles.toLocaleString()} ${changedFiles === 1 ? "file" : "files"}`
+                      model.changedFilesLabel
                     )}
                   </span>
                   {seed ? (
                     <PullRequestDiffStat
-                      additions={seed.additions ?? 0}
-                      deletions={seed.deletions ?? 0}
+                      additions={seed.additions}
+                      deletions={seed.deletions}
                       className="shrink-0 font-mono text-xs"
                     />
                   ) : (
@@ -349,9 +333,9 @@ export function PullRequestDetailGhost({
                 Labels
               </span>
               <span className="flex min-w-0 flex-wrap items-center gap-1 text-foreground">
-                {entry?.labels ? (
-                  entry.labels.length > 0 ? (
-                    entry.labels.map((label) => (
+                {model.labels ? (
+                  model.labels.length > 0 ? (
+                    model.labels.map((label) => (
                       <PullRequestLabelChip
                         key={label.name}
                         label={label}

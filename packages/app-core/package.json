@@ -1,0 +1,27 @@
+{
+  "name": "@t3tools/app-core",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@pierre/diffs": "catalog:",
+    "@t3tools/client-runtime": "workspace:*",
+    "@t3tools/contracts": "workspace:*",
+    "@t3tools/desktop": "workspace:*",
+    "@t3tools/shared": "workspace:*",
+    "@t3tools/web": "workspace:*",
+    "effect": "catalog:",
+    "zustand": "^5.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=24.10"
+  }
+}

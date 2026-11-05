@@ -10,6 +10,7 @@ import {
   DialogFooter,
 } from "../ui/dialog";
 import { ChatGptConnectionButton } from "./ChatGptConnectionButton";
+import { buildChatGptAccountPickerModel } from "./ChatGptAccountPicker.logic";
 
 export function ChatGptAccountPicker({
   open,
@@ -22,14 +23,8 @@ export function ChatGptAccountPicker({
   onClose: () => void;
   onSelect: (methodId: string) => void;
 }) {
-  const profiles = methods.filter((method) => method.id.startsWith("chatgpt-profile:"));
   const [selection, setSelection] = useState<string | null>(null);
-  const selectedMethodId =
-    selection === "chatgpt-change-account"
-      ? selection
-      : (profiles.find((profile) => profile.id === selection)?.id ??
-        profiles[0]?.id ??
-        "chatgpt-change-account");
+  const model = buildChatGptAccountPickerModel({ methods, selection });
   return (
     <Dialog
       open={open}
@@ -39,34 +34,36 @@ export function ChatGptAccountPicker({
     >
       <DialogPopup>
         <DialogHeader>
-          <DialogTitle>Reconnect ChatGPT</DialogTitle>
-          <DialogDescription>
-            On OpenAI, sign in with the account you choose here.
-          </DialogDescription>
+          <DialogTitle>{model.title}</DialogTitle>
+          <DialogDescription>{model.description}</DialogDescription>
         </DialogHeader>
         <div className="px-6 pb-6">
           <RadioGroup
-            aria-label="ChatGPT account to connect"
-            value={selectedMethodId}
+            aria-label={model.groupLabel}
+            value={model.selectedMethodId}
             onValueChange={(value) => setSelection(value)}
           >
-            {profiles.map((profile) => (
+            {model.options.map((option) => (
               <label
-                key={profile.id}
+                key={option.value}
                 className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-sm"
               >
-                <Radio value={profile.id} />
-                <span className="min-w-0 break-all font-medium">{profile.name}</span>
+                <Radio value={option.value} />
+                <span
+                  className={
+                    option.kind === "profile" ? "min-w-0 break-all font-medium" : "font-medium"
+                  }
+                >
+                  {option.label}
+                </span>
               </label>
             ))}
-            <label className="flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-sm">
-              <Radio value="chatgpt-change-account" />
-              <span className="font-medium">Use a different account</span>
-            </label>
           </RadioGroup>
         </div>
         <DialogFooter>
-          <ChatGptConnectionButton onClick={() => onSelect(selectedMethodId)} />
+          <ChatGptConnectionButton onClick={() => onSelect(model.selectedMethodId)}>
+            {model.confirmLabel}
+          </ChatGptConnectionButton>
         </DialogFooter>
       </DialogPopup>
     </Dialog>

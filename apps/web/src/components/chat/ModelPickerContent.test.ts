@@ -9,10 +9,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import {
   adjacentModelPickerProvider,
-  resolveModelPickerSelectedModel,
   shouldIncludeModelPickerOption,
   shouldOfferModelPickerSetup,
-} from "./ModelPickerContent";
+} from "./modelPicker.logic";
+import { resolveModelPickerSelectedModel } from "./modelPickerTrigger.logic";
 
 function entry(status: ServerProvider["status"], driver = "opencode") {
   return deriveProviderInstanceEntries([

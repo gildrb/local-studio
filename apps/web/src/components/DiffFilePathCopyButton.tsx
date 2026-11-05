@@ -2,6 +2,10 @@ import { CheckIcon, CopyIcon } from "lucide-react";
 import { useRef } from "react";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import {
+  buildDiffFilePathCopyModel,
+  resolveDiffFilePathCopy,
+} from "./DiffFilePathCopyButton.logic";
+import {
   ANCHORED_COPY_TOAST_TIMEOUT_MS,
   showAnchoredCopyErrorToast,
   showAnchoredCopySuccessToast,
@@ -16,6 +20,7 @@ export function DiffFilePathCopyButton({ filePath }: { filePath: string }) {
     onError: (error) => showAnchoredCopyErrorToast(ref, error),
     timeout: ANCHORED_COPY_TOAST_TIMEOUT_MS,
   });
+  const model = buildDiffFilePathCopyModel(isCopied);
 
   return (
     <Tooltip>
@@ -25,15 +30,19 @@ export function DiffFilePathCopyButton({ filePath }: { filePath: string }) {
             ref={ref}
             size="icon-micro"
             variant="ghost-muted"
-            aria-label="Copy file path"
-            onClick={() => copyToClipboard(filePath, undefined)}
+            aria-label={model.ariaLabel}
+            onClick={() => copyToClipboard(resolveDiffFilePathCopy(filePath).text, undefined)}
           />
         }
       >
-        {isCopied ? <CheckIcon className="size-3 text-success" /> : <CopyIcon className="size-3" />}
+        {model.icon === "check" ? (
+          <CheckIcon className="size-3 text-success" />
+        ) : (
+          <CopyIcon className="size-3" />
+        )}
       </TooltipTrigger>
       <TooltipPopup>
-        <p>{isCopied ? "Copied" : "Copy path"}</p>
+        <p>{model.tooltip}</p>
       </TooltipPopup>
     </Tooltip>
   );

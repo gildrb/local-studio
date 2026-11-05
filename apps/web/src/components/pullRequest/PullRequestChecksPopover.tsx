@@ -16,10 +16,14 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
   PullRequestCheckStatusIcon,
-  pullRequestCheckStatusLabel,
   pullRequestChecksStatePresentation,
-  summarizePullRequestChecks,
 } from "./pullRequestPresentation";
+import {
+  buildPullRequestChecksPopoverModel,
+  buildPullRequestLazyChecksBodyModel,
+  PULL_REQUEST_CHECK_OPEN_FAILURE_TITLE,
+  type PullRequestChecksBodyModel,
+} from "./PullRequestChecksPopover.logic";
 
 /**
  * The checks behind the rollup, for a row that only carries the rollup. Mounted by the popup, so
@@ -38,59 +42,55 @@ function LazyChecksBody({
   const detailQuery = useEnvironmentQuery(
     pullRequestEnvironment.detail({ environmentId, input: reference }),
   );
-  if (detailQuery.error !== null) {
-    return <p className="text-muted-foreground text-xs">{detailQuery.error}</p>;
-  }
-  if (detailQuery.data === null) {
-    return (
-      <p className="text-muted-foreground text-xs">
-        {detailQuery.isPending ? "Loading checks…" : "No checks reported"}
-      </p>
-    );
-  }
-  return <ChecksBody checks={detailQuery.data.checks} threadRef={threadRef} />;
+  return (
+    <ChecksBody
+      body={buildPullRequestLazyChecksBodyModel({
+        checks: detailQuery.data?.checks ?? null,
+        isPending: detailQuery.isPending,
+        error: detailQuery.error,
+      })}
+      threadRef={threadRef}
+    />
+  );
 }
 
 function ChecksBody({
-  checks,
+  body,
   threadRef,
 }: {
-  checks: ReadonlyArray<PullRequestCheck>;
+  body: PullRequestChecksBodyModel;
   threadRef: ScopedThreadRef | null;
 }) {
   const openLink = useOpenLink(threadRef);
-  if (checks.length === 0) {
-    return <p className="text-muted-foreground text-xs">No checks reported</p>;
+  if (body.kind === "none") return null;
+  if (body.kind === "message") {
+    return <p className="text-muted-foreground text-xs">{body.message}</p>;
   }
   return (
     <ul className="flex flex-col gap-1">
       {/* Keyed by position as well as by name: the host is the one that decides how many runs
           share a name, and a repeated key is a rendering fault rather than a wrong list. */}
-      {checks.map((check, index) => (
-        <li key={`${index}:${check.name}`} className="flex items-center gap-2 text-xs">
-          <PullRequestCheckStatusIcon status={check.status} />
+      {body.rows.map((row) => (
+        <li key={row.key} className="flex items-center gap-2 text-xs">
+          <PullRequestCheckStatusIcon status={row.statusKey} />
           <Tooltip>
-            <TooltipTrigger
-              render={<span className="min-w-0 flex-1 truncate">{check.name}</span>}
-            />
-            <TooltipPopup side="top">{check.description ?? check.name}</TooltipPopup>
+            <TooltipTrigger render={<span className="min-w-0 flex-1 truncate">{row.name}</span>} />
+            <TooltipPopup side="top">{row.tooltip}</TooltipPopup>
           </Tooltip>
-          <span className="shrink-0 text-muted-foreground">
-            {pullRequestCheckStatusLabel(check)}
-          </span>
-          {check.url === null ? null : (
+          <span className="shrink-0 text-muted-foreground">{row.statusLabel}</span>
+          {row.detailsUrl === null ? null : (
             <button
               type="button"
               className="shrink-0 text-primary hover:underline"
               onClick={() => {
-                if (!check.url) return;
-                void openLink(check.url).catch((error: unknown) => {
+                if (!row.detailsUrl) return;
+                void openLink(row.detailsUrl).catch((error: unknown) => {
                   console.error(error);
-                  toastManager.add({ type: "error", title: "Unable to open check details" });
+                  toastManager.add({ type: "error", title: PULL_REQUEST_CHECK_OPEN_FAILURE_TITLE });
                 });
               }}
             >
-              Details
+              {row.detailsLabel}
             </button>
           )}
         </li>
@@ -125,9 +125,13 @@ export function PullRequestChecksPopover({
   threadRef?: ScopedThreadRef | null;
   className?: string;
 }) {
-  const presentation = pullRequestChecksStatePresentation(checksState);
-  // Counts beat the rollup's own wording where they are known, the way GitHub's own header reads.
-  const summary = checks === undefined || stale ? null : summarizePullRequestChecks(checks);
+  const Icon = pullRequestChecksStatePresentation(checksState).Icon;
+  const model = buildPullRequestChecksPopoverModel({
+    checksState,
+    checks: checks ?? null,
+    stale,
+    canReadLazily: environmentId !== undefined && reference !== undefined,
+  });
   return (
     <Popover>
       {/* A listing row is itself a button, so the trigger renders as a span: a nested button is
@@ -139,30 +143,30 @@ export function PullRequestChecksPopover({
           <span
             role="button"
             tabIndex={0}
-            aria-label={`Checks: ${presentation.label}`}
+            aria-label={model.trigger.ariaLabel}
             className={cn("inline-flex shrink-0 cursor-pointer items-center", className)}
           />
         }
         onClick={(event) => event.stopPropagation()}
       >
-        <presentation.Icon aria-hidden className={cn("size-3.5", presentation.toneClassName)} />
+        <Icon aria-hidden className={cn("size-3.5", model.trigger.toneClassName)} />
       </PopoverTrigger>
       <PopoverPopup align="start" width="md" side="bottom">
-        <p className="mb-2 font-medium text-sm">{presentation.label}</p>
-        {summary === null ? null : <p className="mb-2 text-muted-foreground text-xs">{summary}</p>}
-        {stale ? (
-          <p className="text-muted-foreground text-xs">
-            Check details are out of date. Refresh the pull request to update them.
-          </p>
-        ) : checks !== undefined ? (
-          <ChecksBody checks={checks} threadRef={threadRef} />
-        ) : environmentId !== undefined && reference !== undefined ? (
+        <p className="mb-2 font-medium text-sm">{model.title}</p>
+        {model.summary === null ? null : (
+          <p className="mb-2 text-muted-foreground text-xs">{model.summary}</p>
+        )}
+        {model.body.kind === "stale" ? (
+          <p className="text-muted-foreground text-xs">{model.body.message}</p>
+        ) : model.body.kind === "lazy" && environmentId !== undefined && reference !== undefined ? (
           <LazyChecksBody
             environmentId={environmentId}
             reference={reference}
             threadRef={threadRef}
           />
-        ) : null}
+        ) : model.body.kind === "lazy" ? null : (
+          <ChecksBody body={model.body} threadRef={threadRef} />
+        )}
       </PopoverPopup>
     </Popover>
   );

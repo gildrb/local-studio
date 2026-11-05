@@ -20,6 +20,7 @@ import {
   allEnvironmentShellsBootstrappedAtom,
 } from "./shell";
 import { environmentThreadDetails, environmentThreadShells } from "./threads";
+import { waitForProjectIn } from "./waitForProject.logic";
 
 const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
 
@@ -154,29 +155,11 @@ export function readProjects(): ReadonlyArray<EnvironmentProject> {
   return appAtomRegistry.get(environmentProjects.projectsAtom);
 }
 
-/** Resolves when the project event reaches the live client store. */
 export function waitForProject(
   ref: ScopedProjectRef,
   timeoutMs = 10_000,
 ): Promise<EnvironmentProject> {
-  const current = readProject(ref);
-  if (current !== null) return Promise.resolve(current);
-
-  return new Promise((resolve, reject) => {
-    let unsubscribe: (() => void) | null = null;
-    const timeout = setTimeout(() => {
-      unsubscribe?.();
-      reject(new Error("The project did not appear in the desktop app."));
-    }, timeoutMs);
-    const finish = (project: EnvironmentProject | null) => {
-      if (project === null) return;
-      clearTimeout(timeout);
-      unsubscribe?.();
-      resolve(project);
-    };
-    unsubscribe = appAtomRegistry.subscribe(environmentProjects.projectAtom(ref), finish);
-    finish(readProject(ref));
-  });
+  return waitForProjectIn(appAtomRegistry, environmentProjects.projectAtom(ref), timeoutMs);
 }
 
 export function readThreadShell(ref: ScopedThreadRef): EnvironmentThreadShell | null {

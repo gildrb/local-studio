@@ -879,7 +879,7 @@ export function getSettingsSearchTargetScope(targetId: string) {
     : null;
 }
 
-interface AutoSettlementSearchEnvironment {
+export interface AutoSettlementSearchEnvironment {
   readonly environmentId: EnvironmentId;
   readonly connection: { readonly phase: EnvironmentConnectionPhase };
   readonly serverConfig: {
@@ -984,18 +984,28 @@ export function filterAvailableSettingsSearchItems(
   );
 }
 
+export type SettingsSearchPlatform = {
+  readonly isElectron: boolean;
+  readonly platform: string;
+};
+
+function currentSettingsSearchPlatform(): SettingsSearchPlatform {
+  return { isElectron, platform: typeof navigator === "undefined" ? "" : navigator.platform };
+}
+
 export function searchSettings(
   query: string,
   items: ReadonlyArray<SettingsSearchItem> = SETTINGS_SEARCH_ITEMS,
+  searchPlatform: SettingsSearchPlatform = currentSettingsSearchPlatform(),
 ): ReadonlyArray<SettingsSearchItem> {
   const normalizedQuery = normalizeSearchText(query);
   if (normalizedQuery.length === 0) return [];
   const queryTokens = normalizedQuery.split(" ");
-  const platform = typeof navigator === "undefined" ? "" : navigator.platform;
+  const { platform } = searchPlatform;
 
   return items
     .flatMap((item, index) => {
-      if (!isElectron && item.desktopOnly === true) return [];
+      if (!searchPlatform.isElectron && item.desktopOnly === true) return [];
       if (item.macOnly && !isMacPlatform(platform)) return [];
       if (item.windowsOnly && !isWindowsPlatform(platform)) return [];
 

@@ -24,7 +24,7 @@ import type { ResolvedSettingsScope } from "./settingsScope";
 
 export type ScopedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
 
-interface ScopedSettingsEnvironment {
+export interface ScopedSettingsEnvironment {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly connection: { readonly phase: EnvironmentConnectionPhase };
@@ -35,6 +35,12 @@ interface ScopedSettingsEnvironment {
     };
   } | null;
 }
+
+export type ScopedSettingsEnvironmentSelection<T extends ScopedSettingsEnvironment> = {
+  readonly environments: readonly T[];
+  readonly connectedEnvironments: readonly T[];
+  readonly environment: T | null;
+};
 
 const SERVER_KEYS = new Set<string>(Object.keys(ServerSettings.fields));
 const CLIENT_KEYS = new Set<string>(Object.keys(ClientSettingsSchema.fields));
@@ -53,7 +59,7 @@ export function selectScopedSettingsEnvironments<T extends ScopedSettingsEnviron
   scope: ResolvedSettingsScope,
   available: readonly T[],
   primaryEnvironmentId: EnvironmentId | null,
-) {
+): ScopedSettingsEnvironmentSelection<T> {
   const selectedIds = new Set(scope.environmentIds);
   const environments = available.filter((environment) =>
     selectedIds.has(environment.environmentId),
@@ -161,11 +167,29 @@ export function scopedSettingsSource(
         : "environment";
 }
 
-interface ScopedServerWrite {
+export interface ScopedServerWrite {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly patch: ServerSettingsPatch;
 }
+
+export type ScopedSettingsPlan = {
+  readonly clientPatch: ClientSettingsPatch;
+  readonly hasClientWrite: boolean;
+  readonly serverWrites: readonly ScopedServerWrite[];
+  readonly unavailableReason: string | null;
+};
+
+export type ScopedSettingsPersistResult = {
+  readonly failedEnvironments: readonly ScopedServerWrite[];
+  readonly savedEnvironmentCount: number;
+};
+
+export type ScopedSettingsToast = {
+  readonly type: "warning" | "error";
+  readonly title: string;
+  readonly description: string;
+};
 
 function projectOverrideWrites(
   scope: Extract<ResolvedSettingsScope, { kind: "project" | "checkout" }>,
@@ -213,7 +237,7 @@ export function planScopedSettingsPatch(
   scope: ResolvedSettingsScope,
   environments: readonly ScopedSettingsEnvironment[],
   patch: ScopedSettingsPatch,
-) {
+): ScopedSettingsPlan {
   const clientPatch = Object.fromEntries(
     Object.entries(patch).filter(([key]) => CLIENT_KEYS.has(key)),
   ) as ClientSettingsPatch;
@@ -309,7 +333,7 @@ export function planScopedSettingsClear(
   scope: ResolvedSettingsScope,
   environments: readonly ScopedSettingsEnvironment[],
   keys: readonly ProjectScopedServerSettingKey[],
-) {
+): ScopedSettingsPlan {
   const serverWrites =
     scope.kind === "project" || scope.kind === "checkout"
       ? projectOverrideWrites(scope, environments, (_current, settings, projectId) =>
@@ -317,7 +341,7 @@ export function planScopedSettingsClear(
         )
       : [];
   return {
-    clientPatch: {} as ClientSettingsPatch,
+    clientPatch: {},
     hasClientWrite: false,
     serverWrites,
     unavailableReason:
@@ -359,7 +383,7 @@ export function planProjectOverridesClear(
   environments: readonly ScopedSettingsEnvironment[],
   entries: readonly ProjectOverrideEntry[],
   keys: readonly ProjectScopedServerSettingKey[],
-) {
+): ScopedSettingsPlan {
   const byId = new Map(environments.map((environment) => [environment.environmentId, environment]));
   const writes = new Map<EnvironmentId, ScopedServerWrite>();
   for (const { environmentId, projectId } of entries) {
@@ -380,7 +404,7 @@ export function planProjectOverridesClear(
   }
   const serverWrites = [...writes.values()];
   return {
-    clientPatch: {} as ClientSettingsPatch,
+    clientPatch: {},
     hasClientWrite: false,
     serverWrites,
     unavailableReason:
@@ -390,13 +414,13 @@ export function planProjectOverridesClear(
 
 /** Wait for every target so a failed environment does not hide successful or later writes. */
 export async function persistScopedSettingsPatch(
-  plan: ReturnType<typeof planScopedSettingsPatch>,
+  plan: ScopedSettingsPlan,
   persistServer: (input: {
     environmentId: EnvironmentId;
     input: { patch: ServerSettingsPatch };
   }) => Promise<{ readonly _tag: "Success" | "Failure" }>,
   persistClient: (patch: ClientSettingsPatch) => void,
-) {
+): Promise<ScopedSettingsPersistResult> {
   if (plan.hasClientWrite) persistClient(plan.clientPatch);
   const results = await Promise.allSettled(
     plan.serverWrites.map(({ environmentId, patch }) =>
@@ -410,5 +434,25 @@ export async function persistScopedSettingsPatch(
   return {
     failedEnvironments,
     savedEnvironmentCount: plan.serverWrites.length - failedEnvironments.length,
+  };
+}
+
+export function resolveScopedSettingsPlanToast(
+  plan: ScopedSettingsPlan,
+): ScopedSettingsToast | null {
+  return plan.unavailableReason
+    ? { type: "warning", title: "Setting not saved", description: plan.unavailableReason }
+    : null;
+}
+
+export function resolveScopedSettingsPersistToast(
+  result: ScopedSettingsPersistResult,
+): ScopedSettingsToast | null {
+  const { failedEnvironments, savedEnvironmentCount } = result;
+  if (failedEnvironments.length === 0) return null;
+  return {
+    type: "error",
+    title: savedEnvironmentCount > 0 ? "Setting saved on some environments" : "Setting not saved",
+    description: `Could not update ${failedEnvironments.map((environment) => environment.label).join(", ")}.${savedEnvironmentCount > 0 ? " The other selected environments saved the change." : ""}`,
   };
 }

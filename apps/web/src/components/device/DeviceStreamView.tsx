@@ -8,6 +8,16 @@ import { createCanvasFrameSink } from "@t3tools/client-runtime/device/frame";
 import { resolveDeviceShape } from "@t3tools/client-runtime/device/shape-profile";
 import { deviceKeyboard, deviceModel } from "./deviceModels";
 import { fitDeviceFrame } from "./deviceFrameLayout";
+import {
+  DEVICE_CONTROLS_RAIL_WIDTH,
+  deviceDisplayAspect,
+  deviceDisplayRotation,
+  deviceInputDisconnectedNotice,
+  deviceMediaBox,
+  deviceStreamLoadingMessage,
+  isRetainingAndroidFrame,
+  normalizedDevicePoint,
+} from "./DeviceStreamView.logic";
 import { DeviceDuoViewport } from "./DeviceDuoViewport";
 import { DeviceDuoControls } from "./DeviceDuoControls";
 import { DeviceAndroidFoldControls } from "./DeviceAndroidFoldControls";
@@ -22,9 +32,9 @@ import {
   type DeviceStreamClient,
   type DeviceStreamStatus,
 } from "@t3tools/client-runtime/device/stream";
+import { shouldForwardDeviceKeyDown } from "@t3tools/client-runtime/device/input";
 
 const AX_POLL_INTERVAL_MS = 2_000;
-const CONTROLS_RAIL_WIDTH = 56;
 
 export interface DeviceViewControls {
   readonly phone: boolean;
@@ -174,27 +184,17 @@ export function DeviceStreamView(props: {
     props.visible,
   ]);
 
-  // Displayed aspect ratio (width / height) of the device as the user sees it.
-  const aspect = useMemo(() => {
-    if (!screen) return props.platform === "ios" ? 9 / 19.5 : 9 / 20;
-    const landscape =
-      screen.orientation === "landscape_left" || screen.orientation === "landscape_right";
-    const w = landscape
-      ? Math.max(screen.width, screen.height)
-      : Math.min(screen.width, screen.height);
-    const h = landscape
-      ? Math.min(screen.width, screen.height)
-      : Math.max(screen.width, screen.height);
-    return w / h;
-  }, [props.platform, screen]);
+  const aspect = useMemo(
+    () => deviceDisplayAspect(props.platform, screen),
+    [props.platform, screen],
+  );
 
-  // Android restarts its encoder when a fold changes the framebuffer size.
-  // Keep the last decoded frame and viewer mounted while the next keyframe arrives.
-  const retainingAndroidFrame =
-    props.platform === "android" &&
-    status === "connecting" &&
-    inputState.connected &&
-    screen !== null;
+  const retainingAndroidFrame = isRetainingAndroidFrame({
+    platform: props.platform,
+    status,
+    inputConnected: inputState.connected,
+    screen,
+  });
   const showPhone =
     props.allowPhoneView &&
     (status === "streaming" || retainingAndroidFrame) &&
@@ -209,7 +209,7 @@ export function DeviceStreamView(props: {
     const timeout = window.setTimeout(() => setShowRestartNotice(true), 2_000);
     return () => window.clearTimeout(timeout);
   }, [retainingAndroidFrame, showPhone]);
-  const controlsInset = props.renderControls && !showPhone ? CONTROLS_RAIL_WIDTH : 0;
+  const controlsInset = props.renderControls && !showPhone ? DEVICE_CONTROLS_RAIL_WIDTH : 0;
 
   // The frame is the largest box at `aspect` that fits the container, so a
   // narrow panel shows a shorter phone rather than a squeezed one. CSS
@@ -237,39 +237,17 @@ export function DeviceStreamView(props: {
     return fitDeviceFrame(aspect, host.width, host.height, controlsInset);
   }, [aspect, controlsInset, host]);
 
-  // serve-sim streams the raw framebuffer; rotate the display for a device
-  // that reports landscape while its frames stay portrait.
-  const rotation = useMemo(() => {
-    if (props.platform !== "ios" || !screen || screen.width > screen.height) return 0;
-    switch (screen.orientation) {
-      case "landscape_left":
-        return 90;
-      case "landscape_right":
-        return -90;
-      case "portrait_upside_down":
-        return 180;
-      default:
-        return 0;
-    }
-  }, [props.platform, screen]);
-
-  // A sideways rotation draws the raw portrait frame into a landscape box:
-  // the media element takes the transposed size and is rotated about the
-  // box's center.
-  const sideways = rotation === 90 || rotation === -90;
-  const mediaStyle: React.CSSProperties = sideways
-    ? {
-        width: frame.height,
-        height: frame.width,
-        left: (frame.width - frame.height) / 2,
-        top: (frame.height - frame.width) / 2,
-        transform: `rotate(${rotation}deg)`,
-      }
-    : {
-        width: frame.width,
-        height: frame.height,
-        ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
-      };
+  const rotation = useMemo(
+    () => deviceDisplayRotation(props.platform, screen),
+    [props.platform, screen],
+  );
+  const mediaBox = deviceMediaBox(frame, rotation);
+  const mediaStyle: React.CSSProperties = {
+    width: mediaBox.width,
+    height: mediaBox.height,
+    ...(mediaBox.left || mediaBox.top ? { left: mediaBox.left, top: mediaBox.top } : {}),
+    ...(rotation ? { transform: `rotate(${rotation}deg)` } : {}),
+  };
 
   // The accessibility tree is polled while the overlay is on; each poll is
   // one JSON fetch, so there is nothing to repaint between polls.
@@ -300,12 +278,11 @@ export function DeviceStreamView(props: {
   }, [access, props.axOverlay, props.deviceId, props.platform, props.visible]);
 
   const pointerActive = useRef(false);
-  const normalizedPoint = (event: React.PointerEvent<HTMLElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = (event.clientX - rect.left) / rect.width;
-    const y = (event.clientY - rect.top) / rect.height;
-    return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
-  };
+  const normalizedPoint = (event: React.PointerEvent<HTMLElement>) =>
+    normalizedDevicePoint(
+      { x: event.clientX, y: event.clientY },
+      event.currentTarget.getBoundingClientRect(),
+    );
 
   const phoneUnavailableReason =
     isDuo && !screen?.supportsHingeAngle
@@ -398,7 +375,7 @@ export function DeviceStreamView(props: {
         aria-label={`${props.platform === "ios" ? "iOS Simulator" : "Android Emulator"} screen`}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
-          if (event.metaKey && !["r", "R"].includes(event.key)) return;
+          if (!shouldForwardDeviceKeyDown(event)) return;
           event.preventDefault();
           clientRef.current?.sendKey(event.nativeEvent, "down");
         }}
@@ -528,7 +505,7 @@ export function DeviceStreamView(props: {
         {status === "streaming" && !inputState.connected ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-center p-2">
             <span className="rounded-md bg-background/85 px-2 py-1 text-xs text-muted-foreground">
-              Input disconnected{inputState.detail ? ` (${inputState.detail})` : ""}, reconnecting…
+              {deviceInputDisconnectedNotice(inputState.detail)}
             </span>
           </div>
         ) : null}
@@ -545,7 +522,7 @@ export function DeviceStreamView(props: {
               name={props.deviceName ?? "Device"}
               description={props.deviceDescription ?? ""}
               stage="stream"
-              message={status === "error" ? (detail ?? "Stream failed.") : "Connecting video…"}
+              message={deviceStreamLoadingMessage(status, detail)}
               error={status === "error"}
             >
               {status === "error" ? (

@@ -41,15 +41,21 @@ import {
 } from "../ui/sidebar";
 import { SidebarUtilityMenu } from "../sidebar/SidebarChrome";
 import { scrollToSettingsTarget } from "./settingsLayout";
-import {
-  searchSettings,
-  isSettingsOverviewVisible,
-  SETTINGS_SECTION_LABELS,
-  type SettingsPath,
-  type SettingsSearchItem,
-} from "./settingsSearch";
+import type { SettingsPath } from "./settingsSearch";
+import { isElectron } from "~/env";
 import { useAvailableSettingsSearchItems } from "./useAvailableSettingsSearchItems";
 import { validateSettingsScopeSearch } from "./settingsScope";
+import {
+  buildSettingsNavModel,
+  buildSettingsSearchResults,
+  clampSettingsSearchResultIndex,
+  isSettingsSearchShortcut,
+  resolveSettingsSearchKeyIntent,
+  resolveSettingsSearchResultSelection,
+  settingsSearchResultElementId,
+  type SettingsSearchResultRow,
+  type SettingsSectionIconKey,
+} from "./SettingsSidebarNav.logic";
 
 const SnapShotIcon = createLucideIcon("snap-shot", [
   [
@@ -75,34 +81,24 @@ const T3ConnectSidebarAvatar = lazy(() =>
 );
 
 const SETTINGS_SECTION_ICONS: Readonly<
-  Record<SettingsPath, ComponentType<{ className?: string }>>
+  Record<SettingsSectionIconKey, ComponentType<{ className?: string }>>
 > = {
-  "/settings/general": Settings2Icon,
-  "/settings/appearance": PaletteIcon,
-  "/settings/projects": PanelsTopLeftIcon,
-  "/settings/keybindings": KeyboardIcon,
-  "/settings/snap-shot": SnapShotIcon,
-  "/settings/providers": BotIcon,
-  "/settings/integrations": BlocksIcon,
-  "/settings/source-control": GitBranchIcon,
-  "/settings/storage": HardDriveIcon,
-  "/settings/local": ServerIcon,
-  "/settings/connections": Link2Icon,
-  "/settings/archived": ArchiveIcon,
+  "settings-2": Settings2Icon,
+  palette: PaletteIcon,
+  "panels-top-left": PanelsTopLeftIcon,
+  keyboard: KeyboardIcon,
+  "snap-shot": SnapShotIcon,
+  bot: BotIcon,
+  blocks: BlocksIcon,
+  "git-branch": GitBranchIcon,
+  "hard-drive": HardDriveIcon,
+  server: ServerIcon,
+  "link-2": Link2Icon,
+  archive: ArchiveIcon,
 };
 
-const SETTINGS_NAV_ITEMS: ReadonlyArray<{
-  label: string;
-  to: SettingsPath;
-  icon: ComponentType<{ className?: string }>;
-}> = (Object.keys(SETTINGS_SECTION_LABELS) as SettingsPath[]).map((to) => ({
-  to,
-  label: SETTINGS_SECTION_LABELS[to],
-  icon: SETTINGS_SECTION_ICONS[to],
-}));
-
-function SettingsSectionIcon({ to }: { to: SettingsPath }) {
-  const Icon = SETTINGS_SECTION_ICONS[to];
+function SettingsSectionIcon({ icon }: { icon: SettingsSectionIconKey }) {
+  const Icon = SETTINGS_SECTION_ICONS[icon];
   return <Icon className="mt-0.5 size-3.5 shrink-0 text-sidebar-muted-foreground/60" />;
 }
 
@@ -111,33 +107,41 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const currentHash = useLocation({ select: (location) => location.hash });
   const currentSearch = useLocation({ select: (location) => location.search });
   const scopeSearch = useMemo(() => validateSettingsScopeSearch(currentSearch), [currentSearch]);
-  const navItems = SETTINGS_NAV_ITEMS.filter(
-    (item) => item.to !== "/settings/projects" || isSettingsOverviewVisible(scopeSearch),
-  );
   const { isMobile, setOpenMobile, open, setOpen } = useSidebar();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeResultIndex, setActiveResultIndex] = useState(0);
   const searchableItems = useAvailableSettingsSearchItems(scopeSearch);
-  const results = useMemo(() => searchSettings(query, searchableItems), [query, searchableItems]);
-  const isSearching = query.trim().length > 0;
-  const hasResults = results.length > 0;
+  const results = useMemo(
+    () =>
+      buildSettingsSearchResults({
+        query,
+        items: searchableItems,
+        platform: { isElectron, platform: navigator.platform },
+      }),
+    [query, searchableItems],
+  );
+  const model = useMemo(
+    () => buildSettingsNavModel({ pathname, scopeSearch, query, results, activeResultIndex }),
+    [activeResultIndex, pathname, query, results, scopeSearch],
+  );
+  const { search } = model;
 
   useEffect(() => {
-    setActiveResultIndex((index) => Math.min(index, Math.max(results.length - 1, 0)));
+    setActiveResultIndex((index) => clampSettingsSearchResultIndex(index, results.length));
   }, [results.length]);
 
   useEffect(() => {
     const result = results[activeResultIndex];
     if (!result) return;
     document
-      .getElementById(`settings-search-result-${result.id}`)
+      .getElementById(settingsSearchResultElementId(result.id))
       ?.scrollIntoView({ block: "nearest" });
   }, [activeResultIndex, results]);
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (!isSettingsSearchShortcut(event)) return;
 
       const target = event.target;
       if (
@@ -186,19 +190,24 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     setActiveResultIndex(0);
   }, []);
   const handleSearchResultClick = useCallback(
-    (item: SettingsSearchItem) => {
+    (result: Pick<SettingsSearchResultRow, "to" | "targetId">) => {
       clearSearch();
       if (isMobile) {
         setOpenMobile(false);
       }
-      const targetId = item.targetId ?? item.id;
-      if (pathname === item.to && currentHash.replace(/^#/, "") === targetId) {
-        scrollToSettingsTarget(targetId);
+      const intent = resolveSettingsSearchResultSelection({
+        to: result.to,
+        targetId: result.targetId,
+        pathname,
+        currentHash,
+      });
+      if (intent.kind === "scroll") {
+        scrollToSettingsTarget(intent.targetId);
         return;
       }
       void navigate({
-        to: item.to,
-        hash: targetId,
+        to: intent.to,
+        hash: intent.hash,
         replace: true,
         hashScrollIntoView: false,
         state: { settingsTargetHighlight: true },
@@ -208,30 +217,32 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   );
   const handleSearchKeyDown = useCallback(
     (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Escape" && isSearching) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearSearch();
-        return;
-      }
-      if (results.length === 0) return;
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveResultIndex((index) => (index + 1) % results.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveResultIndex((index) => (index - 1 + results.length) % results.length);
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const result = results[activeResultIndex];
-        if (result) handleSearchResultClick(result);
+      const intent = resolveSettingsSearchKeyIntent({
+        key: event.key,
+        isSearching: search.isSearching,
+        resultCount: search.results.length,
+        activeResultIndex,
+      });
+      switch (intent.kind) {
+        case "none":
+          return;
+        case "clear":
+          event.preventDefault();
+          event.stopPropagation();
+          clearSearch();
+          return;
+        case "move":
+          event.preventDefault();
+          setActiveResultIndex(intent.index);
+          return;
+        case "select": {
+          event.preventDefault();
+          const result = search.results[intent.index];
+          if (result) handleSearchResultClick(result);
+        }
       }
     },
-    [activeResultIndex, clearSearch, handleSearchResultClick, isSearching, results],
+    [activeResultIndex, clearSearch, handleSearchResultClick, search],
   );
   return (
     <>
@@ -250,26 +261,22 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   setActiveResultIndex(0);
                 }}
                 onKeyDown={handleSearchKeyDown}
-                placeholder="Search"
-                aria-label="Search settings"
+                placeholder={search.placeholder}
+                aria-label={search.ariaLabel}
                 role="combobox"
                 aria-autocomplete="list"
-                aria-expanded={isSearching && hasResults}
-                aria-controls={isSearching && hasResults ? "settings-search-results" : undefined}
-                aria-activedescendant={
-                  isSearching && results[activeResultIndex]
-                    ? `settings-search-result-${results[activeResultIndex].id}`
-                    : undefined
-                }
+                aria-expanded={search.expanded}
+                aria-controls={search.expanded ? "settings-search-results" : undefined}
+                aria-activedescendant={search.activeDescendantId ?? undefined}
                 className="min-w-0 flex-1"
               />
-              {isSearching ? (
+              {search.isSearching ? (
                 <Button
                   type="button"
                   size="icon-micro"
                   variant="ghost-muted"
                   className="shrink-0"
-                  aria-label="Clear settings search"
+                  aria-label={search.clearLabel}
                   onClick={() => {
                     clearSearch();
                     searchInputRef.current?.focus();
@@ -278,43 +285,43 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                   <XIcon className="size-3" />
                 </Button>
               ) : (
-                <Kbd>/</Kbd>
+                <Kbd>{search.shortcutHint}</Kbd>
               )}
             </div>
-            {isSearching && results.length === 0 ? (
+            {search.emptyMessage !== null ? (
               <p
                 role="status"
                 className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
               >
-                No settings found
+                {search.emptyMessage}
               </p>
             ) : null}
-            {isSearching ? (
+            {search.isSearching ? (
               <SidebarMenu
-                id={hasResults ? "settings-search-results" : undefined}
-                role={hasResults ? "listbox" : undefined}
-                aria-label={hasResults ? "Settings search results" : undefined}
+                id={search.hasResults ? "settings-search-results" : undefined}
+                role={search.hasResults ? "listbox" : undefined}
+                aria-label={search.hasResults ? search.resultsLabel : undefined}
               >
-                {results.map((item, index) => (
+                {search.results.map((item, index) => (
                   <SidebarMenuItem key={item.id} role="presentation">
                     <SidebarMenuButton
-                      id={`settings-search-result-${item.id}`}
+                      id={item.elementId}
                       role="option"
-                      aria-selected={index === activeResultIndex}
+                      aria-selected={item.active}
                       tabIndex={-1}
                       size="sm"
-                      isActive={index === activeResultIndex}
+                      isActive={item.active}
                       className="h-auto min-h-10 items-start"
                       onMouseMove={() => setActiveResultIndex(index)}
                       onClick={() => handleSearchResultClick(item)}
                     >
-                      <SettingsSectionIcon to={item.to} />
+                      <SettingsSectionIcon icon={item.icon} />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium text-sidebar-foreground">
                           {item.title}
                         </span>
                         <span className="block truncate text-2xs text-sidebar-muted-foreground/75">
-                          {SETTINGS_SECTION_LABELS[item.to]}
+                          {item.sectionLabel}
                         </span>
                       </span>
                     </SidebarMenuButton>
@@ -323,23 +330,16 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
               </SidebarMenu>
             ) : (
               <SidebarMenu>
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const isGeneralDetailPage =
-                    item.to === "/settings/general" &&
-                    pathname === "/settings/open-source-licenses";
-                  const isActive =
-                    isGeneralDetailPage ||
-                    pathname === item.to ||
-                    pathname.startsWith(`${item.to}/`);
+                {model.sections.map((section) => {
+                  const Icon = SETTINGS_SECTION_ICONS[section.icon];
                   return (
-                    <SidebarMenuItem key={item.to}>
+                    <SidebarMenuItem key={section.id}>
                       <SidebarMenuButton
-                        isActive={isActive}
-                        onClick={() => handleSectionClick(item.to)}
+                        isActive={section.active}
+                        onClick={() => handleSectionClick(section.id)}
                       >
                         <Icon />
-                        <span className="truncate">{item.label}</span>
+                        <span className="truncate">{section.label}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );

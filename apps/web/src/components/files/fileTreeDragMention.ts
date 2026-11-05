@@ -38,6 +38,28 @@ const itemPathOf = (node: unknown): string | null => {
   return typeof element.getAttribute === "function" ? element.getAttribute("data-item-path") : null;
 };
 
+export type FileTreeDragMentionPayload = {
+  readonly draggedPaths: ReadonlyArray<string>;
+  readonly format: string;
+  readonly data: string;
+};
+
+export function resolveFileTreeDragMentionPayload(input: {
+  readonly selection: ReadonlyArray<string>;
+  readonly itemPath: string;
+}): FileTreeDragMentionPayload | null {
+  // Same rule the tree applies to the drag itself: dragging a row that is
+  // part of the current selection drags the whole selection.
+  const dragged = input.selection.includes(input.itemPath) ? input.selection : [input.itemPath];
+  const mentions = dragged
+    .map((path) => composerMentionFromTreePath(path))
+    .filter((mention): mention is string => mention !== null);
+  if (mentions.length === 0) {
+    return null;
+  }
+  return { draggedPaths: dragged, format: COMPOSER_MENTION_DRAG_TYPE, data: mentions.join(" ") };
+}
+
 /**
  * Tags file-tree drags with the composer mention payload and keeps the drag
  * from acting like a click: while the drag runs, selection changes are
@@ -70,17 +92,12 @@ export function createFileTreeDragMentionController(
       if (itemPath === null) {
         return;
       }
-      // Same rule the tree applies to the drag itself: dragging a row that is
-      // part of the current selection drags the whole selection.
-      const dragged = selection.includes(itemPath) ? selection : [itemPath];
-      const mentions = dragged
-        .map((path) => composerMentionFromTreePath(path))
-        .filter((mention): mention is string => mention !== null);
-      if (mentions.length === 0) {
+      const payload = resolveFileTreeDragMentionPayload({ selection, itemPath });
+      if (payload === null) {
         return;
       }
-      draggedPaths = dragged;
-      event.dataTransfer.setData(COMPOSER_MENTION_DRAG_TYPE, mentions.join(" "));
+      draggedPaths = payload.draggedPaths;
+      event.dataTransfer.setData(payload.format, payload.data);
     },
     handleDragEnd() {
       if (draggedPaths.length === 0) {

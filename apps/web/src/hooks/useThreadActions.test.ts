@@ -5,7 +5,8 @@ import {
   navigateAfterThreadDeletion,
   requestThreadUnpinConfirmation,
   ThreadArchiveBlockedError,
-} from "./useThreadActions";
+} from "./threadActions.logic";
+import { addThreadActionToast } from "./threadActionToast";
 import { toastManager } from "../components/ui/toast";
 
 describe("navigateAfterThreadDeletion", () => {
@@ -15,7 +16,10 @@ describe("navigateAfterThreadDeletion", () => {
     const addToast = vi.spyOn(toastManager, "add").mockReturnValue("navigation-error");
 
     await expect(
-      navigateAfterThreadDeletion(() => Promise.reject(new Error("route unavailable"))),
+      navigateAfterThreadDeletion(
+        () => Promise.reject(new Error("route unavailable")),
+        addThreadActionToast,
+      ),
     ).resolves.toBeUndefined();
 
     expect(addToast).toHaveBeenCalledOnce();
@@ -30,7 +34,7 @@ describe("navigateAfterThreadDeletion", () => {
   it("does not report an error after successful navigation", async () => {
     const addToast = vi.spyOn(toastManager, "add");
 
-    await navigateAfterThreadDeletion(() => Promise.resolve());
+    await navigateAfterThreadDeletion(() => Promise.resolve(), addThreadActionToast);
 
     expect(addToast).not.toHaveBeenCalled();
   });

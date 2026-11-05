@@ -5,7 +5,7 @@ import {
   browserProfileRemovalAvailable,
   clearBrowserProfileData,
   importFailureReason,
-} from "./IntegrationsSettings";
+} from "./IntegrationsSettings.logic";
 
 const environmentId = "environment-a" as EnvironmentId;
 const secondEnvironmentId = "environment-b" as EnvironmentId;

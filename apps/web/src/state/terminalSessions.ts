@@ -16,6 +16,7 @@ import { useMemo } from "react";
 
 import { useEnvironmentQuery } from "./query";
 import { terminalEnvironment } from "./terminal";
+import { sortTerminalSummaries } from "./terminalSessions.logic";
 
 const EMPTY_KNOWN_TERMINAL_SESSIONS = Object.freeze<ReadonlyArray<KnownTerminalSession>>([]);
 
@@ -66,8 +67,7 @@ function knownSession(
 function terminalMetadataIndex(metadata: ReadonlyArray<TerminalSummary>): TerminalMetadataIndex {
   let index = metadataIndexes.get(metadata);
   if (!index) {
-    const compare = new Intl.Collator(undefined, { numeric: true }).compare;
-    const all = metadata.toSorted((left, right) => compare(left.terminalId, right.terminalId));
+    const all = sortTerminalSummaries(metadata);
     const byThreadId = new Map<string, TerminalSummary[]>();
     for (const summary of all) {
       const group = byThreadId.get(summary.threadId);

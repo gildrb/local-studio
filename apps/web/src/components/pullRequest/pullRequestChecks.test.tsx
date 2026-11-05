@@ -9,7 +9,7 @@ import {
   pullRequestChecksState,
   pullRequestCheckStatusLabel,
   summarizePullRequestChecks,
-} from "./pullRequestPresentation";
+} from "./pullRequestPresentation.logic";
 
 function check(
   status: PullRequestCheck["status"],

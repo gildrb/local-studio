@@ -1,10 +1,13 @@
 import { RegistryContext, useAtomValue } from "@effect/atom-react";
-import { chooseLoadBalancedEnvironment } from "@t3tools/client-runtime/load-balancing";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { useCallback, useContext, useMemo } from "react";
 
 import { serverEnvironment } from "../state/server";
+import {
+  resolveLoadBalancedEnvironment,
+  toLoadBalancedEnvironmentResource,
+} from "./loadBalancedEnvironment.logic";
 
 /** Only mounted for unresolved automatic drafts, so idle clients do not poll hosts. */
 export function useLoadBalancedEnvironment(
@@ -23,32 +26,18 @@ export function useLoadBalancedEnvironment(
   const resourcesAtom = useMemo(
     () =>
       Atom.make((get) =>
-        environmentIds.map((environmentId) => {
-          const result = get(serverEnvironment.hostResources({ environmentId, input: {} }));
-          return {
+        environmentIds.map((environmentId) =>
+          toLoadBalancedEnvironmentResource(
             environmentId,
-            resources: result._tag === "Success" ? result.value : null,
-            receivedAt: result._tag === "Success" ? result.timestamp : 0,
-            pending: result._tag === "Initial" || result.waiting,
-            failed: result._tag === "Failure",
-          };
-        }),
+            get(serverEnvironment.hostResources({ environmentId, input: {} })),
+          ),
+        ),
       ),
     [environmentIds],
   );
   const resources = useAtomValue(resourcesAtom);
-  const pending = resources.some((resource) => resource.pending);
-  const environmentId = chooseLoadBalancedEnvironment(
-    resources.map((resource) => ({
-      ...resource,
-      weight: weights[resource.environmentId] ?? 50,
-    })),
-    Date.now(),
-  ) as EnvironmentId | null;
   return {
     refresh,
-    pending,
-    environmentId,
-    failed: !pending && environmentId === null && resources.some((resource) => resource.failed),
+    ...resolveLoadBalancedEnvironment({ resources, weights, now: Date.now() }),
   };
 }

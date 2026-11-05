@@ -8,12 +8,14 @@ import {
 import { getProviderOptionDescriptors } from "@t3tools/shared/model";
 import { getProviderModelCapabilities } from "../../providerModels";
 import {
-  getComposerPromptInjectionState,
-  getComposerProviderState,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
-  withImplicitFastModeDefault,
 } from "./composerProviderState";
+import {
+  getComposerPromptInjectionState,
+  getComposerProviderState,
+  withImplicitFastModeDefault,
+} from "./composerProviderState.logic";
 
 // Everything in composerProviderState is now data-driven by the model's
 // optionDescriptors, so these tests use a single synthetic provider/model and

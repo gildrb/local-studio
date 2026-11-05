@@ -9,7 +9,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { ProviderModelPicker } from "./ProviderModelPicker";
-import type { ModelEsque } from "./providerIconUtils";
+import type { ModelEsque } from "./modelDisplayName";
 
 function providerEntry(instanceId: string, driver: string) {
   const provider: ServerProvider = {

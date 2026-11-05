@@ -22,7 +22,6 @@ import {
   terminalGridCellAt,
   terminalScrollbarGeometry,
   terminalScrollbarOffsetAtPointer,
-  terminalLinkAtPositionWithRange,
   terminalContentOriginY,
   terminalFontFamily,
   terminalFontSize,
@@ -31,6 +30,7 @@ import {
   GhosttyTerminalSurface,
   type GhosttyTerminalSurfaceOptions,
 } from "./surface";
+import { terminalLinkAtPositionWithRange } from "../terminalLinkRange.logic";
 
 vi.mock("./vendor/ghostty-vt.wasm?url", async () => ({
   default: (await import("./vendor/ghostty-vt.wasm?inline")).default,

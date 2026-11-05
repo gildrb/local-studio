@@ -8,7 +8,7 @@ import type {
   EnvironmentId,
   ScopedThreadRef,
 } from "@t3tools/contracts";
-import { videoMimeType } from "@t3tools/shared/video";
+import { buildAttachmentVideoAsset } from "./expandedMedia.logic";
 import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
 import { resolveAssetUrl } from "@t3tools/client-runtime/state/assets";
 import {
@@ -35,11 +35,6 @@ export interface ExpandedImageItem {
 export interface ExpandedImagePreview {
   images: ExpandedImageItem[];
   index: number;
-}
-
-/** Wraps navigation in either direction, including offsets beyond a complete cycle. */
-export function wrapExpandedImageIndex(index: number, imageCount: number): number {
-  return imageCount > 0 ? ((index % imageCount) + imageCount) % imageCount : 0;
 }
 
 /** Resolves a chat media reference on its owning environment, without downloading its bytes. */
@@ -105,21 +100,6 @@ export async function resolveMarkdownMediaPreview(input: {
       },
     ],
     index: 0,
-  };
-}
-
-export function buildAttachmentVideoAsset(
-  environmentId: EnvironmentId,
-  attachment: ChatFileAttachment,
-): NonNullable<MediaActionSource["asset"]> {
-  return {
-    environmentId,
-    resource: {
-      _tag: "attachment" as const,
-      attachmentId: attachment.id,
-      fileName: attachment.name,
-      mimeType: videoMimeType(attachment) ?? attachment.mimeType,
-    },
   };
 }
 

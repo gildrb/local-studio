@@ -5,9 +5,9 @@
  * reads its people then: they are worth a request when somebody wants them and worth nothing on
  * every pull request they merely open.
  */
-import type { EnvironmentId, PullRequestLabelCandidate, PullRequestRef } from "@t3tools/contracts";
-import { CheckIcon, TagIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import type { EnvironmentId, PullRequestRef } from "@t3tools/contracts";
+import { CheckIcon } from "lucide-react";
+import { useState } from "react";
 
 import { pullRequestEnvironment } from "~/state/pullRequests";
 import { useEnvironmentQuery } from "~/state/query";
@@ -16,18 +16,12 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 
 import { toastManager } from "../ui/toast";
 import { PullRequestCandidatePicker } from "./PullRequestCandidatePicker";
-import { readableFailure } from "./pullRequestDetail.logic";
-import { pullRequestLabelColor } from "./pullRequestList.logic";
-
-/** Narrows only what arrived: the host is asked once, when the menu opens. */
-function matches(candidate: PullRequestLabelCandidate, query: string): boolean {
-  if (query.length === 0) return true;
-  const needle = query.toLowerCase();
-  return (
-    candidate.name.toLowerCase().includes(needle) ||
-    (candidate.description ?? "").toLowerCase().includes(needle)
-  );
-}
+import {
+  buildPullRequestLabelPickerModel,
+  pullRequestLabelToggleFailureToast,
+  resolvePullRequestLabelToggle,
+  type PullRequestLabelCandidateRowModel,
+} from "./PullRequestLabelPicker.logic";
 
 export function PullRequestLabelPicker({
   environmentId,
@@ -50,78 +44,63 @@ export function PullRequestLabelPicker({
   );
   const setLabels = useAtomCommand(pullRequestEnvironment.setLabels, { reportFailure: false });
 
-  const candidates = useMemo(
-    () => (candidatesQuery.data?.candidates ?? []).filter((entry) => matches(entry, query)),
-    [candidatesQuery.data, query],
-  );
+  const model = buildPullRequestLabelPickerModel({
+    allowed,
+    query,
+    candidates: candidatesQuery.data?.candidates ?? null,
+    isPending: candidatesQuery.isPending,
+    error: candidatesQuery.error,
+    truncated: candidatesQuery.data?.truncated === true,
+    changePending: pending !== null,
+  });
 
-  const toggle = async (candidate: PullRequestLabelCandidate) => {
-    if (pending !== null) return;
-    setPending(candidate.name);
+  const toggle = async (row: PullRequestLabelCandidateRowModel) => {
+    const candidate = { name: row.name, isApplied: row.applied };
+    const decision = resolvePullRequestLabelToggle({ candidate, changePending: pending !== null });
+    if (decision.kind === "ignore") return;
+    setPending(decision.label);
     const result = await setLabels({
       environmentId,
-      input: { ...reference, labels: [candidate.name], applied: !candidate.isApplied },
+      input: { ...reference, labels: [decision.label], applied: decision.applied },
     });
     setPending(null);
     if (result._tag === "Failure") {
-      toastManager.add({
-        type: "error",
-        title: candidate.isApplied
-          ? `Could not take ${candidate.name} off`
-          : `Could not put ${candidate.name} on`,
-        description: readableFailure(
-          squashAtomCommandFailure(result),
-          "The host refused it. Check that you have triage access on this repository.",
-        ),
-      });
-      return;
+      toastManager.add(
+        pullRequestLabelToggleFailureToast({
+          candidate,
+          failure: squashAtomCommandFailure(result),
+        }),
+      );
     }
   };
 
   return (
     <PullRequestCandidatePicker
-      icon={<TagIcon className="size-3.5" />}
-      label="Change labels"
-      allowed={allowed}
-      disabledReason="Changing labels needs triage access on this repository"
+      model={model}
       open={open}
       onOpenChange={setOpen}
       query={query}
       onQueryChange={setQuery}
-      searchLabel="Search labels"
-      isPending={candidatesQuery.isPending && candidatesQuery.data === null}
-      error={candidatesQuery.data === null ? candidatesQuery.error : null}
-      candidates={candidates}
-      emptyLabel="This repository has no labels."
-      noMatchLabel="No label matches that."
-      errorLabel="The labels could not be read."
-      truncated={candidatesQuery.data?.truncated === true}
-      truncatedLabel="This repository has more labels than are listed here. Apply the rest on the host."
-      candidateKey={(candidate) => candidate.name}
-      disabled={pending !== null}
-      onSelect={(candidate) => void toggle(candidate)}
+      onSelect={(row) => void toggle(row)}
     >
-      {(candidate) => {
-        const dot = pullRequestLabelColor(candidate.color);
-        return (
-          <>
-            <span
-              aria-hidden
-              className="size-2 shrink-0 rounded-full bg-muted-foreground"
-              {...(dot ? { style: { backgroundColor: dot } } : {})}
-            />
-            <span className="min-w-0 flex-1 truncate">
-              {candidate.name}
-              {candidate.description ? (
-                <span className="text-muted-foreground"> · {candidate.description}</span>
-              ) : null}
-            </span>
-            {candidate.isApplied ? (
-              <CheckIcon aria-label="Applied" className="size-3.5 shrink-0" />
+      {(row) => (
+        <>
+          <span
+            aria-hidden
+            className="size-2 shrink-0 rounded-full bg-muted-foreground"
+            {...(row.color ? { style: { backgroundColor: row.color } } : {})}
+          />
+          <span className="min-w-0 flex-1 truncate">
+            {row.name}
+            {row.description ? (
+              <span className="text-muted-foreground"> · {row.description}</span>
             ) : null}
-          </>
-        );
-      }}
+          </span>
+          {row.applied ? (
+            <CheckIcon aria-label={row.appliedAriaLabel} className="size-3.5 shrink-0" />
+          ) : null}
+        </>
+      )}
     </PullRequestCandidatePicker>
   );
 }

@@ -3,43 +3,16 @@ import type * as Fiber from "effect/Fiber";
 
 import * as Electron from "electron";
 
-const MIN_DURATION_MS = 280;
-const MAX_DURATION_MS = 680;
-const DURATION_DISTANCE_SCALE = 2_000;
+import {
+  SNAP_SHOT_ANIMATION_TIMEOUT_MS,
+  snapShotAnimationDisplayBounds,
+  snapShotAnimationDurationMs,
+  snapShotAnimationOverlayBounds,
+  type SnapShotAnimationDestination,
+  type SnapShotAnimationDetails,
+} from "@t3tools/shared/snapShot/snapShotTransitionGeometry";
+
 const EASING = "cubic-bezier(.2,.8,.2,1)";
-const TIMEOUT_MS = 6_000;
-
-type SnapShotAnimationDetails = {
-  readonly appName: string;
-  readonly windowTitle: string;
-  readonly appIconDataUrl?: string | undefined;
-};
-
-export type SnapShotAnimationDestination = {
-  readonly frame: Electron.Rectangle;
-  /** Unit coordinates in T3's content area; GNOME supplies the real compositor origin. */
-  readonly relativeFrame?: Electron.Rectangle | undefined;
-  readonly backgroundColor: string;
-  readonly borderColor: string;
-  readonly borderWidth: number;
-  readonly cornerRadius: number;
-  readonly scaleFactor: number;
-  readonly details?: SnapShotAnimationDetails | undefined;
-};
-
-export function snapShotAnimationDurationMs(
-  source: Electron.Rectangle,
-  target: Electron.Rectangle,
-): number {
-  const distance = Math.hypot(
-    source.x + source.width / 2 - target.x - target.width / 2,
-    source.y + source.height / 2 - target.y - target.height / 2,
-  );
-  return (
-    MAX_DURATION_MS -
-    (MAX_DURATION_MS - MIN_DURATION_MS) * Math.exp(-distance / DURATION_DISTANCE_SCALE)
-  );
-}
 
 type ActiveTransition = {
   readonly id: string;
@@ -63,42 +36,6 @@ type SnapShotTransitionOptions = {
     | NonNullable<Parameters<Electron.BrowserWindow["setAlwaysOnTop"]>[1]>
     | undefined;
 };
-
-export function snapShotAnimationOverlayBounds(
-  displays: ReadonlyArray<Pick<Electron.Display, "bounds">>,
-): Electron.Rectangle {
-  const firstDisplay = displays[0];
-  const first = firstDisplay?.bounds ?? { x: 0, y: 0, width: 1, height: 1 };
-  let left = first.x;
-  let top = first.y;
-  let right = first.x + first.width;
-  let bottom = first.y + first.height;
-  for (const display of displays.slice(1)) {
-    const bounds = display.bounds;
-    left = Math.min(left, bounds.x);
-    top = Math.min(top, bounds.y);
-    right = Math.max(right, bounds.x + bounds.width);
-    bottom = Math.max(bottom, bounds.y + bounds.height);
-  }
-  return { x: left, y: top, width: right - left, height: bottom - top };
-}
-
-export function snapShotAnimationDisplayBounds(
-  displays: ReadonlyArray<Pick<Electron.Display, "bounds">>,
-  source: Electron.Rectangle,
-  destination: Electron.Rectangle,
-): Array<Electron.Rectangle> {
-  const flight = snapShotAnimationOverlayBounds([{ bounds: source }, { bounds: destination }]);
-  return displays
-    .map((display) => display.bounds)
-    .filter(
-      (bounds) =>
-        bounds.x < flight.x + flight.width &&
-        bounds.x + bounds.width > flight.x &&
-        bounds.y < flight.y + flight.height &&
-        bounds.y + bounds.height > flight.y,
-    );
-}
 
 function createWindow(
   bounds: Electron.Rectangle,
@@ -240,7 +177,7 @@ export class SnapShotTransition {
       overlays: [],
     };
     active.timer = Effect.runFork(
-      Effect.sleep(TIMEOUT_MS).pipe(
+      Effect.sleep(SNAP_SHOT_ANIMATION_TIMEOUT_MS).pipe(
         Effect.andThen(
           Effect.sync(() => {
             if (this.active === active) this.dispose();

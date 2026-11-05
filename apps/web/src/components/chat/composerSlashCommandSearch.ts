@@ -4,7 +4,7 @@ import {
   scoreQueryMatch,
 } from "@t3tools/shared/searchRanking";
 
-import type { ComposerCommandItem } from "./ComposerCommandMenu";
+import type { ComposerCommandItem } from "./composerTriggers.logic";
 import { scoreProviderSkill } from "../../providerSkillSearch";
 
 type SlashSearchItem = Extract<

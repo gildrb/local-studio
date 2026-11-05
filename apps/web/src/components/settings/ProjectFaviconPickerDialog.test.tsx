@@ -46,10 +46,8 @@ vi.mock("../ui/toast", () => ({
 }));
 
 import { toastManager } from "../ui/toast";
-import {
-  canPickExternalProjectFavicon,
-  ProjectFaviconPickerDialog,
-} from "./ProjectFaviconPickerDialog";
+import { ProjectFaviconPickerDialog } from "./ProjectFaviconPickerDialog";
+import { canPickExternalProjectFavicon } from "./ProjectFaviconPickerDialog.logic";
 
 describe("ProjectFaviconPickerDialog", () => {
   beforeEach(() => {

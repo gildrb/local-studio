@@ -6,6 +6,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 
+import {
+  collectReachableDirectoryPaths,
+  directoryLoadErrorMessage,
+  flattenLoadedDirectories,
+  resolveVisibleDirectoryError,
+  selectDirectChildEntries,
+} from "./FileBrowserPanel.logic";
+
 /** Loads only requested directories; collapsing a folder keeps its children cached. */
 export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
   const [directories, setDirectories] = useState(new Map<string, readonly ProjectEntry[]>());
@@ -51,10 +59,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
             setDirectories((previous) =>
               new Map(previous).set(
                 directoryPath,
-                result.value.entries.filter(
-                  (entry) =>
-                    entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) === directoryPath,
-                ),
+                selectDirectChildEntries(result.value.entries, directoryPath),
               ),
             );
             setErrors((previous) => {
@@ -66,10 +71,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
             loaded.current.delete(directoryPath);
             const cause = Cause.squash(result.cause);
             setErrors((previous) =>
-              new Map(previous).set(
-                directoryPath,
-                cause instanceof Error ? cause.message : "Unable to load folder.",
-              ),
+              new Map(previous).set(directoryPath, directoryLoadErrorMessage(cause)),
             );
           }
         })
@@ -91,26 +93,9 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
     };
   }, [load]);
 
-  const entries = useMemo(() => {
-    const result: ProjectEntry[] = [];
-    const visit = (path: string) => {
-      for (const entry of directories.get(path) ?? []) {
-        result.push(entry);
-        if (entry.kind === "directory") visit(entry.path);
-      }
-    };
-    visit("");
-    return result;
-  }, [directories]);
+  const entries = useMemo(() => flattenLoadedDirectories(directories), [directories]);
 
-  const reachableDirectories = useMemo(
-    () =>
-      new Set([
-        "",
-        ...entries.filter((entry) => entry.kind === "directory").map((entry) => entry.path),
-      ]),
-    [entries],
-  );
+  const reachableDirectories = useMemo(() => collectReachableDirectoryPaths(entries), [entries]);
 
   const refresh = useCallback(() => {
     // Refresh folders already visited, preserving the current expansion state.
@@ -131,6 +116,6 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
     refresh,
     isPending: pending > 0,
     ready: directories.has(""),
-    error: [...errors].find(([path]) => reachableDirectories.has(path))?.[1] ?? null,
+    error: resolveVisibleDirectoryError(errors, reachableDirectories),
   };
 }

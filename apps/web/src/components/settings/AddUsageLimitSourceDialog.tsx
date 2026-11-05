@@ -1,4 +1,4 @@
-import { type EnvironmentId, UsageLimitSourceId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { useUpdateEnvironmentSettings } from "../../hooks/useSettings";
@@ -14,25 +14,12 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-
-/**
- * Stable per hub and readable in settings.json. Dots and dashes in the host
- * are kept so `foo-bar.com` and `foo.bar.com` do not collide; anything else
- * (a port's colon, a path) is folded to a dash.
- */
-function sourceIdFromUrl(url: string): UsageLimitSourceId {
-  let host = url;
-  try {
-    host = new URL(url).host;
-  } catch {
-    // Keep the raw text; the server reports the bad URL on its row.
-  }
-  const slug = host
-    .toLowerCase()
-    .replace(/[^a-z0-9.-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return UsageLimitSourceId.make(`cliproxy-${slug || "hub"}`);
-}
+import {
+  type AddUsageLimitSourceDraft,
+  buildAddUsageLimitSourceDialogModel,
+  EMPTY_ADD_USAGE_LIMIT_SOURCE_DRAFT,
+  resolveAddUsageLimitSource,
+} from "./AddUsageLimitSourceDialog.logic";
 
 /**
  * Adds a CLIProxyAPI hub from provider settings on one environment. The
@@ -51,33 +38,18 @@ export function AddUsageLimitSourceDialog({
   readonly environmentLabel: string;
 }) {
   const updateSettings = useUpdateEnvironmentSettings(environmentId);
-  const [label, setLabel] = useState("");
-  const [url, setUrl] = useState("");
-  const [managementKey, setManagementKey] = useState("");
-  const trimmedUrl = url.trim();
-  const canSave = trimmedUrl.length > 0 && managementKey.trim().length > 0;
+  const [draft, setDraft] = useState<AddUsageLimitSourceDraft>(EMPTY_ADD_USAGE_LIMIT_SOURCE_DRAFT);
+  const model = buildAddUsageLimitSourceDialogModel({ environmentLabel, draft });
 
   const reset = () => {
-    setLabel("");
-    setUrl("");
-    setManagementKey("");
+    setDraft(EMPTY_ADD_USAGE_LIMIT_SOURCE_DRAFT);
   };
 
   const save = () => {
-    if (!canSave) return;
-    const id = sourceIdFromUrl(trimmedUrl);
+    const decision = resolveAddUsageLimitSource(draft);
+    if (decision.kind === "invalid") return;
     // The patch names only this entry; the server merges it into its map.
-    updateSettings({
-      usageLimitSources: {
-        [id]: {
-          kind: "cliproxy",
-          ...(label.trim() ? { label: label.trim() } : {}),
-          url: trimmedUrl,
-          managementKey: managementKey.trim(),
-          enabled: true,
-        },
-      },
-    });
+    updateSettings(decision.patch);
     reset();
     onOpenChange(false);
   };
@@ -92,11 +64,8 @@ export function AddUsageLimitSourceDialog({
     >
       <DialogPopup className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Add a CLIProxyAPI hub</DialogTitle>
-          <DialogDescription>
-            Show the quota of every account the hub pools, next to the providers on{" "}
-            {environmentLabel}. The key stays on that server.
-          </DialogDescription>
+          <DialogTitle>{model.title}</DialogTitle>
+          <DialogDescription>{model.description}</DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <form
@@ -106,35 +75,23 @@ export function AddUsageLimitSourceDialog({
               save();
             }}
           >
-            <div className="grid gap-1.5">
-              <Label htmlFor="usage-source-url">Hub URL</Label>
-              <Input
-                id="usage-source-url"
-                placeholder="https://hub.example.ts.net:8318"
-                value={url}
-                onChange={(event) => setUrl(event.target.value)}
-                autoFocus
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="usage-source-key">Management key</Label>
-              <Input
-                id="usage-source-key"
-                type="password"
-                autoComplete="off"
-                value={managementKey}
-                onChange={(event) => setManagementKey(event.target.value)}
-              />
-            </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="usage-source-label">Label (optional)</Label>
-              <Input
-                id="usage-source-label"
-                placeholder="Defaults to the hub's host name"
-                value={label}
-                onChange={(event) => setLabel(event.target.value)}
-              />
-            </div>
+            {model.fields.map((field) => (
+              <div key={field.id} className="grid gap-1.5">
+                <Label htmlFor={field.id}>{field.label}</Label>
+                <Input
+                  id={field.id}
+                  type={field.type ?? undefined}
+                  autoComplete={field.autoComplete ?? undefined}
+                  placeholder={field.placeholder ?? undefined}
+                  value={field.value}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setDraft((current) => ({ ...current, [field.key]: value }));
+                  }}
+                  autoFocus={field.autoFocus}
+                />
+              </div>
+            ))}
           </form>
         </DialogPanel>
         <DialogFooter variant="bare">
@@ -145,10 +102,10 @@ export function AddUsageLimitSourceDialog({
               onOpenChange(false);
             }}
           >
-            Cancel
+            {model.cancelLabel}
           </Button>
-          <Button onClick={save} disabled={!canSave}>
-            Add hub
+          <Button onClick={save} disabled={!model.canSave}>
+            {model.saveLabel}
           </Button>
         </DialogFooter>
       </DialogPopup>

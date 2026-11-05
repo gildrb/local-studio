@@ -3,7 +3,8 @@ import { act, useLayoutEffect } from "react";
 import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { useUsage, type EnvironmentUsageStatus, type UsageView } from "./usage";
+import { useUsage, type UsageView } from "./usage";
+import type { EnvironmentUsageStatus } from "./usage.logic";
 
 const testState = vi.hoisted(() => ({ environments: [] as EnvironmentUsageStatus[] }));
 vi.mock("@effect/atom-react", async (importOriginal) => ({

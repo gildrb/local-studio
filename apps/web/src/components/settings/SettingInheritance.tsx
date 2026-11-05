@@ -1,152 +1,19 @@
-import {
-  DEFAULT_SERVER_SETTINGS,
-  PROJECT_FILE_BACKED_SETTINGS,
-  type ProjectFileBackedSettingKey,
-  resolveEnvironmentMachineKind,
-  type ServerSettings,
-  type WorktreeSubmodules,
-} from "@t3tools/contracts";
+import type { ServerSettings } from "@t3tools/contracts";
 import { CheckIcon, LayersIcon } from "lucide-react";
-import * as Equal from "effect/Equal";
+import { useMemo } from "react";
 
 import { cn } from "../../lib/utils";
-import type { EnvironmentPresentation } from "../../state/environments";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
-import { resolveEnvModeLabel, WORKTREE_SUBMODULES_LABELS } from "../BranchToolbar.logic";
-import { PULL_REQUEST_MERGE_METHOD_LABELS } from "../pullRequest/pullRequestDetail.logic";
 import { Button, InlineButton } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import type { ProjectOverrideEntry, ScopedSettingsTarget } from "./scopedSettings";
-import { isProjectScopedSettingKey } from "./scopedSettings";
-
-interface InheritanceLayer {
-  readonly key: "project" | "environment" | "t3.json" | "built-in";
-  readonly label: string;
-  readonly value: string;
-  readonly effective: boolean;
-  readonly set: boolean;
-}
-
-const WRITING_STYLE_LABELS: Record<string, string> = {
-  repo_conventions: "Repository conventions",
-  conventional_commits: "Conventional Commits",
-  custom: "Custom instructions",
-};
-
-/** Human labels for the values the chain can show; falls back to a type summary. */
-function formatValue(key: keyof ServerSettings, value: unknown): string {
-  if (value === null || value === undefined) {
-    return key === "pullRequestMergeMethod"
-      ? "Last selected"
-      : key === "sidebarAutoSettleAfterDays"
-        ? "Never"
-        : key === "defaultModelSelection"
-          ? "Automatic"
-          : key === "sourceControlWriterModelSelection"
-            ? "Text generation model"
-            : key === "defaultThreadEnvMode" || key === "worktreeSubmodules"
-              ? "Inherit"
-              : "Not set";
-  }
-  if (typeof value === "boolean") return value ? "On" : "Off";
-  if (typeof value === "number") {
-    return key === "sidebarAutoSettleAfterDays"
-      ? `${value} ${value === 1 ? "day" : "days"}`
-      : String(value);
-  }
-  if (typeof value === "string") {
-    if (key === "defaultThreadEnvMode" && (value === "local" || value === "worktree")) {
-      return resolveEnvModeLabel(value);
-    }
-    if (key === "worktreeSubmodules" && value in WORKTREE_SUBMODULES_LABELS) {
-      return WORKTREE_SUBMODULES_LABELS[value as WorktreeSubmodules];
-    }
-    if (key === "pullRequestMergeMethod" && value in PULL_REQUEST_MERGE_METHOD_LABELS) {
-      return PULL_REQUEST_MERGE_METHOD_LABELS[
-        value as keyof typeof PULL_REQUEST_MERGE_METHOD_LABELS
-      ];
-    }
-    return value === "" ? "Empty" : value;
-  }
-  if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? "item" : "items"}`;
-  if (typeof value === "object") {
-    if ("model" in value && typeof value.model === "string") return value.model;
-    if ("mode" in value && typeof value.mode === "string") {
-      return WRITING_STYLE_LABELS[value.mode] ?? value.mode;
-    }
-  }
-  return "Custom";
-}
-
-/**
- * The layers a setting resolves through for one target, top-down: the
- * project override when the target is a project, the environment's value,
- * the checkout's t3.json for file-backed keys, and the built-in default. The
- * first layer that is set wins. Same order as `resolveProjectSettings`.
- */
-export function settingInheritanceLayers(
-  target: ScopedSettingsTarget,
-  environmentSettings: ServerSettings,
-  key: keyof ServerSettings,
-): readonly InheritanceLayer[] {
-  const environmentValue = environmentSettings[key];
-  const source = isProjectScopedSettingKey(key) ? target.sources[key] : "environment";
-  const environmentSet = !Equal.equals(environmentValue, DEFAULT_SERVER_SETTINGS[key]);
-  const fileBacked = isProjectFileBackedSettingKey(key);
-  const layers: InheritanceLayer[] = [];
-  if (target.projectId !== null && isProjectScopedSettingKey(key)) {
-    layers.push({
-      key: "project",
-      label: "Project",
-      value: source === "project" ? formatValue(key, target.settings[key]) : "Inherits",
-      effective: source === "project",
-      set: source === "project",
-    });
-  }
-  layers.push({
-    key: "environment",
-    label: target.label,
-    value: environmentSet ? formatValue(key, environmentValue) : "Inherits",
-    effective: source === "environment" && environmentSet,
-    set: environmentSet,
-  });
-  if (fileBacked && target.projectId !== null) {
-    layers.push({
-      key: "t3.json",
-      label: "t3.json",
-      value: source === "t3.json" ? formatValue(key, target.settings[key]) : "Inherits",
-      effective: source === "t3.json",
-      set: source === "t3.json",
-    });
-  }
-  // For a file-backed key the built-in is what the resolver produced with
-  // nothing set, not the null the schema decodes to.
-  const builtIn = fileBacked
-    ? PROJECT_FILE_BACKED_SETTINGS[key].builtIn
-    : DEFAULT_SERVER_SETTINGS[key];
-  layers.push({
-    key: "built-in",
-    label: "Default",
-    value: formatValue(key, builtIn),
-    effective: source === "environment" && !environmentSet,
-    set: true,
-  });
-  return layers;
-}
-
-function isProjectFileBackedSettingKey(
-  key: keyof ServerSettings,
-): key is ProjectFileBackedSettingKey {
-  return Object.hasOwn(PROJECT_FILE_BACKED_SETTINGS, key);
-}
-
-export type SettingInheritanceState =
-  | "default"
-  | "environment"
-  | "inherited"
-  | "overridden"
-  | "mixed";
+import {
+  buildSettingInheritanceModel,
+  resolveSettingInheritanceReset,
+  type SettingInheritanceEnvironment,
+  type SettingInheritanceState,
+} from "./SettingInheritance.logic";
 
 /**
  * A small indicator beside a row's title that opens a top-down view of where
@@ -159,44 +26,41 @@ export interface SettingOverridingProject extends ProjectOverrideEntry {
   readonly open: () => void;
 }
 
+const EMPTY_OVERRIDING_PROJECTS: readonly SettingOverridingProject[] = [];
+
 export function SettingInheritance({
   state,
   summary,
   targets,
   environments,
   keys,
-  overridingProjects = [],
+  overridingProjects = EMPTY_OVERRIDING_PROJECTS,
   onClearOverrides,
 }: {
   state: SettingInheritanceState;
   summary: string;
   targets: readonly ScopedSettingsTarget[];
-  environments: readonly Pick<EnvironmentPresentation, "environmentId" | "serverConfig">[];
+  environments: readonly SettingInheritanceEnvironment[];
   keys: readonly (keyof ServerSettings)[];
   /** At environment scope: projects whose own value hides the environment's. */
   overridingProjects?: readonly SettingOverridingProject[];
   onClearOverrides?: (entries: readonly ProjectOverrideEntry[]) => void;
 }) {
-  const key = keys[0];
-  if (!key || targets.length === 0) return null;
-  const overrideSummary =
-    overridingProjects.length > 0
-      ? `${summary} · ${overridingProjects.length} project ${overridingProjects.length === 1 ? "override" : "overrides"}`
-      : summary;
-  const chains = targets.flatMap((target) => {
-    const environment = environments.find(
-      (candidate) => candidate.environmentId === target.environmentId,
-    );
-    if (!environment?.serverConfig) return [];
-    return [
-      {
-        target,
-        environment: { ...environment, serverConfig: environment.serverConfig },
-        machine: resolveEnvironmentMachineKind(environment.serverConfig),
-        layers: settingInheritanceLayers(target, environment.serverConfig.settings, key),
-      },
-    ];
-  });
+  const canClearOverrides = onClearOverrides !== undefined;
+  const model = useMemo(
+    () =>
+      buildSettingInheritanceModel({
+        state,
+        summary,
+        targets,
+        environments,
+        keys,
+        overridingProjects,
+        canClearOverrides,
+      }),
+    [canClearOverrides, environments, keys, overridingProjects, state, summary, targets],
+  );
+  if (!model.visible) return null;
   return (
     <Popover>
       <Tooltip>
@@ -207,7 +71,7 @@ export function SettingInheritance({
                 <Button
                   size="icon-micro"
                   variant="ghost-muted"
-                  aria-label={`${overrideSummary}. Show where this value comes from`}
+                  aria-label={model.triggerAriaLabel}
                 />
               }
             />
@@ -216,26 +80,27 @@ export function SettingInheritance({
           <LayersIcon
             className={cn(
               "size-3",
-              state === "overridden" && "text-primary",
-              state === "mixed" && "text-warning",
+              model.tone === "primary" && "text-primary",
+              model.tone === "warning" && "text-warning",
             )}
           />
         </TooltipTrigger>
-        <TooltipPopup side="top">{overrideSummary}</TooltipPopup>
+        <TooltipPopup side="top">{model.summary}</TooltipPopup>
       </Tooltip>
       <PopoverPopup align="start" width="md" padding="none">
         <div className="divide-y divide-border/60">
-          {chains.map(({ target, environment, machine, layers }) => (
-            <section
-              key={`${target.environmentId}:${target.projectId ?? ""}`}
-              className="px-3 py-2.5"
-            >
+          {model.chains.map((chain) => (
+            <section key={chain.id} className="px-3 py-2.5">
               <h4 className="flex items-center gap-1.5 pb-1.5 text-xs font-medium text-muted-foreground">
-                <EnvironmentMachineIcon aria-hidden kind={machine} className="size-3.5 shrink-0" />
-                <span className="min-w-0 truncate">{target.label}</span>
+                <EnvironmentMachineIcon
+                  aria-hidden
+                  kind={chain.machine}
+                  className="size-3.5 shrink-0"
+                />
+                <span className="min-w-0 truncate">{chain.title}</span>
               </h4>
               <ol role="list" className="text-sm">
-                {layers.map((layer) => (
+                {chain.layers.map((layer) => (
                   <li
                     key={layer.key}
                     className={cn(
@@ -249,7 +114,7 @@ export function SettingInheritance({
                         layer.effective ? "font-medium text-foreground" : "text-muted-foreground",
                       )}
                     >
-                      {layer.key === "environment" ? "Environment" : layer.label}
+                      {layer.label}
                     </span>
                     <span
                       className={cn(
@@ -271,42 +136,53 @@ export function SettingInheritance({
                   </li>
                 ))}
               </ol>
-              {(() => {
-                const overriding = overridingProjects.filter(
-                  (project) => project.environmentId === target.environmentId,
-                );
-                if (overriding.length === 0) return null;
-                const overrides = environment.serverConfig.settings.projectSettingsOverrides;
-                return (
-                  <div className="mt-2 border-t border-border/60 pt-2">
-                    <div className="flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground">
-                      <span>Overridden by</span>
-                      {onClearOverrides ? (
-                        <InlineButton onClick={() => onClearOverrides(overriding)}>
-                          Reset {overriding.length === 1 ? "it" : "all"}
-                        </InlineButton>
-                      ) : null}
-                    </div>
-                    <ul role="list" className="mt-0.5 text-sm">
-                      {overriding.map((project) => (
-                        <li
-                          key={project.projectId}
-                          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-2 py-1"
-                        >
-                          <InlineButton className="min-w-0 justify-start" onClick={project.open}>
-                            <span className="truncate">{project.label}</span>
-                          </InlineButton>
-                          <span className="max-w-32 truncate text-muted-foreground tabular-nums">
-                            {isProjectScopedSettingKey(key)
-                              ? formatValue(key, overrides[project.projectId]?.[key])
-                              : null}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+              {chain.overrides === null ? null : (
+                <div className="mt-2 border-t border-border/60 pt-2">
+                  <div className="flex items-center justify-between gap-3 px-2 text-xs text-muted-foreground">
+                    <span>{chain.overrides.heading}</span>
+                    {onClearOverrides && chain.overrides.resetLabel !== null ? (
+                      <InlineButton
+                        onClick={() => {
+                          const reset = resolveSettingInheritanceReset({
+                            environmentId: chain.environmentId,
+                            overridingProjects,
+                          });
+                          if (reset.kind === "clear-project-overrides")
+                            onClearOverrides(reset.entries);
+                        }}
+                      >
+                        {chain.overrides.resetLabel}
+                      </InlineButton>
+                    ) : null}
                   </div>
-                );
-              })()}
+                  <ul role="list" className="mt-0.5 text-sm">
+                    {chain.overrides.projects.map((project) => (
+                      <li
+                        key={project.projectId}
+                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 px-2 py-1"
+                      >
+                        <InlineButton
+                          className="min-w-0 justify-start"
+                          onClick={() =>
+                            overridingProjects
+                              .find(
+                                (candidate) =>
+                                  candidate.environmentId === project.environmentId &&
+                                  candidate.projectId === project.projectId,
+                              )
+                              ?.open()
+                          }
+                        >
+                          <span className="truncate">{project.label}</span>
+                        </InlineButton>
+                        <span className="max-w-32 truncate text-muted-foreground tabular-nums">
+                          {project.value}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </section>
           ))}
         </div>

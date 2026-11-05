@@ -1,7 +1,7 @@
 import { ProjectId, type PullRequestSummary } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import { newestPullRequestObservation, newestPullRequestSummary } from "./pullRequests";
+import { newestPullRequestObservation, newestPullRequestSummary } from "./pullRequestSummaries";
 
 function summary(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
