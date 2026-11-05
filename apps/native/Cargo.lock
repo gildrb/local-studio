@@ -4197,6 +4197,8 @@ dependencies = [
  "dirs 6.0.0",
  "futures",
  "getrandom 0.3.4",
+ "gio",
+ "glib 0.18.5",
  "gpui-kit",
  "gstreamer",
  "gstreamer-app",

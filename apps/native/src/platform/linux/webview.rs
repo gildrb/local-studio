@@ -3,11 +3,15 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use gio::ffi::GAsyncResult;
+use glib::ffi::{GAsyncReadyCallback, GError, GFALSE, gpointer};
+use glib::thread_guard::ThreadGuard;
+use glib::translate::IntoGlib as _;
+use glib::{DateTime, ToGlibNone};
 use soup::Cookie as SoupCookie;
-use webkit2gtk::glib::ffi::{GAsyncReadyCallback, gpointer};
-use webkit2gtk::glib::thread_guard::ThreadGuard;
-use webkit2gtk::glib::{DateTime, ToGlibNone};
-use webkit2gtk::{CookieManagerExt, WebViewExt, WebsiteDataManager, WebsiteDataTypes};
+use webkit2gtk::{
+    CookieManagerExt, WebViewExt, WebsiteDataManager, WebsiteDataManagerExt, WebsiteDataTypes,
+};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::raw_window_handle::HasWindowHandle;
 use wry::{Rect, WebContext, WebView, WebViewBuilder, WebViewExtUnix};
