@@ -44,3 +44,7 @@ node_modules/
 
 # pnpm content-addressable store; never belongs in the repo.
 .pnpm-store/
+
+# Vendored crates build output
+gpui-pre-wgpu/target/
+apps/native/vendor/*/target/
