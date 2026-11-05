@@ -144,7 +144,8 @@ objc2-av-foundation = { version = "0.3.2", default-features = false, features = 
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
-soup3 = "0.5"
+webkit2gtk-sys = "2.0"
+soup = { package = "soup3", version = "0.5" }
 notify-rust = "4.18.2"
 openh264 = "0.9"
 gstreamer = "0.25"

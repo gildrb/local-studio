@@ -4225,6 +4225,7 @@ dependencies = [
  "tungstenite",
  "url",
  "webkit2gtk",
+ "webkit2gtk-sys",
  "wry",
 ]
 

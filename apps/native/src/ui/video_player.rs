@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use futures::StreamExt;
 use futures::channel::mpsc;
+#[cfg(not(target_os = "macos"))]
+use gpui::StyledImage;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnchoredPositionMode, AnyElement, App, Bounds, BoxShadow, ClickEvent, Context, Entity,

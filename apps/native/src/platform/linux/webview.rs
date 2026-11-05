@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
+use soup::Cookie as SoupCookie;
+use webkit2gtk::glib::ffi::{GAsyncReadyCallback, gpointer};
 use webkit2gtk::glib::thread_guard::ThreadGuard;
-use webkit2gtk::glib::{DateTime, TimeSpan};
-use webkit2gtk::{
-    CookieManagerExt, WebViewExt, WebsiteDataManager, WebsiteDataManagerExt, WebsiteDataTypes,
-};
+use webkit2gtk::glib::{DateTime, ToGlibNone};
+use webkit2gtk::{CookieManagerExt, WebViewExt, WebsiteDataManager, WebsiteDataTypes};
 use wry::dpi::{LogicalPosition, LogicalSize};
 use wry::raw_window_handle::HasWindowHandle;
 use wry::{Rect, WebContext, WebView, WebViewBuilder, WebViewExtUnix};
@@ -55,8 +55,8 @@ pub enum StoreData {
     Cache,
 }
 
-fn soup_cookie(cookie: &BrowserHostCookie) -> Option<soup3::Cookie> {
-    let mut soup_cookie = soup3::Cookie::new(
+fn soup_cookie(cookie: &BrowserHostCookie) -> Option<SoupCookie> {
+    let mut soup_cookie = SoupCookie::new(
         &cookie.name,
         &cookie.value,
         &cookie.domain,
@@ -69,8 +69,8 @@ fn soup_cookie(cookie: &BrowserHostCookie) -> Option<soup3::Cookie> {
     soup_cookie.set_secure(cookie.secure);
     soup_cookie.set_http_only(cookie.http_only);
     match cookie.same_site.as_deref() {
-        Some("lax") => soup_cookie.set_same_site_policy(soup3::SameSitePolicy::Lax),
-        Some("strict") => soup_cookie.set_same_site_policy(soup3::SameSitePolicy::Strict),
+        Some("lax") => soup_cookie.set_same_site_policy(soup::SameSitePolicy::Lax),
+        Some("strict") => soup_cookie.set_same_site_policy(soup::SameSitePolicy::Strict),
         _ => {}
     }
     Some(soup_cookie)
@@ -189,15 +189,51 @@ impl ProfileStores {
             StoreData::Cache => WebsiteDataTypes::DISK_CACHE | WebsiteDataTypes::MEMORY_CACHE,
         };
         let helpers = self.helpers.clone();
-        let finish = ThreadGuard::new(move |result: Result<(), String>| {
-            helpers.borrow_mut().remove(&key);
-            done(result);
-        });
-        manager.clear(
-            types,
-            TimeSpan::from_seconds(0),
-            None::<&webkit2gtk::gio::Cancellable>,
-            move |result| (finish.into_inner())(result.map_err(|error| error.to_string())),
+        let manager_ptr = manager.to_glib_none().0;
+        struct ClearRequest {
+            manager: *mut webkit2gtk_sys::WebKitWebsiteDataManager,
+            finish: ThreadGuard<Box<dyn FnOnce(Result<(), String>)>>,
+        }
+        let request = Box::into_raw(Box::new(ClearRequest {
+            manager: manager_ptr,
+            finish: ThreadGuard::new(Box::new(move |result: Result<(), String>| {
+                helpers.borrow_mut().remove(&key);
+                done(result);
+            })),
+        }));
+        unsafe extern "C" fn clear_ready(
+            _source: *mut glib::gobject_ffi::GObject,
+            result: *mut gio::ffi::GAsyncResult,
+            user_data: gpointer,
+        ) {
+            let request = Box::from_raw(user_data as *mut ClearRequest);
+            let finish = request.finish.into_inner();
+            let mut error: *mut glib::ffi::GError = std::ptr::null_mut();
+            let ok = webkit2gtk_sys::webkit_website_data_manager_clear_finish(
+                request.manager,
+                result,
+                &mut error,
+            );
+            let outcome = if ok != glib::ffi::GFALSE {
+                Ok(())
+            } else {
+                let message = if error.is_null() {
+                    None
+                } else {
+                    Some(glib::Error::from_glib_borrow(error).message().to_string())
+                };
+                Err(message
+                    .unwrap_or_else(|| "The browser profile data could not be cleared.".into()))
+            };
+            finish(outcome);
+        }
+        webkit2gtk_sys::webkit_website_data_manager_clear(
+            manager_ptr,
+            types.into_glib(),
+            0,
+            std::ptr::null_mut(),
+            Some(clear_ready as GAsyncReadyCallback),
+            request as gpointer,
         );
     }
 
