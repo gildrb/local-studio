@@ -48,3 +48,6 @@ node_modules/
 # Vendored crates build output
 gpui-pre-wgpu/target/
 apps/native/vendor/*/target/
+
+# SwiftPM build output
+macos/.build/

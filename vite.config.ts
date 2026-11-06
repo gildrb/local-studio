@@ -62,7 +62,6 @@ export default defineConfig({
   test: {
     environment: "node",
     exclude: [
-      "**/.repos/**",
       "**/node_modules/**",
       "**/dist/**",
       "**/dist-electron/**",
@@ -82,10 +81,6 @@ export default defineConfig({
   },
   fmt: {
     ignorePatterns: [
-      ".repos/**",
-      // Macroscope's glob-per-line ignore grammar, not Markdown: formatting
-      // it rewrites `*` as `_` and joins lines.
-      ".macroscope/ignore.md",
       ".alchemy",
       "dist",
       "dist-electron",
@@ -99,19 +94,9 @@ export default defineConfig({
       "*.icon/**",
     ],
     sortPackageJson: {},
-    overrides: [
-      {
-        files: [".devcontainer/devcontainer.json"],
-        options: {
-          trailingComma: "none",
-        },
-      },
-    ],
   },
   lint: {
     ignorePatterns: [
-      ".repos",
-      ".repos/**",
       "dist",
       "dist-electron",
       "node_modules",
