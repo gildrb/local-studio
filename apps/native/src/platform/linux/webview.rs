@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gio::ffi::GAsyncResult;
-use glib::ffi::{GAsyncReadyCallback, GError, GFALSE, gpointer};
+use gio::ffi::{GAsyncReadyCallback, GAsyncResult};
+use glib::DateTime;
+use glib::ffi::{GFALSE, gpointer};
 use glib::thread_guard::ThreadGuard;
-use glib::translate::IntoGlib as _;
-use glib::{DateTime, ToGlibNone};
+use glib::translate::{IntoGlib as _, ToGlibNone as _};
 use soup::Cookie as SoupCookie;
 use webkit2gtk::{
     CookieManagerExt, WebViewExt, WebsiteDataManager, WebsiteDataManagerExt, WebsiteDataTypes,
@@ -212,22 +212,15 @@ impl ProfileStores {
         ) {
             let request = Box::from_raw(user_data as *mut ClearRequest);
             let finish = request.finish.into_inner();
-            let mut error: *mut glib::ffi::GError = std::ptr::null_mut();
             let ok = webkit2gtk_sys::webkit_website_data_manager_clear_finish(
                 request.manager,
                 result,
-                &mut error,
+                std::ptr::null_mut(),
             );
-            let outcome = if ok != glib::ffi::GFALSE {
+            let outcome = if ok != GFALSE {
                 Ok(())
             } else {
-                let message = if error.is_null() {
-                    None
-                } else {
-                    Some(glib::Error::from_glib_borrow(error).message().to_string())
-                };
-                Err(message
-                    .unwrap_or_else(|| "The browser profile data could not be cleared.".into()))
+                Err("The browser profile data could not be cleared.".into())
             };
             finish(outcome);
         }
