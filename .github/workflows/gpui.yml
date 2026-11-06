@@ -11,6 +11,7 @@ on:
       - apps/native/**
       - packages/app-core/**
       - .github/workflows/gpui.yml
+  workflow_dispatch:
 permissions:
   contents: read
 concurrency:
