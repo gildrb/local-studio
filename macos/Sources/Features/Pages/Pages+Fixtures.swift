@@ -21,7 +21,9 @@ enum PagesFixtures {
             autoPull: false, mergeMethod: .squash, gitFetchIntervalSeconds: 30, writingStyle: .conventionalCommits,
             writingInstructions: "", followPrTemplates: true, sourceControlProvider: nil, sourceControlModel: nil,
             worktreeCleanupAfterDays: 7, worktreeCleanupOnMerge: true, worktreeCleanupOnDelete: true,
-            worktreeCleanupUnchanged: false, localControllerUrl: "", fleetKey: "fk_live_8c1d", startController: true
+            worktreeCleanupUnchanged: false, localControllerUrl: "", fleetKey: "fk_live_8c1d", startController: true,
+            onboardingCompleted: true, customThemes: "", glassOpacity: 100, snapshotEnabled: false, snapshotIncludeText: false,
+            snapshotPlaySound: true, snapshotSound: .softPop, snapshotFlash: true, snapshotAnimations: true
         )
     }
 

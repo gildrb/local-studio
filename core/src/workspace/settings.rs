@@ -78,6 +78,7 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str, Option<&str>)] = &[
     ("usage.period.week", "cmd+shift+2", Some("usagePageOpen")),
     ("usage.period.month", "cmd+shift+3", Some("usagePageOpen")),
     ("usage.period.quarter", "cmd+shift+4", Some("usagePageOpen")),
+    ("snapshot.capture", "cmd+option+shift+s", None),
 ];
 
 fn title_case_segment(segment: &str) -> String {
@@ -113,6 +114,7 @@ pub(crate) fn command_title(command: &str) -> String {
         "usage.period.week" => return "Usage: Period: 7 days".to_string(),
         "usage.period.month" => return "Usage: Period: 30 days".to_string(),
         "usage.period.quarter" => return "Usage: Period: 90 days".to_string(),
+        "snapshot.capture" => return "SnapShot: Capture".to_string(),
         _ => {}
     }
     command.split('.').map(title_case_segment).collect::<Vec<_>>().join(": ")
@@ -209,6 +211,7 @@ pub(crate) fn save_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Stri
 pub(crate) fn sanitize(mut settings: Settings) -> Settings {
     settings.auto_settle_inactive_days = settings.auto_settle_inactive_days.clamp(1, 90);
     settings.contrast = settings.contrast.clamp(50, 200);
+    settings.glass_opacity = settings.glass_opacity.min(100);
     settings.interface_font_size = settings.interface_font_size.clamp(9, 24);
     settings.prompt_font_size = settings.prompt_font_size.clamp(9, 24);
     settings.code_font_size = settings.code_font_size.clamp(8, 24);

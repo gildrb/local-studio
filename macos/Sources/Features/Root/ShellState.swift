@@ -35,6 +35,10 @@ final class ShellState {
     var commitProject: String?
     var pullRequestProject: String?
     var publishProject: String?
+    var onboardingDismissed = false
+    var onboardingActive = false
+    var settingsRequest: SettingsPane?
+    var settingsProject: String?
 
     private(set) var back: [String?] = []
     private(set) var forward: [String?] = []

@@ -10,8 +10,8 @@ use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
     AccessMode, Branch, ColorScheme, Connection, DaemonLaunch, Device, DiffLineKind, DiffScope, FileContent, FileDiff,
     FileEntry, GitStatus, Keybinding, LocalSnapshot, PromptDraft, ProviderStatus, PullRequestDetail, SearchHit,
-    SendShortcut, Settings, Studio, StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, Update, UsagePeriod,
-    UsageReport, Waker, WorktreeChoice,
+    SendShortcut, Settings, SnapshotSound, Studio, StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, Update,
+    UsagePeriod, UsageReport, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
@@ -650,6 +650,11 @@ fn settings_providers_usage(harness: &mut Harness, project: &str) -> anyhow::Res
     settings.send_shortcut = SendShortcut::ModEnter;
     settings.working_section = true;
     settings.code_font_size = 15;
+    ensure!(!settings.onboarding_completed, "onboarding starts incomplete");
+    settings.onboarding_completed = true;
+    settings.custom_themes = r#"[{"name":"Smoke"}]"#.to_string();
+    settings.glass_opacity = 250;
+    settings.snapshot_sound = SnapshotSound::CameraShutter;
     settings.fleet_key = String::new();
     harness.studio.update_settings(settings);
     harness.pump_until("settings saved", |view| {
@@ -763,6 +768,11 @@ fn second_run(harness: &mut Harness) -> anyhow::Result<()> {
                 && settings.send_shortcut == SendShortcut::ModEnter
                 && settings.working_section
                 && settings.code_font_size == 15
+                && settings.onboarding_completed
+                && settings.custom_themes == r#"[{"name":"Smoke"}]"#
+                && settings.glass_opacity == 100
+                && settings.snapshot_sound == SnapshotSound::CameraShutter
+                && !settings.snapshot_enabled
         }) && view.keybindings.as_ref().is_some_and(|bindings| {
             bindings.iter().any(|binding| {
                 binding.command == "sidebar.toggle" && binding.shortcut.as_deref() == Some("cmd+shift+b")
