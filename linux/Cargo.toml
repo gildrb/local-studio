@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = ["."]
+
+[package]
+name = "local-studio-gtk"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Local Studio for Linux: GTK4 and libadwaita over the shared Rust core"
+
+[[bin]]
+name = "local-studio"
+path = "src/main.rs"
+
+[dependencies]
+local-studio-core = { path = "../core" }
+gtk = { package = "gtk4", version = "0.11", features = ["gnome_50"] }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_9"] }
+vte = { package = "vte4", version = "0.10", features = ["v0_84"] }
+webkit = { package = "webkit6", version = "0.6" }
+async-channel = "2"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
