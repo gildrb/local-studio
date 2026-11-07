@@ -11,7 +11,7 @@ final class TerminalSurfaceView: NSView, @preconcurrency NSTextInputClient, NSMe
     ]
 
     var onFocus: (() -> Void)?
-    var blinkEnabled = true {
+    var blinkEnabled = false {
         didSet { updateBlink() }
     }
 

@@ -17,7 +17,7 @@ enum PagesFixtures {
             quitConfirmation: .hold, textGenerationProvider: nil, textGenerationModel: nil, contextWindowMeter: false,
             colorScheme: .dark, theme: nil, contrast: 100, diffColors: .redGreen, chatWidth: .normal,
             interfaceFont: "", interfaceFontSize: 13, promptFont: "", promptFontSize: 14, codeFont: "", codeFontSize: 12,
-            terminalFont: "", terminalFontSize: 12, terminalScrollback: 10_000, terminalCursorBlink: true,
+            terminalFont: "", terminalFontSize: 12, terminalScrollback: 10_000, terminalCursorBlink: false,
             fontSmoothing: true, wordWrap: true, openLinksIn: .system,
             autoPull: false, mergeMethod: .squash, gitFetchIntervalSeconds: 30, writingStyle: .conventionalCommits,
             writingInstructions: "", followPrTemplates: true, sourceControlProvider: nil, sourceControlModel: nil,

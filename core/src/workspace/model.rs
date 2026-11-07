@@ -575,7 +575,7 @@ impl Default for Settings {
             terminal_font: String::new(),
             terminal_font_size: 12,
             terminal_scrollback: 10_000,
-            terminal_cursor_blink: true,
+            terminal_cursor_blink: false,
             font_smoothing: true,
             word_wrap: true,
             open_links_in: LinkTarget::System,

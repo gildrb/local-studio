@@ -248,7 +248,7 @@ struct TerminalPaneView: View {
                 session: session,
                 fontName: fontName,
                 fontSize: CGFloat(settings?.terminalFontSize ?? 12),
-                blink: settings?.terminalCursorBlink ?? true,
+                blink: settings?.terminalCursorBlink ?? false,
                 actions: actions,
                 onFocus: onFocus,
                 revision: ThemeTokens.shared.revision
