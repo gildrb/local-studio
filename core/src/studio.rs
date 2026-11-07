@@ -35,6 +35,9 @@ const TIMER_PERIOD: Duration = Duration::from_secs(15);
 const EVENT_BURST: usize = 512;
 const NEW_THREAD_TITLE: &str = "New thread";
 const BODY_LIMIT: usize = 140;
+const GENERATED_TITLE_LIMIT: usize = 80;
+const TITLE_QUESTION: &str =
+    "Reply with a concise 3-7 word title for this conversation, no punctuation. Reply with the title only.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
@@ -150,6 +153,7 @@ enum Command {
     ReorderPinned { threads: Vec<String> },
     SetAutoSettle { thread: String, enabled: bool },
     SetHiddenModel { provider: String, model: String, hidden: bool },
+    RegenerateTitle { thread: String },
     Shutdown { done: std::sync::mpsc::Sender<()> },
 }
 
@@ -207,6 +211,7 @@ impl Studio {
             heads: HashMap::new(),
             models: Vec::new(),
             utility: None,
+            titles: HashMap::new(),
             last_rows: None,
             dirty: true,
         };
@@ -359,6 +364,10 @@ impl Studio {
     pub fn set_hidden_model(&self, provider: String, model: String, hidden: bool) {
         self.send_command(Command::SetHiddenModel { provider, model, hidden });
     }
+
+    pub fn regenerate_title(&self, thread: String) {
+        self.send_command(Command::RegenerateTitle { thread });
+    }
 }
 
 impl Studio {
@@ -423,6 +432,7 @@ struct Actor {
     heads: HashMap<String, GitHead>,
     models: Vec<ModelOption>,
     utility: Option<String>,
+    titles: HashMap<String, String>,
     last_rows: Option<Vec<ThreadRow>>,
     dirty: bool,
 }
@@ -772,6 +782,11 @@ impl Actor {
             Command::SetAutoSettle { thread, enabled } => {
                 self.flag(&thread, |flags, _| flags.auto_settle_disabled = !enabled);
             }
+            Command::RegenerateTitle { thread } => {
+                if let Err(error) = self.regenerate_title(&thread).await {
+                    self.mailbox.notice(NoticeLevel::Error, format!("Could not regenerate the title: {error}"));
+                }
+            }
             Command::Shutdown { done } => self.stop(&done).await,
         }
     }
@@ -1120,7 +1135,12 @@ impl Actor {
         }
         let Some(thread) = self.threads.get(id) else { return };
         let Some(live) = thread.live.as_ref() else { return };
-        if live.state.busy || thread.pending_run || live.state.queue.len() > 0 || !live.approvals.is_empty() {
+        if live.state.busy
+            || thread.pending_run
+            || live.state.queue.len() > 0
+            || !live.approvals.is_empty()
+            || self.titles.values().any(|title| title == id)
+        {
             return;
         }
         let active = live.active.clone();
@@ -1901,10 +1921,54 @@ impl Actor {
             DaemonClientEvent::DirectLinkLost { .. }
             | DaemonClientEvent::SessionListItem { .. }
             | DaemonClientEvent::SessionListProgress { .. }
-            | DaemonClientEvent::SideQuestionEvent { .. }
             | DaemonClientEvent::HeartbeatsChanged
             | DaemonClientEvent::StateTreeUpdate { .. } => {}
+            DaemonClientEvent::SideQuestionEvent { event, .. } => self.title_answered(&event).await,
         }
+    }
+
+    async fn regenerate_title(&mut self, id: &str) -> Result<(), String> {
+        if self.titles.values().any(|title| title == id) {
+            return Err("A title is already being generated for this thread.".to_string());
+        }
+        let active = self.ensure_open(id).await?;
+        let request = format!("title:{id}:{}", now_ms());
+        self.titles.insert(request.clone(), id.to_string());
+        let command = DaemonCommand::StartSideQuestion {
+            id: None,
+            active_session_id: active,
+            side_question_id: request.clone(),
+            question: TITLE_QUESTION.to_string(),
+            previous_turns: None,
+            rest: Map::default(),
+        };
+        if let Err(error) = self.call(command).await {
+            self.titles.remove(&request);
+            self.release(id).await;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    async fn title_answered(&mut self, event: &Value) {
+        let Some(request) = event.get("id").and_then(Value::as_str) else { return };
+        let status = event.get("status").and_then(Value::as_str).unwrap_or_default();
+        if status == "running" || !self.titles.contains_key(request) {
+            return;
+        }
+        let Some(id) = self.titles.remove(request) else { return };
+        let answer = event.get("answer").and_then(Value::as_str).unwrap_or_default();
+        match (status, clean_generated_title(answer)) {
+            ("complete", Some(title)) => self.rename(&id, &title).await,
+            ("complete", None) => {
+                self.mailbox.notice(NoticeLevel::Warning, "The model returned no usable title.");
+            }
+            _ => {
+                let reason = event.get("errorMessage").and_then(Value::as_str).unwrap_or(status);
+                self.mailbox.notice(NoticeLevel::Error, format!("Could not regenerate the title: {reason}"));
+            }
+        }
+        self.release(&id).await;
     }
 
     async fn session_event(&mut self, active: &str, event: &SessionEvent, sequence: u64) {
@@ -2087,6 +2151,23 @@ impl Actor {
             self.mailbox.push_threads(rows);
         }
     }
+}
+
+fn clean_generated_title(answer: &str) -> Option<String> {
+    let line = answer.lines().map(str::trim).find(|line| !line.is_empty())?;
+    let line = line.trim_start_matches(['#', '*', '-', '>', ' ']);
+    let line = line.strip_prefix("Title:").unwrap_or(line).trim();
+    let words: Vec<&str> = line
+        .split_whitespace()
+        .map(|word| word.trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | '*' | '_' | '“' | '”' | '‘' | '’')))
+        .filter(|word| !word.is_empty())
+        .collect();
+    let title = words.join(" ");
+    let title = title.trim_end_matches(['.', '!', '?', ',', ';', ':']).trim();
+    if title.is_empty() {
+        return None;
+    }
+    Some(title.chars().take(GENERATED_TITLE_LIMIT).collect::<String>().trim_end().to_string())
 }
 
 fn toggle_key(keys: &mut Vec<ModelKey>, key: ModelKey, present: bool) {
