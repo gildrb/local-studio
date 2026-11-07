@@ -1,9 +1,13 @@
 import LocalStudioKit
 import SwiftUI
 
-struct TimelineRowView: View {
+struct TimelineRowView: View, Equatable {
     let row: TimelineRow
     let store: StudioStore
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.row.same(as: rhs.row) && lhs.store === rhs.store
+    }
 
     var body: some View {
         switch row {

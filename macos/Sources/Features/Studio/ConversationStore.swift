@@ -264,7 +264,7 @@ final class ConversationStore {
     private(set) var timelines: [String] = []
 
     static let cachedThreads = 12
-    static let liveTimelines = 8
+    static let liveTimelines = 10
 
     func focus(_ thread: String?, row: ThreadRow? = nil) {
         guard thread != self.thread || focusedPending != nil else { return }

@@ -244,22 +244,8 @@ private struct TimelineScroll: View {
     var body: some View {
         let conversation = store.conversation
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 22) {
-                if current {
-                    LoadingPlaceholder(conversation: conversation)
-                }
-                ForEach(current ? conversation.rows : conversation.cachedRows(thread)) { row in
-                    TimelineRowView(row: row, store: store)
-                        .keyboardFocusRing(current && store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
-                }
-                TimelineFooter(store: store, live: current)
-            }
-            .scrollTargetLayout()
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
-            .padding(.bottom, 20)
-            .frame(maxWidth: width)
-            .frame(maxWidth: .infinity)
+            TimelineStack(store: store, thread: thread, current: current, width: width)
+                .equatable()
         }
         .scrollPosition($position)
         .defaultScrollAnchor(restoredTop == nil ? .bottom : nil, for: .initialOffset)
@@ -295,12 +281,12 @@ private struct TimelineScroll: View {
                 position.scrollTo(edge: .bottom)
             }
         }
-        .onChange(of: conversation.endRequest) {
-            guard current else { return }
+        .onChange(of: Gated(live: current, value: current ? conversation.endRequest : nil)) { old, new in
+            guard old.live, new.live else { return }
             position.scrollTo(edge: .bottom)
         }
-        .onChange(of: store.shell.timelineCursor) { _, cursor in
-            guard current, let cursor, store.shell.region == .timeline else { return }
+        .onChange(of: Gated(live: current, value: current ? store.shell.timelineCursor : nil)) { old, new in
+            guard old.live, new.live, let cursor = new.value, store.shell.region == .timeline else { return }
             follow(cursor == conversation.rows.last?.id)
             position.scrollTo(id: cursor)
         }
@@ -343,6 +329,7 @@ private struct TimelineScroll: View {
                     currentAnchor = anchor
                     position.scrollTo(id: anchor, anchor: .top)
                 }
+                .equatable()
                 .padding(.trailing, 8)
             }
         }
@@ -391,12 +378,53 @@ private struct TimelineScroll: View {
     }
 }
 
-private struct TimelineMinimap: View {
+private struct Gated<Value: Equatable>: Equatable {
+    let live: Bool
+    let value: Value?
+}
+
+private struct TimelineStack: View, Equatable {
+    let store: StudioStore
+    let thread: String
+    let current: Bool
+    let width: CGFloat
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.thread == rhs.thread && lhs.current == rhs.current && lhs.width == rhs.width
+    }
+
+    var body: some View {
+        let conversation = store.conversation
+        LazyVStack(alignment: .leading, spacing: 22) {
+            if current {
+                LoadingPlaceholder(conversation: conversation)
+            }
+            ForEach(current ? conversation.rows : conversation.cachedRows(thread)) { row in
+                TimelineRowView(row: row, store: store)
+                    .equatable()
+                    .keyboardFocusRing(current && store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
+            }
+            TimelineFooter(store: store, live: current)
+        }
+        .scrollTargetLayout()
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .frame(maxWidth: width)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct TimelineMinimap: View, Equatable {
     let anchors: [TimelineAnchor]
     let current: UInt64?
     let jump: (UInt64) -> Void
 
     private static let maxTicks = 36
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.anchors == rhs.anchors && lhs.current == rhs.current
+    }
 
     var body: some View {
         if anchors.count >= 2 {
