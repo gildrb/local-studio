@@ -137,6 +137,9 @@ struct ComposerSuggestionSource {
             return conversation.mentionRequest.flatMap { store.workspace.searchResults[$0] } == nil
                 ? "Searching workspace files…" : "No matching files or folders."
         case .pullRequest:
+            if let error = conversation.pullsError {
+                return "Couldn’t load pull requests: \(error)"
+            }
             return conversation.pullsRequest.flatMap { store.workspace.pullRequests[$0] } == nil
                 ? "Loading pull requests…" : "No matching pull requests."
         }
