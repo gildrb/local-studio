@@ -4,9 +4,10 @@ use std::sync::Arc;
 use eukhe_client::saved_sessions::strip_signal_reply_rules;
 use serde_json::Value;
 
-use crate::model::{Project, Shelf, ThreadRow, ThreadSearchHit, ThreadStatus};
+use crate::model::{Project, Shelf, Subagent, ThreadRow, ThreadSearchHit, ThreadStatus};
 use crate::session::model_ref;
 use crate::store::{StoredProject, ThreadFlags};
+use crate::workspace::model::PullRequest;
 
 const SEARCH_QUERY_LIMIT: usize = 256;
 const SEARCH_TEXT_CAP: usize = 4 * 1024 * 1024;
@@ -93,6 +94,14 @@ pub(crate) struct RosterRow {
     pub(crate) running: bool,
     pub(crate) failed: bool,
     pub(crate) updated_at: Option<i64>,
+    pub(crate) monitoring: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChildRow {
+    pub(crate) parent_session_id: Option<String>,
+    pub(crate) parent_active_session_id: Option<String>,
+    pub(crate) agent: Subagent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,6 +109,7 @@ pub(crate) struct InboxPrefs {
     pub(crate) working_section: bool,
     pub(crate) auto_settle_inactive: bool,
     pub(crate) auto_settle_inactive_days: u32,
+    pub(crate) auto_settle_merged: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -121,6 +131,9 @@ pub(crate) struct Facts {
     pub(crate) provider: Option<String>,
     pub(crate) model: Option<String>,
     pub(crate) note: Option<String>,
+    pub(crate) monitoring: bool,
+    pub(crate) live_agents: u32,
+    pub(crate) pull_request: Option<PullRequest>,
 }
 
 pub(crate) fn saved_rows(data: &Value) -> Vec<SavedRow> {
@@ -182,6 +195,47 @@ pub(crate) fn roster_row(entry: &Value) -> Option<RosterRow> {
         running: status == "running",
         failed: label == "failed",
         updated_at: text("lastActivityAt").or_else(|| text("modified")).and_then(parse_rfc3339),
+        monitoring: summary.get("hasRegisteredCronJob").and_then(Value::as_bool).unwrap_or(false)
+            || text("activity") == Some("monitoring"),
+    })
+}
+
+pub(crate) fn child_row(agent_id: &str, entry: &Value) -> Option<ChildRow> {
+    let summary = entry.get("summary")?;
+    let text = |key: &str| summary.get(key).and_then(Value::as_str).filter(|value| !value.is_empty());
+    let child = text("runtimeKind") == Some("subagent")
+        || summary.get("rlmDepth").and_then(Value::as_u64).unwrap_or(0) > 0
+        || text("parentSessionPath").is_some();
+    if !child {
+        return None;
+    }
+    let status = entry.get("status").and_then(Value::as_str).unwrap_or_default();
+    let label = entry.get("statusLabel").and_then(Value::as_str);
+    let usage = summary.get("usage");
+    let tokens = |key: &str| usage.and_then(|usage| usage.get(key)).and_then(Value::as_u64).unwrap_or(0);
+    Some(ChildRow {
+        parent_session_id: text("parentSessionId").map(str::to_string),
+        parent_active_session_id: text("parentActiveSessionId").map(str::to_string),
+        agent: Subagent {
+            id: text("rlmChildId").unwrap_or(agent_id).to_string(),
+            title: text("sessionName")
+                .or_else(|| text("label"))
+                .or_else(|| text("firstMessage"))
+                .map_or_else(|| "Subagent".to_string(), clean_title),
+            status: label.or_else(|| text("activity")).unwrap_or(status).to_string(),
+            running: status == "running",
+            started_at: text("created").and_then(parse_rfc3339),
+            duration_ms: None,
+            tokens: tokens("inputTokens").saturating_add(tokens("outputTokens")),
+            current_tool: summary
+                .get("currentTool")
+                .and_then(|tool| tool.get("name"))
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            note: text("note").map(str::to_string),
+            model: summary.get("model").and_then(model_ref).map(|model| model.id),
+            answer: None,
+        },
     })
 }
 
@@ -254,6 +308,8 @@ pub(crate) fn row(
         (ThreadStatus::Approval, facts.approval_since)
     } else if facts.working {
         (ThreadStatus::Working, facts.run_started_at)
+    } else if facts.monitoring {
+        (ThreadStatus::Monitoring, None)
     } else if facts.failed_at.is_some() {
         (ThreadStatus::Failed, facts.failed_at)
     } else if flags.woke_at.is_some() {
@@ -271,14 +327,22 @@ pub(crate) fn row(
         && flags.unsettled_at.is_none_or(|at| at < facts.activity_at))
     .then(|| facts.activity_at.saturating_add(i64::from(prefs.auto_settle_inactive_days).saturating_mul(DAY_MS)))
     .filter(|at| *at <= now);
-    let settled_at = flags.settled_at.or(auto_settled_at);
+    let merged_at = (prefs.auto_settle_merged
+        && !flags.auto_settle_disabled
+        && !matches!(status, ThreadStatus::Working | ThreadStatus::Monitoring | ThreadStatus::Approval)
+        && flags.unsettled_at.is_none()
+        && facts.pull_request.as_ref().is_some_and(|pull| pull.state.eq_ignore_ascii_case("merged")))
+    .then_some(facts.activity_at);
+    let settled_at = flags.settled_at.or(merged_at).or(auto_settled_at);
     let (shelf, updated_at, key) = if let Some(order) = flags.pin_order {
         (Shelf::Pinned, facts.activity_at, -order)
     } else if let Some(until) = snoozed {
         (Shelf::Snoozed, facts.activity_at, -until)
-    } else if let Some(settled_at) = settled_at.filter(|_| status != ThreadStatus::Working) {
+    } else if let Some(settled_at) =
+        settled_at.filter(|_| !matches!(status, ThreadStatus::Working | ThreadStatus::Monitoring))
+    {
         (Shelf::Settled, settled_at, settled_at)
-    } else if prefs.working_section && status == ThreadStatus::Working {
+    } else if prefs.working_section && matches!(status, ThreadStatus::Working | ThreadStatus::Monitoring) {
         (Shelf::Working, facts.activity_at, facts.run_started_at.unwrap_or(facts.activity_at))
     } else {
         (Shelf::Active, facts.activity_at, facts.activity_at)
@@ -305,6 +369,9 @@ pub(crate) fn row(
             note: facts.note,
             archived: flags.archived,
             auto_settle: !flags.auto_settle_disabled,
+            live_agents: facts.live_agents,
+            fan_out: flags.fan_out.clone(),
+            pull_request: facts.pull_request,
         },
         key,
     )

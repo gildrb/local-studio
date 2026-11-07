@@ -43,6 +43,8 @@ pub(crate) struct ThreadFlags {
     pub(crate) additions: u32,
     pub(crate) deletions: u32,
     pub(crate) auto_settle_disabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) fan_out: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

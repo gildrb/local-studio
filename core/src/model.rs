@@ -59,6 +59,7 @@ pub enum ThreadStatus {
     Failed,
     Done,
     Woke,
+    Monitoring,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +85,9 @@ pub struct ThreadRow {
     pub note: Option<String>,
     pub archived: bool,
     pub auto_settle: bool,
+    pub live_agents: u32,
+    pub fan_out: Option<String>,
+    pub pull_request: Option<PullRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +118,9 @@ pub struct ThreadInfo {
     pub context: Option<ContextUsage>,
     pub branch: Option<String>,
     pub worktree: Option<String>,
+    pub service_tier: Option<String>,
+    pub service_tiers: Vec<String>,
+    pub goal: Option<Goal>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,6 +145,7 @@ pub struct SlashCommand {
     pub name: String,
     pub description: String,
     pub source: String,
+    pub kind: CommandKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,6 +176,7 @@ pub struct PromptDraft {
 pub enum Delivery {
     Queue,
     Steer,
+    Default,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,6 +185,7 @@ pub enum WorktreeChoice {
     Local,
     NewWorktree { branch: String, base: Option<String> },
     Existing { path: String },
+    Default,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,6 +196,60 @@ pub struct ThreadSettings {
     pub thinking_level: Option<String>,
     pub access: AccessMode,
     pub worktree: WorktreeChoice,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum CommandKind {
+    Command,
+    Template,
+    Skill,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum SkillSource {
+    App,
+    Repo,
+    Project,
+    Personal,
+    System,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct SkillEntry {
+    pub name: String,
+    pub description: String,
+    pub source: SkillSource,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct Subagent {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    pub running: bool,
+    pub started_at: Option<i64>,
+    pub duration_ms: Option<u64>,
+    pub tokens: u64,
+    pub current_tool: Option<String>,
+    pub note: Option<String>,
+    pub model: Option<String>,
+    pub answer: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct Goal {
+    pub objective: String,
+    pub status: String,
+    pub active: bool,
+    pub tokens_used: u64,
+    pub token_budget: Option<u64>,
+    pub time_used_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -227,6 +291,15 @@ pub enum ToolKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct ImageThumbnail {
+    pub mime_type: String,
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct FileChange {
     pub path: String,
     pub additions: u32,
@@ -249,6 +322,7 @@ pub enum ItemKind {
         text: String,
         images: u32,
         entry: Option<String>,
+        thumbnails: Vec<ImageThumbnail>,
     },
     Assistant {
         blocks: Vec<Block>,
@@ -320,6 +394,7 @@ pub struct ModelOption {
     pub thinking_levels: Vec<String>,
     pub context_window: u64,
     pub configured: bool,
+    pub service_tiers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -347,6 +422,9 @@ pub enum Update {
     ComposerText { thread: String, text: String },
     Models { models: Vec<ModelOption>, favorites: Vec<ModelKey>, hidden: Vec<ModelKey> },
     Commands { request: String, commands: Vec<SlashCommand> },
+    Skills { request: String, skills: Vec<SkillEntry> },
+    Subagents { thread: String, agents: Vec<Subagent> },
+    MessageImage { request: String, mime_type: String, data: Vec<u8> },
     Notification { thread: String, kind: NotificationKind, title: String, body: String },
     GitStatus { project: String, status: GitStatus },
     Branches { request: String, branches: Vec<Branch>, total: u32 },

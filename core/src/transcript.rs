@@ -5,7 +5,8 @@ use eukhe_types::daemon::{SessionEvent, StreamUpdate};
 use eukhe_types::session::AgentMessage;
 use serde_json::Value;
 
-use crate::model::{Block, FileChange, Item, ItemKind, NoticeLevel, ToolKind, ToolState, TranscriptOp};
+use crate::images;
+use crate::model::{Block, FileChange, ImageThumbnail, Item, ItemKind, NoticeLevel, ToolKind, ToolState, TranscriptOp};
 
 const NO_REPLY: &str = "The turn ended without a reply.";
 const ABORTED: &str = "Operation aborted";
@@ -326,7 +327,8 @@ impl Transcript {
         self.turn += 1;
         self.open = Some(OpenTurn { started_at: Some(at), last_at: Some(at), ..OpenTurn::default() });
         let (text, images) = user_parts(content);
-        ops.push(self.push(ItemKind::User { text, images, entry: None }, Some(at)));
+        let thumbnails = user_thumbnails(content);
+        ops.push(self.push(ItemKind::User { text, images, entry: None, thumbnails }, Some(at)));
         ops
     }
 
@@ -800,6 +802,19 @@ fn assistant_parts(assistant: &AssistantMessage) -> AssistantParts<'_> {
         StopReason::Error | StopReason::Stop | StopReason::Length | StopReason::ToolUse => None,
     };
     AssistantParts { blocks, calls, error }
+}
+
+fn user_thumbnails(content: &UserContent) -> Vec<ImageThumbnail> {
+    match content {
+        UserContent::Text(_) => Vec::new(),
+        UserContent::Blocks(blocks) => blocks
+            .iter()
+            .filter_map(|block| match block {
+                UserContentBlock::Image(image) => images::thumbnail(&image.mime_type, &image.data),
+                UserContentBlock::Text(_) | UserContentBlock::Raw(_) => None,
+            })
+            .collect(),
+    }
 }
 
 pub(crate) fn user_parts(content: &UserContent) -> (String, u32) {

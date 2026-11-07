@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use eukhe_client::daemon_client::{DaemonClient, DaemonClientEvent};
 use eukhe_client::saved_sessions;
+use eukhe_types::ai::{ServiceTier, UserContent, UserContentBlock};
 use eukhe_types::daemon::{
     DaemonClientKind, DaemonCommand, DaemonSessionLifecycle, DaemonSessionSnapshot, ForkPosition, PromptInput,
     SessionEvent, StreamingBehavior,
@@ -18,16 +19,20 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
 use crate::daemon::{self, DaemonQuery};
+use crate::images;
 use crate::model::{
-    AccessMode, Approval, ApprovalAnswer, Connection, Delivery, ModelKey, ModelOption, NoticeLevel, NotificationKind,
-    PromptDraft, SlashCommand, ThreadInfo, ThreadRow, ThreadSettings, Update, WorktreeChoice,
+    AccessMode, Approval, ApprovalAnswer, Block, Connection, Delivery, ItemKind, ModelKey, ModelOption, NoticeLevel,
+    NotificationKind, PromptDraft, Subagent, ThreadInfo, ThreadRow, ThreadSettings, TranscriptOp, Update,
+    WorktreeChoice,
 };
+use crate::oneshot::TextGen;
 use crate::session::{self, LiveState};
+use crate::skills::Resources;
 use crate::store::{self, Store, StoredProject};
-use crate::threads::{self, Facts, GitHead, InboxPrefs, RosterRow, SavedRow, SearchDoc};
+use crate::threads::{self, ChildRow, Facts, GitHead, InboxPrefs, RosterRow, SavedRow, SearchDoc};
 use crate::transcript::Transcript;
-use crate::workspace::model::Settings;
-use crate::workspace::Workspace;
+use crate::workspace::model::{FollowUpBehavior, NewThreadWorkspace, ResponseStreaming, Settings};
+use crate::workspace::{PreparedWorktree, Workspace};
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
@@ -39,6 +44,7 @@ const GRANTABLE_EFFECTS: [&str; 6] = ["read", "write", "exec", "net", "outside",
 const GENERATED_TITLE_LIMIT: usize = 80;
 const TITLE_QUESTION: &str =
     "Reply with a concise 3-7 word title for this conversation, no punctuation. Reply with the title only.";
+const TITLE_CONTEXT_LIMIT: usize = 4000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
@@ -121,41 +127,171 @@ impl Mailbox {
 }
 
 enum Command {
-    AddProject { path: String },
-    RemoveProject { project: String },
-    RenameProject { project: String, name: String },
-    SetProjectIcon { project: String, icon: Option<String> },
-    ReorderProjects { projects: Vec<String> },
-    SelectThread { thread: Option<String> },
-    StartThread { draft: String, project: Option<String>, prompt: PromptDraft, settings: ThreadSettings },
-    Send { thread: String, prompt: PromptDraft, delivery: Delivery },
-    Abort { thread: String },
-    SendQueuedNow { thread: String, queued: String },
-    RemoveQueued { thread: String, queued: String },
-    AnswerApproval { thread: String, request: String, answer: ApprovalAnswer },
-    RenameThread { thread: String, title: String },
-    DeleteThread { thread: String },
-    SetArchived { thread: String, archived: bool },
-    SetPinned { thread: String, pinned: bool },
-    SetSettled { thread: String, settled: bool },
-    Snooze { thread: String, until: Option<i64> },
-    MarkUnread { thread: String, unread: bool },
-    EditFromHere { thread: String, entry: String },
-    ForkThread { thread: String },
-    Compact { thread: String },
-    SetModel { thread: String, provider: String, model: String },
-    SetThinkingLevel { thread: String, level: String },
-    SetAccessMode { thread: String, mode: AccessMode },
+    AddProject {
+        path: String,
+    },
+    RemoveProject {
+        project: String,
+    },
+    RenameProject {
+        project: String,
+        name: String,
+    },
+    SetProjectIcon {
+        project: String,
+        icon: Option<String>,
+    },
+    ReorderProjects {
+        projects: Vec<String>,
+    },
+    SelectThread {
+        thread: Option<String>,
+    },
+    StartThread {
+        draft: String,
+        project: Option<String>,
+        prompt: PromptDraft,
+        settings: ThreadSettings,
+    },
+    StartThreads {
+        draft: String,
+        project: Option<String>,
+        prompt: PromptDraft,
+        settings: ThreadSettings,
+        models: Vec<ModelKey>,
+    },
+    Send {
+        thread: String,
+        prompt: PromptDraft,
+        delivery: Delivery,
+    },
+    Abort {
+        thread: String,
+    },
+    SendQueuedNow {
+        thread: String,
+        queued: String,
+    },
+    RemoveQueued {
+        thread: String,
+        queued: String,
+    },
+    AnswerApproval {
+        thread: String,
+        request: String,
+        answer: ApprovalAnswer,
+    },
+    RenameThread {
+        thread: String,
+        title: String,
+    },
+    DeleteThread {
+        thread: String,
+    },
+    SetArchived {
+        thread: String,
+        archived: bool,
+    },
+    SetPinned {
+        thread: String,
+        pinned: bool,
+    },
+    SetSettled {
+        thread: String,
+        settled: bool,
+    },
+    Snooze {
+        thread: String,
+        until: Option<i64>,
+    },
+    MarkUnread {
+        thread: String,
+        unread: bool,
+    },
+    EditFromHere {
+        thread: String,
+        entry: String,
+    },
+    ForkThread {
+        thread: String,
+    },
+    Compact {
+        thread: String,
+    },
+    SetModel {
+        thread: String,
+        provider: String,
+        model: String,
+    },
+    SetThinkingLevel {
+        thread: String,
+        level: String,
+    },
+    SetAccessMode {
+        thread: String,
+        mode: AccessMode,
+    },
     LoadModels,
-    SetFavoriteModel { provider: String, model: String, favorite: bool },
-    ListCommands { request: String, project: Option<String> },
-    ListArchived { request: String },
-    SearchThreads { request: String, query: String, limit: u32 },
-    ReorderPinned { threads: Vec<String> },
-    SetAutoSettle { thread: String, enabled: bool },
-    SetHiddenModel { provider: String, model: String, hidden: bool },
-    RegenerateTitle { thread: String },
-    Shutdown { done: std::sync::mpsc::Sender<()> },
+    SetFavoriteModel {
+        provider: String,
+        model: String,
+        favorite: bool,
+    },
+    ListCommands {
+        request: String,
+        project: Option<String>,
+    },
+    ListSkills {
+        request: String,
+        project: Option<String>,
+    },
+    ListArchived {
+        request: String,
+    },
+    SearchThreads {
+        request: String,
+        query: String,
+        limit: u32,
+    },
+    ReorderPinned {
+        threads: Vec<String>,
+    },
+    SetAutoSettle {
+        thread: String,
+        enabled: bool,
+    },
+    SetHiddenModel {
+        provider: String,
+        model: String,
+        hidden: bool,
+    },
+    RegenerateTitle {
+        thread: String,
+    },
+    TitleGenerated {
+        thread: String,
+        result: Result<String, String>,
+    },
+    SetServiceTier {
+        thread: String,
+        tier: Option<String>,
+    },
+    RestartThread {
+        thread: String,
+    },
+    CancelSubagent {
+        thread: String,
+        child: String,
+    },
+    LoadMessageImage {
+        request: String,
+        thread: String,
+        entry: String,
+        index: u32,
+    },
+    Shutdown {
+        done: std::sync::mpsc::Sender<()>,
+    },
 }
 
 #[cfg_attr(feature = "ffi", derive(uniffi::Object))]
@@ -187,25 +323,42 @@ impl Studio {
             .map_err(|error| StudioError::Runtime { message: error.to_string() })?;
         let mailbox = Arc::new(Mailbox { updates: Mutex::new(Vec::new()), waker });
         let (client_slot, client_watch) = watch::channel(None);
-        let query = DaemonQuery::new(client_watch, session_dir.clone());
+        let query = DaemonQuery::new(client_watch.clone(), session_dir.clone());
+        let home = home.to_string_lossy().into_owned();
+        let text = TextGen::new(client_watch, session_dir.clone(), home.clone());
         let controller_main = config.controller_main.filter(|value| !value.is_empty()).map(PathBuf::from);
-        let workspace =
-            Workspace::new(runtime.handle().clone(), Arc::clone(&mailbox), data_dir, query, controller_main);
+        let workspace = Workspace::new(
+            runtime.handle().clone(),
+            Arc::clone(&mailbox),
+            data_dir,
+            query,
+            controller_main,
+            text.clone(),
+        );
         let settings = workspace.settings();
+        let pull_requests = workspace.pull_requests_changed();
         let (commands, receiver) = mpsc::unbounded_channel();
+        let adder = commands.clone();
+        workspace.set_project_adder(Arc::new(move |path: String| {
+            adder.send(Command::AddProject { path }).ok();
+        }));
         let actor = Actor {
             socket,
             session_dir,
             launch: config.launch,
-            home: home.to_string_lossy().into_owned(),
+            home,
             mailbox: Arc::clone(&mailbox),
             workspace: workspace.clone(),
             settings,
+            pull_requests,
+            text,
+            itself: commands.clone(),
             client_slot,
             client: None,
             store,
             saved: HashMap::new(),
             roster: HashMap::new(),
+            children: HashMap::new(),
             threads: HashMap::new(),
             by_active: HashMap::new(),
             focused: None,
@@ -214,6 +367,7 @@ impl Studio {
             utility: None,
             titles: HashMap::new(),
             last_rows: None,
+            protected: Vec::new(),
             dirty: true,
         };
         runtime.spawn(actor.run(receiver));
@@ -260,6 +414,17 @@ impl Studio {
 
     pub fn start_thread(&self, draft: String, project: Option<String>, prompt: PromptDraft, settings: ThreadSettings) {
         self.send_command(Command::StartThread { draft, project, prompt, settings });
+    }
+
+    pub fn start_threads(
+        &self,
+        draft: String,
+        project: Option<String>,
+        prompt: PromptDraft,
+        settings: ThreadSettings,
+        models: Vec<ModelKey>,
+    ) {
+        self.send_command(Command::StartThreads { draft, project, prompt, settings, models });
     }
 
     pub fn send(&self, thread: String, prompt: PromptDraft, delivery: Delivery) {
@@ -346,6 +511,10 @@ impl Studio {
         self.send_command(Command::ListCommands { request, project });
     }
 
+    pub fn list_skills(&self, request: String, project: Option<String>) {
+        self.send_command(Command::ListSkills { request, project });
+    }
+
     pub fn list_archived(&self, request: String) {
         self.send_command(Command::ListArchived { request });
     }
@@ -368,6 +537,22 @@ impl Studio {
 
     pub fn regenerate_title(&self, thread: String) {
         self.send_command(Command::RegenerateTitle { thread });
+    }
+
+    pub fn set_service_tier(&self, thread: String, tier: Option<String>) {
+        self.send_command(Command::SetServiceTier { thread, tier });
+    }
+
+    pub fn restart_thread(&self, thread: String) {
+        self.send_command(Command::RestartThread { thread });
+    }
+
+    pub fn cancel_subagent(&self, thread: String, child: String) {
+        self.send_command(Command::CancelSubagent { thread, child });
+    }
+
+    pub fn load_message_image(&self, request: String, thread: String, entry: String, index: u32) {
+        self.send_command(Command::LoadMessageImage { request, thread, entry, index });
     }
 }
 
@@ -398,6 +583,7 @@ struct Live {
     transcript: Transcript,
     approvals: Vec<(Approval, i64)>,
     sending: Vec<String>,
+    shown: HashMap<u64, Vec<Block>>,
 }
 
 #[derive(Default)]
@@ -413,6 +599,8 @@ struct Thread {
     reopen: bool,
     ended_by_events: bool,
     allowed_effects: Vec<String>,
+    resources: Option<Resources>,
+    rlm_children: Vec<Subagent>,
 }
 
 struct Actor {
@@ -423,11 +611,15 @@ struct Actor {
     mailbox: Arc<Mailbox>,
     workspace: Workspace,
     settings: watch::Receiver<Settings>,
+    pull_requests: watch::Receiver<u64>,
+    text: TextGen,
+    itself: mpsc::UnboundedSender<Command>,
     client_slot: watch::Sender<Option<DaemonClient>>,
     client: Option<DaemonClient>,
     store: Store,
     saved: HashMap<String, SavedRow>,
     roster: HashMap<String, RosterRow>,
+    children: HashMap<String, ChildRow>,
     threads: HashMap<String, Thread>,
     by_active: HashMap<String, String>,
     focused: Option<String>,
@@ -436,6 +628,7 @@ struct Actor {
     utility: Option<String>,
     titles: HashMap<String, String>,
     last_rows: Option<Vec<ThreadRow>>,
+    protected: Vec<String>,
     dirty: bool,
 }
 
@@ -472,6 +665,7 @@ impl Actor {
         let mut dead = None;
         let mut retry_at = Some(Instant::now());
         let mut settings_open = true;
+        let mut pulls_open = true;
         let mut timer = tokio::time::interval(TIMER_PERIOD);
         loop {
             if self.client.is_none() && retry_at.is_some_and(|at| at <= Instant::now()) {
@@ -525,6 +719,12 @@ impl Actor {
                 changed = self.settings.changed(), if settings_open => {
                     if changed.is_err() {
                         settings_open = false;
+                    }
+                    self.dirty = true;
+                }
+                changed = self.pull_requests.changed(), if pulls_open => {
+                    if changed.is_err() {
+                        pulls_open = false;
                     }
                     self.dirty = true;
                 }
@@ -661,9 +861,12 @@ impl Actor {
             }
             Command::SelectThread { thread } => self.select(thread).await,
             Command::StartThread { draft, project, prompt, settings } => {
-                if let Err(error) = self.start_thread(&draft, project, prompt, settings).await {
+                if let Err(error) = self.start_thread(&draft, project, prompt, settings, None).await {
                     self.mailbox.notice(NoticeLevel::Error, error);
                 }
+            }
+            Command::StartThreads { draft, project, prompt, settings, models } => {
+                self.start_threads(&draft, project, prompt, settings, models).await;
             }
             Command::Send { thread, prompt, delivery } => {
                 if let Err(error) = self.send_prompt(&thread, prompt, delivery).await {
@@ -763,8 +966,15 @@ impl Actor {
                 self.push_models();
             }
             Command::ListCommands { request, project } => {
-                let update = match self.list_commands(project).await {
-                    Ok(commands) => Update::Commands { request, commands },
+                let update = match self.project_resources(project).await {
+                    Ok(resources) => Update::Commands { request, commands: resources.commands() },
+                    Err(message) => Update::RequestFailed { request, message },
+                };
+                self.mailbox.push(update);
+            }
+            Command::ListSkills { request, project } => {
+                let update = match self.project_resources(project).await {
+                    Ok(resources) => Update::Skills { request, skills: resources.skills() },
                     Err(message) => Update::RequestFailed { request, message },
                 };
                 self.mailbox.push(update);
@@ -791,6 +1001,46 @@ impl Actor {
                 if let Err(error) = self.regenerate_title(&thread).await {
                     self.mailbox.notice(NoticeLevel::Error, format!("Could not regenerate the title: {error}"));
                 }
+            }
+            Command::TitleGenerated { thread, result } => match result.map(|answer| clean_generated_title(&answer)) {
+                Ok(Some(title)) => self.rename(&thread, &title).await,
+                Ok(None) => self.mailbox.notice(NoticeLevel::Warning, "The model returned no usable title."),
+                Err(error) => {
+                    self.mailbox.notice(NoticeLevel::Error, format!("Could not regenerate the title: {error}"));
+                }
+            },
+            Command::SetServiceTier { thread, tier } => {
+                if let Err(error) = self.set_service_tier(&thread, tier).await {
+                    self.mailbox.notice(NoticeLevel::Error, error);
+                }
+            }
+            Command::RestartThread { thread } => {
+                if let Err(error) = self.restart_thread(&thread).await {
+                    self.mailbox.notice(NoticeLevel::Error, format!("Could not restart the thread: {error}"));
+                }
+            }
+            Command::CancelSubagent { thread, child } => {
+                let result = match self.live_active(&thread) {
+                    Some(active) => {
+                        self.call(DaemonCommand::CancelRlmChild {
+                            id: None,
+                            active_session_id: active,
+                            child_id: child,
+                            rest: Map::default(),
+                        })
+                        .await
+                    }
+                    None => Err("That thread is not open.".to_string()),
+                };
+                self.report(result);
+                self.refresh_subagents(&thread).await;
+            }
+            Command::LoadMessageImage { request, thread, entry, index } => {
+                let update = match self.message_image(&thread, &entry, index).await {
+                    Ok((mime_type, data)) => Update::MessageImage { request, mime_type, data },
+                    Err(message) => Update::RequestFailed { request, message },
+                };
+                self.mailbox.push(update);
             }
             Command::Shutdown { done } => self.stop(&done).await,
         }
@@ -908,7 +1158,10 @@ impl Actor {
             return;
         }
         match self.ensure_open(&id).await {
-            Ok(_) => self.emit_focus(&id),
+            Ok(_) => {
+                self.emit_focus(&id);
+                self.refresh_subagents(&id).await;
+            }
             Err(error) => self.mailbox.notice(NoticeLevel::Error, error),
         }
     }
@@ -1073,6 +1326,7 @@ impl Actor {
             thread.run_started_at = thread.run_started_at.or_else(|| transcript.last_user_at()).or(Some(now_ms()));
         }
         thread.last_user_at = transcript.last_user_at().or(thread.last_user_at);
+        thread.resources = None;
         thread.live = Some(Live {
             active: attach.active_session_id.clone(),
             seen: attach.snapshot.last_event_sequence,
@@ -1080,6 +1334,7 @@ impl Actor {
             transcript,
             approvals: Vec::new(),
             sending: Vec::new(),
+            shown: HashMap::new(),
         });
         self.by_active.insert(attach.active_session_id.clone(), id.to_string());
         for turn in settled.into_iter().filter(|turn| !turn.files.is_empty()) {
@@ -1199,25 +1454,36 @@ impl Actor {
         project: Option<String>,
         prompt: PromptDraft,
         settings: ThreadSettings,
-    ) -> Result<(), String> {
+        fan_out: Option<String>,
+    ) -> Result<String, String> {
         let client = self.client.clone().ok_or_else(|| "Not connected to the Eukhe daemon yet.".to_string())?;
         let project_path = match &project {
             Some(project) => Some(self.store.project_id(project).ok_or_else(|| format!("Unknown project {project}."))?),
             None => None,
         };
-        let cwd = match (&settings.worktree, &project_path) {
+        let effective = self.workspace.effective_settings(project_path.as_deref());
+        let choice = match settings.worktree {
+            WorktreeChoice::Default => match effective.new_thread_workspace {
+                NewThreadWorkspace::Local => WorktreeChoice::Local,
+                NewThreadWorkspace::Worktree => {
+                    WorktreeChoice::NewWorktree { branch: format!("local-studio/{}", now_ms()), base: None }
+                }
+            },
+            other => other,
+        };
+        let cwd = match (&choice, &project_path) {
             (WorktreeChoice::Existing { path }, _) => path.clone(),
-            (WorktreeChoice::NewWorktree { branch, base }, Some(project)) => self
-                .workspace
-                .create_worktree_path(Path::new(project), branch, base.as_deref())
-                .await?
-                .to_string_lossy()
-                .into_owned(),
+            (WorktreeChoice::NewWorktree { branch, base }, Some(project)) => {
+                match self.workspace.prepare_worktree(draft, Path::new(project), branch, base.as_deref()).await? {
+                    PreparedWorktree::Worktree(path) => path.to_string_lossy().into_owned(),
+                    PreparedWorktree::Local => project.clone(),
+                }
+            }
             (WorktreeChoice::NewWorktree { .. }, None) => {
                 return Err("A new worktree needs a project.".to_string());
             }
-            (WorktreeChoice::Local, Some(project)) => project.clone(),
-            (WorktreeChoice::Local, None) => self.home.clone(),
+            (WorktreeChoice::Local | WorktreeChoice::Default, Some(project)) => project.clone(),
+            (WorktreeChoice::Local | WorktreeChoice::Default, None) => self.home.clone(),
         };
         let created = saved_sessions::create_resident(&client, None, self.create_config(&cwd))
             .await
@@ -1230,20 +1496,64 @@ impl Actor {
         self.store.update(&id, |flags| {
             flags.project.clone_from(&project_path);
             flags.access = Some(settings.access);
+            flags.fan_out = fan_out;
         });
         self.save();
         self.attach(&id, &created.active_session_id).await?;
-        if settings.provider.is_some() || settings.thinking_level.is_some() {
-            if let Err(error) = self
-                .apply_model(&id, settings.provider.clone(), settings.model.clone(), settings.thinking_level.clone())
-                .await
-            {
+        let provider = settings.provider.or(effective.default_provider);
+        let model = settings.model.or(effective.default_model);
+        let thinking = settings.thinking_level.or(effective.default_thinking_level);
+        if (provider.is_some() && model.is_some()) || thinking.is_some() {
+            if let Err(error) = self.apply_model(&id, provider, model, thinking).await {
                 self.mailbox.notice(NoticeLevel::Warning, error);
             }
         }
         self.mailbox.push(Update::ThreadStarted { draft: draft.to_string(), thread: id.clone() });
         self.dirty = true;
-        self.send_prompt(&id, prompt, Delivery::Queue).await
+        self.send_prompt(&id, prompt, Delivery::Queue).await?;
+        Ok(id)
+    }
+
+    async fn start_threads(
+        &mut self,
+        draft: &str,
+        project: Option<String>,
+        prompt: PromptDraft,
+        settings: ThreadSettings,
+        models: Vec<ModelKey>,
+    ) {
+        if models.is_empty() {
+            if let Err(error) = self.start_thread(draft, project, prompt, settings, None).await {
+                self.mailbox.notice(NoticeLevel::Error, error);
+            }
+            return;
+        }
+        let base = match &settings.worktree {
+            WorktreeChoice::NewWorktree { base, .. } => base.clone(),
+            WorktreeChoice::Local | WorktreeChoice::Existing { .. } | WorktreeChoice::Default => None,
+        };
+        let group = format!("fanout-{}", now_ms());
+        for (index, key) in models.into_iter().enumerate() {
+            let member = if index == 0 { draft.to_string() } else { format!("{draft}#{index}") };
+            let branch =
+                format!("local-studio/{group}-{index}-{}", branch_slug(&format!("{}-{}", key.provider, key.model)));
+            let member_settings = ThreadSettings {
+                provider: Some(key.provider),
+                model: Some(key.model),
+                thinking_level: settings.thinking_level.clone(),
+                access: settings.access,
+                worktree: if project.is_some() {
+                    WorktreeChoice::NewWorktree { branch, base: base.clone() }
+                } else {
+                    WorktreeChoice::Local
+                },
+            };
+            if let Err(error) =
+                self.start_thread(&member, project.clone(), prompt.clone(), member_settings, Some(group.clone())).await
+            {
+                self.mailbox.notice(NoticeLevel::Error, error);
+            }
+        }
     }
 
     async fn send_prompt(&mut self, id: &str, prompt: PromptDraft, delivery: Delivery) -> Result<(), String> {
@@ -1255,18 +1565,35 @@ impl Actor {
             return Err("Write a message first.".to_string());
         }
         let active = self.ensure_open(id).await?;
+        let message = if message.starts_with('/') || message.contains('$') {
+            self.resources(id, &active).await.expand(&message)
+        } else {
+            message
+        };
         let images = (!prompt.images.is_empty()).then(|| {
             Value::Array(
                 prompt
                     .images
                     .iter()
-                    .map(|image| json!({ "type": "image", "data": base64(&image.data), "mimeType": image.mime_type }))
+                    .map(|image| {
+                        json!({ "type": "image", "data": images::encode_base64(&image.data), "mimeType": image.mime_type })
+                    })
                     .collect(),
             )
         });
+        let delivery = match delivery {
+            Delivery::Default => {
+                let project = self.thread_project(id);
+                match self.workspace.effective_settings(project.as_deref()).follow_up_behavior {
+                    FollowUpBehavior::Queue => Delivery::Queue,
+                    FollowUpBehavior::Steer => Delivery::Steer,
+                }
+            }
+            explicit => explicit,
+        };
         let behavior = match delivery {
-            Delivery::Queue => StreamingBehavior::FollowUp,
             Delivery::Steer => StreamingBehavior::Steer,
+            Delivery::Queue | Delivery::Default => StreamingBehavior::FollowUp,
         };
         if let Some(thread) = self.threads.get_mut(id) {
             thread.pending_run = true;
@@ -1292,6 +1619,35 @@ impl Actor {
             return Err(error);
         }
         Ok(())
+    }
+
+    fn thread_project(&self, id: &str) -> Option<String> {
+        let cwd = self.threads.get(id).and_then(|thread| thread.cwd.clone()).unwrap_or_default();
+        threads::project_for(&cwd, &self.store.flags(id), &self.store.projects)
+    }
+
+    async fn resources(&mut self, id: &str, active: &str) -> Resources {
+        if let Some(resources) = self.threads.get(id).and_then(|thread| thread.resources.clone()) {
+            return resources;
+        }
+        let command = DaemonCommand::GetResourceSnapshot {
+            id: None,
+            active_session_id: active.to_string(),
+            rest: Map::default(),
+        };
+        match self.call(command).await {
+            Ok(data) => {
+                let resources = Resources::parse(&data);
+                if let Some(thread) = self.threads.get_mut(id) {
+                    thread.resources = Some(resources.clone());
+                }
+                resources
+            }
+            Err(error) => {
+                self.mailbox.notice(NoticeLevel::Warning, format!("Could not read the skills: {error}"));
+                Resources::default()
+            }
+        }
     }
 
     async fn send_queued_now(&mut self, id: &str, queued: &str) {
@@ -1510,6 +1866,13 @@ impl Actor {
                 self.mailbox.notice(NoticeLevel::Error, format!("Could not delete the thread: {reason}"));
             }
             Ok(_) => {
+                let cwd = self
+                    .threads
+                    .get(id)
+                    .and_then(|thread| thread.cwd.clone())
+                    .or_else(|| self.saved.get(id).map(|row| row.cwd.clone()));
+                let worktree = cwd.and_then(|cwd| threads::git_head(&cwd).worktree);
+                self.workspace.thread_deleted(worktree);
                 self.threads.remove(id);
                 self.saved.remove(id);
                 self.roster.retain(|_, row| row.session_id != id);
@@ -1747,7 +2110,7 @@ impl Actor {
         }
     }
 
-    async fn list_commands(&mut self, project: Option<String>) -> Result<Vec<SlashCommand>, String> {
+    async fn project_resources(&mut self, project: Option<String>) -> Result<Resources, String> {
         let project = project.and_then(|project| self.store.project_id(&project));
         let in_project = project.as_ref().and_then(|project| {
             self.threads.iter().find_map(|(id, thread)| {
@@ -1761,28 +2124,153 @@ impl Actor {
             Some(active) => active,
             None => self.utility_session().await?,
         };
-        let data =
-            self.call(DaemonCommand::GetCommands { id: None, active_session_id: active, rest: Map::default() }).await?;
-        Ok(data
-            .get("commands")
-            .and_then(Value::as_array)
-            .map(|commands| {
-                commands
-                    .iter()
-                    .filter_map(|command| {
-                        Some(SlashCommand {
-                            name: command.get("name")?.as_str()?.to_string(),
-                            description: command
-                                .get("description")
-                                .and_then(Value::as_str)
-                                .unwrap_or_default()
-                                .to_string(),
-                            source: command.get("source").and_then(Value::as_str).unwrap_or_default().to_string(),
-                        })
-                    })
-                    .collect()
+        let data = self
+            .call(DaemonCommand::GetResourceSnapshot { id: None, active_session_id: active, rest: Map::default() })
+            .await?;
+        Ok(Resources::parse(&data))
+    }
+
+    async fn set_service_tier(&mut self, id: &str, tier: Option<String>) -> Result<(), String> {
+        let active = self.ensure_open(id).await?;
+        let service_tier = match tier {
+            Some(tier) => Some(
+                serde_json::from_value::<ServiceTier>(Value::String(tier.clone()))
+                    .map_err(|_| format!("Unknown service tier {tier}."))?,
+            ),
+            None => None,
+        };
+        self.call(DaemonCommand::SetServiceTier {
+            id: None,
+            active_session_id: active,
+            service_tier,
+            rest: Map::default(),
+        })
+        .await?;
+        self.reload_state(id).await;
+        Ok(())
+    }
+
+    async fn restart_thread(&mut self, id: &str) -> Result<(), String> {
+        if !self.known(id) {
+            return Err(format!("Unknown thread {id}."));
+        }
+        let active = self.live_active(id).or_else(|| self.roster_for(id).and_then(|row| row.active_session_id.clone()));
+        if let Some(active) = active {
+            self.by_active.remove(&active);
+            if let Some(thread) = self.threads.get_mut(id) {
+                thread.live = None;
+                thread.pending_run = false;
+                thread.run_started_at = None;
+            }
+            self.call(DaemonCommand::Kill { id: None, active_session_id: active, rest: Map::default() }).await?;
+        }
+        self.ensure_open(id).await?;
+        self.dirty = true;
+        self.mailbox.notice(NoticeLevel::Info, "The agent session restarted.");
+        Ok(())
+    }
+
+    async fn refresh_subagents(&mut self, id: &str) {
+        let Some(active) = self.live_active(id) else { return };
+        let command = DaemonCommand::GetRlmChildren { id: None, active_session_id: active, rest: Map::default() };
+        if let Ok(data) = self.call(command).await {
+            let children = data
+                .get("children")
+                .and_then(Value::as_array)
+                .map(|children| children.iter().filter_map(rlm_child).collect())
+                .unwrap_or_default();
+            if let Some(thread) = self.threads.get_mut(id) {
+                thread.rlm_children = children;
+            }
+        }
+        self.emit_subagents(id);
+    }
+
+    fn subagents(&self, id: &str) -> Vec<Subagent> {
+        let thread = self.threads.get(id);
+        let active = thread.and_then(|thread| thread.live.as_ref()).map(|live| live.active.as_str());
+        let roster_active = self.roster_for(id).and_then(|row| row.active_session_id.as_deref());
+        let mut agents: Vec<Subagent> = self
+            .children
+            .values()
+            .filter(|child| {
+                child.parent_session_id.as_deref() == Some(id)
+                    || child
+                        .parent_active_session_id
+                        .as_deref()
+                        .is_some_and(|parent| Some(parent) == active || Some(parent) == roster_active)
             })
-            .unwrap_or_default())
+            .map(|child| child.agent.clone())
+            .collect();
+        for known in thread.map(|thread| thread.rlm_children.as_slice()).unwrap_or_default() {
+            match agents.iter_mut().find(|agent| agent.id == known.id) {
+                Some(agent) => {
+                    agent.duration_ms = known.duration_ms.or(agent.duration_ms);
+                    agent.answer.clone_from(&known.answer);
+                    if agent.model.is_none() {
+                        agent.model.clone_from(&known.model);
+                    }
+                }
+                None => agents.push(known.clone()),
+            }
+        }
+        agents.sort_by(|left, right| right.running.cmp(&left.running).then_with(|| left.id.cmp(&right.id)));
+        agents
+    }
+
+    fn emit_subagents(&self, id: &str) {
+        self.mailbox.push(Update::Subagents { thread: id.to_string(), agents: self.subagents(id) });
+    }
+
+    async fn message_image(&mut self, id: &str, entry: &str, index: u32) -> Result<(String, Vec<u8>), String> {
+        let active = self.ensure_open(id).await?;
+        let forks = self
+            .call(DaemonCommand::GetUserMessagesForForking {
+                id: None,
+                active_session_id: active.clone(),
+                rest: Map::default(),
+            })
+            .await?;
+        let entries: Vec<&str> = forks
+            .get("messages")
+            .and_then(Value::as_array)
+            .map(|messages| messages.iter().filter_map(|message| message.get("entryId")?.as_str()).collect())
+            .unwrap_or_default();
+        let position =
+            entries.iter().position(|known| *known == entry).ok_or_else(|| "Unknown message.".to_string())?;
+        let from_end = entries.len() - 1 - position;
+        let data =
+            self.call(DaemonCommand::GetMessages { id: None, active_session_id: active, rest: Map::default() }).await?;
+        let messages = Messages::deserialize(&data).map_err(|error| format!("Unreadable transcript: {error}"))?;
+        let users: Vec<&UserContent> = messages
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                AgentMessage::User(user) => Some(&user.content),
+                AgentMessage::Assistant(_)
+                | AgentMessage::ToolResult(_)
+                | AgentMessage::BashExecution(_)
+                | AgentMessage::Custom(_)
+                | AgentMessage::BranchSummary(_)
+                | AgentMessage::CompactionSummary(_) => None,
+            })
+            .collect();
+        let content = users
+            .len()
+            .checked_sub(from_end + 1)
+            .and_then(|at| users.get(at))
+            .ok_or_else(|| "That message is no longer in the conversation.".to_string())?;
+        let UserContent::Blocks(blocks) = content else { return Err("That message has no images.".to_string()) };
+        let image = blocks
+            .iter()
+            .filter_map(|block| match block {
+                UserContentBlock::Image(image) => Some(image),
+                UserContentBlock::Text(_) | UserContentBlock::Raw(_) => None,
+            })
+            .nth(usize::try_from(index).unwrap_or(usize::MAX))
+            .ok_or_else(|| "That image is not in the message.".to_string())?;
+        let bytes = images::decode_base64(&image.data).ok_or_else(|| "The image data is unreadable.".to_string())?;
+        Ok((image.mime_type.clone(), bytes))
     }
 
     async fn refresh_saved(&mut self) {
@@ -1808,11 +2296,15 @@ impl Actor {
     }
 
     fn roster_changed(&mut self, changed: Value, removed: &[String], resync: bool, transitions: bool) {
+        let children_before = self.children.len();
+        let mut children_changed = false;
         if resync {
             self.roster.clear();
+            self.children.clear();
         }
         for agent in removed {
             self.roster.remove(agent);
+            children_changed |= self.children.remove(agent).is_some();
         }
         let entries = match changed {
             Value::Array(entries) => entries,
@@ -1820,6 +2312,12 @@ impl Actor {
         };
         for entry in entries {
             let Some(agent) = entry.get("agentId").and_then(Value::as_str).map(str::to_string) else { continue };
+            if let Some(child) = threads::child_row(&agent, &entry) {
+                self.roster.remove(&agent);
+                children_changed |= self.children.get(&agent) != Some(&child);
+                self.children.insert(agent, child);
+                continue;
+            }
             let Some(row) = threads::roster_row(&entry) else {
                 self.roster.remove(&agent);
                 continue;
@@ -1848,6 +2346,11 @@ impl Actor {
                 }
             }
             self.roster.insert(agent, row);
+        }
+        if children_changed || children_before != self.children.len() {
+            if let Some(focused) = self.focused.clone() {
+                self.emit_subagents(&focused);
+            }
         }
         self.dirty = true;
     }
@@ -1963,6 +2466,25 @@ impl Actor {
         if self.titles.values().any(|title| title == id) {
             return Err("A title is already being generated for this thread.".to_string());
         }
+        let project = self.thread_project(id);
+        let settings = self.workspace.effective_settings(project.as_deref());
+        if let (Some(provider), Some(model)) = (settings.text_generation_provider, settings.text_generation_model) {
+            let excerpt: String = self
+                .saved
+                .get(id)
+                .map(|row| row.text.chars().take(TITLE_CONTEXT_LIMIT).collect())
+                .or_else(|| self.threads.get(id).and_then(|thread| thread.live.as_ref()?.transcript.first_user_text()))
+                .unwrap_or_else(|| self.title(id));
+            let prompt = format!("{TITLE_QUESTION}\n\nConversation:\n{excerpt}");
+            let text = self.text.clone();
+            let itself = self.itself.clone();
+            let thread = id.to_string();
+            tokio::spawn(async move {
+                let result = text.one_shot(prompt, Some(provider), Some(model)).await;
+                itself.send(Command::TitleGenerated { thread, result }).ok();
+            });
+            return Ok(());
+        }
         let active = self.ensure_open(id).await?;
         let request = format!("title:{id}:{}", now_ms());
         self.titles.insert(request.clone(), id.to_string());
@@ -2007,6 +2529,7 @@ impl Actor {
         let Some(id) = self.by_active.get(active).cloned() else { return };
         let focused = self.focused.as_deref() == Some(id.as_str());
         let now = now_ms();
+        let mode = self.settings.borrow().response_streaming;
         let Some(thread) = self.threads.get_mut(&id) else { return };
         let Some(live) = thread.live.as_mut() else { return };
         if sequence != 0 {
@@ -2015,7 +2538,12 @@ impl Actor {
             }
             live.seen = sequence;
         }
-        let ops = live.transcript.apply(event);
+        let ops: Vec<TranscriptOp> = if focused {
+            live.transcript.apply(event).into_iter().filter_map(|op| coalesce(mode, &mut live.shown, op)).collect()
+        } else {
+            live.transcript.apply(event);
+            Vec::new()
+        };
         let changed = live.state.apply(event);
         let settled = live.transcript.take_settled();
         let mut failure = None;
@@ -2038,10 +2566,8 @@ impl Actor {
             SessionEvent::SessionActionUpdate { .. } => live.sending.clear(),
             _ => {}
         }
-        if focused {
-            for op in ops {
-                self.mailbox.push(Update::Transcript { thread: id.clone(), op });
-            }
+        for op in ops {
+            self.mailbox.push(Update::Transcript { thread: id.clone(), op });
         }
         if changed {
             self.emit_info(&id);
@@ -2101,6 +2627,9 @@ impl Actor {
             self.save();
         }
         self.reload_context(id).await;
+        if self.focused.as_deref() == Some(id) {
+            self.refresh_subagents(id).await;
+        }
         self.refresh_saved().await;
         self.emit_info(id);
         self.release(id).await;
@@ -2113,6 +2642,7 @@ impl Actor {
             working_section: settings.working_section,
             auto_settle_inactive: settings.auto_settle_inactive,
             auto_settle_inactive_days: settings.auto_settle_inactive_days,
+            auto_settle_merged: settings.auto_settle_merged,
         };
         let mut ids: HashSet<String> = self.saved.keys().cloned().collect();
         ids.extend(self.roster.values().filter(|row| row.session_file.is_some()).map(|row| row.session_id.clone()));
@@ -2123,8 +2653,10 @@ impl Actor {
             if flags.archived != archived {
                 continue;
             }
-            let facts = self.facts(&id, now);
+            let mut facts = self.facts(&id, now);
             let head = self.heads.entry(facts.cwd.clone()).or_insert_with(|| threads::git_head(&facts.cwd)).clone();
+            facts.pull_request =
+                head.branch.as_deref().and_then(|branch| self.workspace.thread_pull_request(&facts.cwd, branch));
             rows.push(threads::row(facts, &flags, &self.store.projects, prefs, head, now));
         }
         threads::arrange(rows)
@@ -2168,6 +2700,10 @@ impl Actor {
                 .or_else(|| roster.and_then(|row| row.model.clone()))
                 .or_else(|| saved.and_then(|row| row.model.clone())),
             note: roster.and_then(|row| row.note.clone()),
+            monitoring: roster.is_some_and(|row| row.monitoring),
+            live_agents: u32::try_from(self.subagents(id).iter().filter(|agent| agent.running).count())
+                .unwrap_or(u32::MAX),
+            pull_request: None,
             cwd,
         }
     }
@@ -2179,10 +2715,72 @@ impl Actor {
         self.dirty = false;
         let rows = self.rows(false);
         if self.last_rows.as_ref() != Some(&rows) {
+            let mut protected: Vec<String> = rows.iter().filter_map(|row| row.worktree.clone()).collect();
+            protected.sort();
+            protected.dedup();
+            if protected != self.protected {
+                self.protected.clone_from(&protected);
+                self.workspace.protect_worktrees(protected);
+            }
             self.last_rows = Some(rows.clone());
             self.mailbox.push_threads(rows);
         }
     }
+}
+
+fn coalesce(mode: ResponseStreaming, shown: &mut HashMap<u64, Vec<Block>>, op: TranscriptOp) -> Option<TranscriptOp> {
+    if mode == ResponseStreaming::Token {
+        return Some(op);
+    }
+    let (index, mut item, insert) = match op {
+        TranscriptOp::Insert { index, item } => (index, item, true),
+        TranscriptOp::Update { index, item } => (index, item, false),
+        TranscriptOp::Reset { .. } => return Some(op),
+    };
+    let ItemKind::Assistant { blocks, streaming: true, .. } = &mut item.kind else {
+        shown.remove(&item.id);
+        return Some(if insert { TranscriptOp::Insert { index, item } } else { TranscriptOp::Update { index, item } });
+    };
+    let visible: Vec<Block> = blocks
+        .iter()
+        .filter_map(|block| match block {
+            Block::Thinking { .. } => Some(block.clone()),
+            Block::Text { text } => {
+                let kept = match mode {
+                    ResponseStreaming::Turn => "",
+                    ResponseStreaming::Paragraph => text.rfind("\n\n").map_or("", |end| &text[..end]),
+                    ResponseStreaming::Token => text.as_str(),
+                };
+                (!kept.trim().is_empty()).then(|| Block::Text { text: kept.to_string() })
+            }
+        })
+        .collect();
+    if !insert && shown.get(&item.id) == Some(&visible) {
+        return None;
+    }
+    shown.insert(item.id, visible.clone());
+    *blocks = visible;
+    Some(if insert { TranscriptOp::Insert { index, item } } else { TranscriptOp::Update { index, item } })
+}
+
+fn rlm_child(child: &Value) -> Option<Subagent> {
+    let text = |key: &str| child.get(key).and_then(Value::as_str).filter(|value| !value.is_empty());
+    let status = text("status").unwrap_or_default();
+    Some(Subagent {
+        id: text("id")?.to_string(),
+        title: text("label")
+            .or_else(|| text("sessionName"))
+            .map_or_else(|| "Subagent".to_string(), threads::clean_title),
+        status: status.to_string(),
+        running: matches!(status, "running" | "queued" | "pending" | "working"),
+        started_at: None,
+        duration_ms: child.get("durationMs").and_then(Value::as_u64),
+        tokens: 0,
+        current_tool: None,
+        note: None,
+        model: text("model").map(str::to_string),
+        answer: text("answerPreview").map(str::to_string),
+    })
 }
 
 fn clean_generated_title(answer: &str) -> Option<String> {
@@ -2249,22 +2847,12 @@ fn prompt_input(images: Option<Value>, behavior: StreamingBehavior) -> PromptInp
     }
 }
 
-fn base64(data: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let bytes = [chunk[0], chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
-        let triple = (u32::from(bytes[0]) << 16) | (u32::from(bytes[1]) << 8) | u32::from(bytes[2]);
-        for position in 0..4 {
-            if position <= chunk.len() {
-                let index = usize::try_from((triple >> (18 - 6 * position)) & 0x3f).unwrap_or(0);
-                out.push(char::from(ALPHABET[index]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
+fn branch_slug(text: &str) -> String {
+    let slug: String = text
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '_' { c.to_ascii_lowercase() } else { '-' })
+        .collect();
+    slug.split('-').filter(|part| !part.is_empty()).collect::<Vec<_>>().join("-")
 }
 
 fn truncate(text: &str, limit: usize) -> String {

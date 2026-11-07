@@ -1,9 +1,10 @@
 use eukhe_types::ai::CatalogModel;
 use eukhe_types::daemon::{SessionActionSnapshot, SessionEvent};
+use eukhe_types::goal::GoalState;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::model::{AccessMode, ContextUsage, ModelOption, ModelRef, QueuedMessage, ThreadInfo};
+use crate::model::{AccessMode, ContextUsage, Goal, ModelOption, ModelRef, QueuedMessage, ThreadInfo};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct LiveState {
@@ -19,6 +20,9 @@ pub(crate) struct LiveState {
     pub(crate) retry_attempt: u32,
     pub(crate) context: Option<ContextUsage>,
     pub(crate) queue: Queue,
+    pub(crate) service_tier: Option<String>,
+    pub(crate) service_tiers: Vec<String>,
+    pub(crate) goal: Option<Goal>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -109,6 +113,15 @@ impl LiveState {
         if let Some(usage) = state.get("contextUsage") {
             self.context = context_usage(usage);
         }
+        if let Some(tier) = state.get("serviceTier") {
+            self.service_tier = tier.as_str().map(str::to_string).filter(|tier| !tier.is_empty());
+        }
+        if let Some(tiers) = state.get("availableServiceTiers").and_then(Value::as_array) {
+            self.service_tiers = tiers.iter().filter_map(Value::as_str).map(str::to_string).collect();
+        }
+        if let Some(goal) = state.get("goal") {
+            self.goal = GoalState::deserialize(goal).ok().and_then(|goal| goal_record(&goal));
+        }
     }
 
     pub(crate) fn apply(&mut self, event: &SessionEvent) -> bool {
@@ -125,6 +138,11 @@ impl LiveState {
                 replace(&mut self.retry_attempt, u32::try_from(*attempt).unwrap_or(u32::MAX))
             }
             SessionEvent::AutoRetryEnd { .. } => replace(&mut self.retry_attempt, 0),
+            SessionEvent::ServiceTierChanged { service_tier } => replace(
+                &mut self.service_tier,
+                serde_json::to_value(service_tier).ok().and_then(|tier| tier.as_str().map(str::to_string)),
+            ),
+            SessionEvent::GoalUpdate { goal } => replace(&mut self.goal, goal_record(goal)),
             SessionEvent::TurnStart
             | SessionEvent::TurnEnd { .. }
             | SessionEvent::PromptProgress { .. }
@@ -135,8 +153,6 @@ impl LiveState {
             | SessionEvent::ToolExecutionUpdate { .. }
             | SessionEvent::ToolExecutionEnd { .. }
             | SessionEvent::CompactionSummaryDelta { .. }
-            | SessionEvent::ServiceTierChanged { .. }
-            | SessionEvent::GoalUpdate { .. }
             | SessionEvent::MemoryUpdate { .. }
             | SessionEvent::AgentRelay(_)
             | SessionEvent::BashStart { .. }
@@ -166,8 +182,26 @@ impl LiveState {
             context: self.context,
             branch: None,
             worktree: None,
+            service_tier: self.service_tier.clone(),
+            service_tiers: self.service_tiers.clone(),
+            goal: self.goal.clone(),
         }
     }
+}
+
+fn goal_record(goal: &GoalState) -> Option<Goal> {
+    let objective = goal.objective.clone().filter(|objective| !objective.trim().is_empty())?;
+    Some(Goal {
+        objective,
+        status: serde_json::to_value(goal.status)
+            .ok()
+            .and_then(|status| status.as_str().map(str::to_string))
+            .unwrap_or_default(),
+        active: goal.active,
+        tokens_used: goal.tokens_used,
+        token_budget: goal.token_budget,
+        time_used_seconds: goal.time_used_seconds,
+    })
 }
 
 pub(crate) fn context_usage(value: &Value) -> Option<ContextUsage> {
@@ -198,6 +232,12 @@ pub(crate) fn model_options(data: &Value) -> anyhow::Result<Vec<ModelOption>> {
             provider: entry.model.provider,
             id: entry.model.id,
             name: entry.model.name,
+            service_tiers: entry
+                .service_tiers
+                .iter()
+                .filter_map(|tier| serde_json::to_value(tier).ok())
+                .filter_map(|tier| tier.as_str().map(str::to_string))
+                .collect(),
         }
     }));
     Ok(options)
@@ -215,6 +255,7 @@ fn faux_option() -> Option<ModelOption> {
         thinking_levels: Vec::new(),
         context_window: script.get("contextWindow").and_then(Value::as_u64).unwrap_or(128_000),
         configured: true,
+        service_tiers: Vec::new(),
     })
 }
 

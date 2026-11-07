@@ -7,14 +7,15 @@ use anyhow::{bail, Context};
 use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
-    AccessMode, ApprovalAnswer, Block, Connection, DaemonLaunch, Delivery, Item, ItemKind, ModelKey, ModelOption,
-    NotificationKind, Project, PromptDraft, Shelf, Studio, StudioConfig, ThreadRow, ThreadSearchHit, ThreadSettings,
-    ThreadStatus, ToolState, TranscriptOp, Update, Waker, WorktreeChoice,
+    AccessMode, ApprovalAnswer, Block, CommandKind, Connection, DaemonLaunch, Delivery, FollowUpBehavior,
+    ImageAttachment, Item, ItemKind, ModelKey, ModelOption, NotificationKind, Project, PromptDraft, ResponseStreaming,
+    Settings, Shelf, SkillEntry, SkillSource, SlashCommand, Studio, StudioConfig, ThreadRow, ThreadSearchHit,
+    ThreadSettings, ThreadStatus, ToolState, TranscriptOp, Update, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(60);
-const FAUX_SCRIPT: &str = r#"{"modelId":"faux-1","responses":[{"content":[{"type":"thinking","thinking":"planning the smoke"},{"type":"text","text":"Running the smoke command."},{"type":"toolCall","name":"bash","arguments":{"i":"run the smoke","script":"echo smoke-ok > smoke.txt && cat smoke.txt"},"id":"call-1"}]},"Done: smoke-ok",{"content":[{"type":"text","text":"Second answer"},{"type":"toolCall","name":"bash","arguments":{"i":"run it again","script":"echo again-ok > again.txt && cat again.txt"},"id":"call-2"}]},"Second done","\"Smoke Title From The Model.\""]}"#;
+const FAUX_SCRIPT: &str = r#"{"modelId":"faux-1","responses":[{"content":[{"type":"thinking","thinking":"planning the smoke"},{"type":"text","text":"Running the smoke command."},{"type":"toolCall","name":"bash","arguments":{"i":"run the smoke","script":"echo smoke-ok > smoke.txt && cat smoke.txt"},"id":"call-1"}]},"Done: smoke-ok",{"content":[{"type":"text","text":"Second answer"},{"type":"toolCall","name":"bash","arguments":{"i":"run it again","script":"echo again-ok > again.txt && cat again.txt"},"id":"call-2"}]},"Second done","\"Smoke Title From The Model.\"","Skill answer","Template answer","Image answer",{"text":"Slow answer","delayMs":4000},"After steer"]}"#;
 const GENERATED_TITLE: &str = "Smoke Title From The Model";
 
 #[derive(Default)]
@@ -55,6 +56,13 @@ struct View {
     always: HashSet<String>,
     approvals_by_thread: HashMap<String, u32>,
     done_by_thread: HashMap<String, u32>,
+    notices: Vec<String>,
+    settings: Option<Settings>,
+    commands: Option<Vec<SlashCommand>>,
+    skills: Option<Vec<SkillEntry>>,
+    steered: HashSet<String>,
+    image: Option<Vec<u8>>,
+    partial_text: bool,
     composer: Vec<(String, String)>,
     models: Option<Vec<ModelOption>>,
     hidden: Vec<ModelKey>,
@@ -157,11 +165,22 @@ impl Harness {
                     *self.view.done_by_thread.entry(thread).or_default() += 1;
                 }
             }
-            Update::Notice { level, text } => println!("     notice {level:?}: {text}"),
+            Update::Notice { level, text } => {
+                println!("     notice {level:?}: {text}");
+                self.view.notices.push(text);
+            }
             Update::RequestFailed { request, message } => println!("     request {request} failed: {message}"),
+            Update::Settings { settings } => self.view.settings = Some(settings),
+            Update::Commands { commands, .. } => self.view.commands = Some(commands),
+            Update::Skills { skills, .. } => self.view.skills = Some(skills),
+            Update::Queue { thread, queued } => {
+                if queued.iter().any(|message| message.steering) {
+                    self.view.steered.insert(thread);
+                }
+            }
+            Update::MessageImage { data, .. } => self.view.image = Some(data),
             Update::Thread { .. }
-            | Update::Queue { .. }
-            | Update::Commands { .. }
+            | Update::Subagents { .. }
             | Update::GitStatus { .. }
             | Update::Branches { .. }
             | Update::Diff { .. }
@@ -177,7 +196,6 @@ impl Harness {
             | Update::Usage { .. }
             | Update::Local { .. }
             | Update::Providers { .. }
-            | Update::Settings { .. }
             | Update::Keybindings { .. }
             | Update::RequestDone { .. }
             | Update::ProjectScripts { .. }
@@ -190,6 +208,15 @@ impl Harness {
 
     fn transcript(&mut self, thread: &str, op: TranscriptOp) -> anyhow::Result<()> {
         let items = self.view.transcripts.entry(thread.to_string()).or_default();
+        let partial = match &op {
+            TranscriptOp::Insert { item, .. } | TranscriptOp::Update { item, .. } => {
+                matches!(&item.kind, ItemKind::Assistant { streaming: true, blocks, .. } if blocks.iter().any(|block| matches!(block, Block::Text { .. })))
+            }
+            TranscriptOp::Reset { .. } => false,
+        };
+        if partial {
+            self.view.partial_text = true;
+        }
         match op {
             TranscriptOp::Reset { items: fresh } => {
                 *self.view.resets.entry(thread.to_string()).or_default() += 1;
@@ -302,7 +329,21 @@ fn main() -> anyhow::Result<()> {
     let work = root.join("work");
     let data = root.join("data");
     std::fs::create_dir_all(&work)?;
-    std::fs::create_dir_all(&agent_dir)?;
+    std::fs::create_dir_all(agent_dir.join("skills").join("smoke-skill"))?;
+    std::fs::create_dir_all(agent_dir.join("prompts"))?;
+    std::fs::write(
+        agent_dir.join("skills").join("smoke-skill").join("SKILL.md"),
+        "---\nname: smoke-skill\ndescription: Answers the smoke check\n---\nSay smoke-skill-body.",
+    )?;
+    std::fs::write(
+        agent_dir.join("prompts").join("smoke-template.md"),
+        "---\ndescription: A smoke template\n---\nTemplate says $1",
+    )?;
+    git(&work, &["init", "-q", "-b", "main"])?;
+    git(
+        &work,
+        &["-c", "user.name=Smoke", "-c", "user.email=smoke@example.com", "commit", "-q", "--allow-empty", "-m", "init"],
+    )?;
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", &data);
     let script = root.join("faux-script.json");
     std::fs::write(&script, FAUX_SCRIPT)?;
@@ -539,6 +580,161 @@ fn round_four(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
         bail!("always-allow asked again: {:?}", harness.view.approvals_by_thread.get(&always));
     }
     println!("ok   always allow this session widened the effects (1 approval for 2 writes)");
+    round_four_resources(harness, ids)?;
+    round_four_settings(harness, ids)?;
+    round_four_sessions(harness, ids, &always)
+}
+
+fn user_texts(view: &View, thread: &str) -> Vec<String> {
+    view.items(thread)
+        .iter()
+        .filter_map(|item| match &item.kind {
+            ItemKind::User { text, .. } => Some(text.clone()),
+            ItemKind::Assistant { .. }
+            | ItemKind::Tool { .. }
+            | ItemKind::TurnSummary { .. }
+            | ItemKind::Notice { .. }
+            | ItemKind::Compaction { .. } => None,
+        })
+        .collect()
+}
+
+fn round_four_resources(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
+    let studio = Arc::clone(&harness.studio);
+    let first = ids.first.clone();
+    studio.list_skills("skills-1".to_string(), Some(ids.project.clone()));
+    harness.pump_until("skills listed with their source", |view| {
+        view.skills.as_ref().is_some_and(|skills| {
+            skills.iter().any(|skill| skill.name == "smoke-skill" && skill.source == SkillSource::Personal)
+        })
+    })?;
+    studio.list_commands("commands-1".to_string(), Some(ids.project.clone()));
+    harness.pump_until("commands listed by kind", |view| {
+        view.commands.as_ref().is_some_and(|commands| {
+            [
+                ("skill:smoke-skill", CommandKind::Skill),
+                ("smoke-template", CommandKind::Template),
+                ("compact", CommandKind::Command),
+            ]
+            .iter()
+            .all(|(name, kind)| commands.iter().any(|command| command.name == *name && command.kind == *kind))
+        })
+    })?;
+    studio.send(first.clone(), prompt("/skill:smoke-skill please"), Delivery::Queue);
+    harness.pump_until("skill command expanded before sending", |view| {
+        user_texts(view, &first).iter().any(|text| {
+            text.contains("<skill name=\"smoke-skill\"")
+                && text.contains("smoke-skill-body")
+                && text.ends_with("please")
+        }) && answer_text(view.items(&first)).contains("Skill answer")
+            && idle(view, &first)
+    })?;
+    studio.send(first.clone(), prompt("/smoke-template hello"), Delivery::Queue);
+    harness.pump_until("prompt template expanded with its argument", |view| {
+        user_texts(view, &first).iter().any(|text| text == "Template says hello")
+            && answer_text(view.items(&first)).contains("Template answer")
+            && idle(view, &first)
+    })?;
+    let mut png = Vec::new();
+    image::RgbaImage::from_pixel(640, 320, image::Rgba([40, 90, 200, 255]))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+    studio.send(
+        first.clone(),
+        PromptDraft {
+            text: "look at this".to_string(),
+            images: vec![ImageAttachment { mime_type: "image/png".to_string(), data: png.clone() }],
+            files: Vec::new(),
+        },
+        Delivery::Queue,
+    );
+    harness.pump_until("user image carried as a downscaled thumbnail", |view| {
+        view.items(&first).iter().any(|item| matches!(&item.kind, ItemKind::User { thumbnails, entry: Some(_), .. } if thumbnails.len() == 1 && thumbnails[0].width == 512 && thumbnails[0].height == 256))
+            && idle(view, &first)
+    })?;
+    let entry = harness
+        .view
+        .items(&first)
+        .iter()
+        .rev()
+        .find_map(|item| match &item.kind {
+            ItemKind::User { thumbnails, entry, .. } if !thumbnails.is_empty() => entry.clone(),
+            ItemKind::User { .. }
+            | ItemKind::Assistant { .. }
+            | ItemKind::Tool { .. }
+            | ItemKind::TurnSummary { .. }
+            | ItemKind::Notice { .. }
+            | ItemKind::Compaction { .. } => None,
+        })
+        .context("the image message has no entry")?;
+    studio.load_message_image("image-1".to_string(), first.clone(), entry, 0);
+    harness.pump_until("full image loaded on demand", |view| view.image.as_ref() == Some(&png))?;
+    Ok(())
+}
+
+fn round_four_settings(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
+    let studio = Arc::clone(&harness.studio);
+    let first = ids.first.clone();
+    let mut settings = harness.view.settings.clone().context("no settings update")?;
+    settings.follow_up_behavior = FollowUpBehavior::Steer;
+    settings.response_streaming = ResponseStreaming::Turn;
+    studio.update_settings(settings);
+    harness.pump_until("settings applied", |view| {
+        view.settings.as_ref().is_some_and(|settings| {
+            settings.follow_up_behavior == FollowUpBehavior::Steer
+                && settings.response_streaming == ResponseStreaming::Turn
+        })
+    })?;
+    harness.view.partial_text = false;
+    studio.send(first.clone(), prompt("answer slowly"), Delivery::Queue);
+    harness.pump_until("slow run started", |view| {
+        view.row(&first).is_some_and(|row| row.status == ThreadStatus::Working)
+    })?;
+    studio.send(first.clone(), prompt("steer this"), Delivery::Default);
+    harness.pump_until("default delivery followed the steer setting", |view| view.steered.contains(&first))?;
+    harness.pump_until("steered run finished", |view| {
+        answer_text(view.items(&first)).contains("After steer") && idle(view, &first)
+    })?;
+    if harness.view.partial_text {
+        bail!("turn streaming showed partial assistant text");
+    }
+    println!("ok   turn streaming hid partial assistant text");
+    Ok(())
+}
+
+fn round_four_sessions(harness: &mut Harness, ids: &Ids, always: &str) -> anyhow::Result<()> {
+    let studio = Arc::clone(&harness.studio);
+    studio.restart_thread(always.to_string());
+    harness.pump_until("agent session restarted", |view| {
+        view.notices.iter().any(|notice| notice == "The agent session restarted.") && view.row(always).is_some()
+    })?;
+    let fan = ModelKey { provider: "faux".to_string(), model: "faux-1".to_string() };
+    studio.start_threads(
+        "draft-fan".to_string(),
+        Some(ids.project.clone()),
+        prompt("fan out"),
+        settings(AccessMode::FullAccess),
+        vec![fan.clone(), fan],
+    );
+    harness.pump_until("fan-out threads finished in their own worktrees", |view| {
+        let (Some(left), Some(right)) = (view.thread("draft-fan"), view.thread("draft-fan#1")) else { return false };
+        let (Some(left), Some(right)) = (view.row(&left), view.row(&right)) else { return false };
+        left.fan_out.is_some()
+            && left.fan_out == right.fan_out
+            && left.worktree.is_some()
+            && right.worktree.is_some()
+            && left.worktree != right.worktree
+            && left.branch != right.branch
+            && view.done_by_thread.get(&left.id) == Some(&1)
+            && view.done_by_thread.get(&right.id) == Some(&1)
+    })?;
+    Ok(())
+}
+
+fn git(dir: &Path, args: &[&str]) -> anyhow::Result<()> {
+    let status = std::process::Command::new("git").args(args).current_dir(dir).status()?;
+    if !status.success() {
+        bail!("git {args:?} failed");
+    }
     Ok(())
 }
 
