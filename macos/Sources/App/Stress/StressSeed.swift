@@ -26,7 +26,16 @@ struct StressSeed {
         Plan(project: "alpha", turns: 1), Plan(project: "beta", turns: 5), Plan(project: "gamma", turns: 2),
     ]
 
-    static func installScript() {
+    private static var activity: NSObjectProtocol?
+
+    static func prepareProcess() {
+        setvbuf(stdout, nil, _IOLBF, 0)
+        UserDefaults.standard.register(defaults: ["NSApplicationCrashOnExceptions": true])
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Local Studio stress harness")
+        installScript()
+    }
+
+    private static func installScript() {
         let base = ProcessInfo.processInfo.environment["LOCAL_STUDIO_DATA_DIR"] ?? NSTemporaryDirectory()
         let url = URL(fileURLWithPath: base).appendingPathComponent("stress-script.json")
         var responses: [Any] = []

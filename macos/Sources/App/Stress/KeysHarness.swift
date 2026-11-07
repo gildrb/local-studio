@@ -27,11 +27,6 @@ final class KeysHarness {
         self.store = store
     }
 
-    static func prepare() {
-        setvbuf(stdout, nil, _IOLBF, 0)
-        StressSeed.installScript()
-    }
-
     func start() {
         Task { await run() }
     }

@@ -17,6 +17,8 @@ final class StudioStore {
     @ObservationIgnored let core = CoreHandle()
     @ObservationIgnored let requests = RequestCenter()
     @ObservationIgnored let didTick = PassthroughSubject<Void, Never>()
+    @ObservationIgnored private(set) var ticks = 0
+    @ObservationIgnored private(set) var appliedUpdates = 0
     @ObservationIgnored private let launch: DaemonLaunch?
     @ObservationIgnored private let controllerMain: String?
 
@@ -73,6 +75,8 @@ final class StudioStore {
     }
 
     func receive(_ updates: [Update]) {
+        ticks += 1
+        appliedUpdates += updates.count
         for update in updates {
             apply(update)
         }

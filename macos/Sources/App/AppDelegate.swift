@@ -31,10 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SyntaxHighlighter.shared.warm()
         let stressFlag = arguments.firstIndex(of: "+stress")
         let keysFlag = arguments.contains("+keys")
-        if stressFlag != nil {
-            StressHarness.prepare()
-        } else if keysFlag {
-            KeysHarness.prepare()
+        if stressFlag != nil || keysFlag {
+            StressSeed.prepareProcess()
         }
         configureNotifier()
         installKeyMonitors()

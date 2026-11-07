@@ -103,16 +103,17 @@ final class StressHarness: NSObject {
     private var rowsRevision = -1
     private var pendingSignature: [String] = []
     private var edited: Set<String> = []
+    private var spammed: Set<ObjectIdentifier> = []
+    private var startTicks = 0
+    private var startUpdates = 0
+    private var lastTicks = 0
+    private var lastTickAt: TimeInterval = 0
+    private var spamTickGap: TimeInterval = 0
 
     init(store: StudioStore, duration: TimeInterval, seed: UInt64) {
         self.store = store
         self.duration = duration
         random = SplitMix(seed: seed)
-    }
-
-    static func prepare() {
-        setvbuf(stdout, nil, _IOLBF, 0)
-        StressSeed.installScript()
     }
 
     func start() {
@@ -131,15 +132,18 @@ final class StressHarness: NSObject {
                 projects[thread] = store.inbox.thread(thread)?.project
             }
             try await Task.sleep(for: .seconds(1))
-            print("stress window \(Int(window.frame.width))×\(Int(window.frame.height)) key=\(window.isKeyWindow) active=\(NSApp.isActive)")
+            print("stress window \(Int(window.frame.width))×\(Int(window.frame.height)) key=\(window.isKeyWindow) active=\(NSApp.isActive) visible=\(window.occlusionState.contains(.visible))")
             monitor.start(window: window)
             monitor.onFrame = { [weak self] in self?.check() }
             try await Task.sleep(for: .milliseconds(300))
             monitor.recording = true
+            startTicks = store.ticks
+            startUpdates = store.appliedUpdates
             let end = monitor.elapsed() + duration
             while monitor.elapsed() < end {
                 guard let window = visibleMainWindow else { throw StressFailure("the main window disappeared") }
                 try await perform(pick(), in: window)
+                monitor.progress(ticks: store.ticks)
                 try await pause()
             }
             try await settlePendings()
@@ -184,6 +188,7 @@ final class StressHarness: NSObject {
         let deadline = monitor.elapsed() + Self.pendingDeadline + 1
         while monitor.elapsed() < deadline, store.conversation.pendings.contains(where: { $0.failure == nil }) {
             try await Task.sleep(for: .milliseconds(50))
+            monitor.progress(ticks: store.ticks)
         }
     }
 
@@ -274,6 +279,7 @@ final class StressHarness: NSObject {
             press(random.int(2) == 0 ? "escape" : "cmd+k", window)
         case .terminal:
             press("cmd+j", window)
+            spamTerminals()
         case .panel:
             press("cmd+option+b", window)
         case .sidebar:
@@ -304,6 +310,14 @@ final class StressHarness: NSObject {
     private func noteSwitch(from before: String?) {
         if let after = store.conversation.thread, after != before {
             switchStart = (after, monitor.elapsed())
+        }
+    }
+
+    private func spamTerminals() {
+        let sessions = store.panels.decks.values.flatMap { $0.groups.flatMap(\.sessions) }
+        for session in sessions where !spammed.contains(ObjectIdentifier(session)) {
+            spammed.insert(ObjectIdentifier(session))
+            session.write(Data("while :; do seq -f 'stress line %g of a terminal flooding the core with frames' 1 200; sleep 0.01; done\r".utf8))
         }
     }
 
@@ -415,8 +429,25 @@ final class StressHarness: NSObject {
         }
     }
 
+    private func checkCoreTicks() {
+        let now = monitor.elapsed()
+        guard store.ticks == lastTicks else {
+            lastTicks = store.ticks
+            lastTickAt = now
+            return
+        }
+        guard !spammed.isEmpty, lastTickAt > 0 else { return }
+        let gap = now - lastTickAt
+        spamTickGap = max(spamTickGap, gap)
+        if gap > 1 {
+            record("core stalled", "no core update applied for \(Int(gap * 1000)) ms while terminals were flooding, after \(monitor.context)")
+            lastTickAt = now
+        }
+    }
+
     private func check() {
         guard monitor.recording else { return }
+        checkCoreTicks()
         trackSends()
         checkPendings()
         checkRows()
@@ -588,6 +619,7 @@ final class StressHarness: NSObject {
         for stall in monitor.stalls.prefix(20) {
             print("  stall \(ms(stall.duration)) at \(String(format: "%.2f", stall.at)) s after \(stall.context)")
         }
+        print("core: \(store.ticks - startTicks) ticks applied \(store.appliedUpdates - startUpdates) updates; \(spammed.count) terminals flooding, longest gap between ticks while flooding \(ms(spamTickGap))")
         let latencies = switchLatencies.sorted()
         if !latencies.isEmpty {
             let median = latencies[latencies.count / 2]

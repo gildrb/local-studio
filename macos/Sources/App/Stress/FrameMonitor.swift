@@ -44,7 +44,8 @@ final class FrameMonitor: NSObject {
     func attach(window: NSWindow) {
         link?.invalidate()
         last = nil
-        let link = window.displayLink(target: self, selector: #selector(tick(_:)))
+        guard let screen = window.screen ?? NSScreen.main else { return }
+        let link = screen.displayLink(target: self, selector: #selector(tick(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
     }
@@ -57,6 +58,10 @@ final class FrameMonitor: NSObject {
 
     func elapsed() -> TimeInterval {
         ProcessInfo.processInfo.systemUptime - origin
+    }
+
+    func progress(ticks: Int) {
+        watchdog.progress(ticks: ticks, context: context)
     }
 
     @objc private func tick(_ link: CADisplayLink) {
@@ -87,24 +92,53 @@ final class Watchdog: Sendable {
     private struct State {
         var running = false
         var outstanding = false
+        var answered: TimeInterval = 0
+        var progressed: TimeInterval = 0
+        var ticks = 0
+        var context = ""
     }
+
+    static let progressLimit: TimeInterval = 15
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
+    func progress(ticks: Int, context: String) {
+        let now = ProcessInfo.processInfo.systemUptime
+        state.withLock {
+            $0.progressed = now
+            $0.ticks = ticks
+            $0.context = context
+        }
+    }
+
     func start(_ report: @escaping @MainActor @Sendable (TimeInterval, TimeInterval) -> Void) {
-        state.withLock { $0.running = true }
+        let now = ProcessInfo.processInfo.systemUptime
+        state.withLock {
+            $0.running = true
+            $0.answered = now
+            $0.progressed = now
+        }
         let thread = Thread { [state] in
             while state.withLock({ $0.running }) {
-                let send = state.withLock { current -> Bool in
-                    guard !current.outstanding else { return false }
+                let now = ProcessInfo.processInfo.systemUptime
+                let current = state.withLock { current -> State in
+                    let snapshot = current
                     current.outstanding = true
-                    return true
+                    return snapshot
                 }
-                if send {
-                    let posted = ProcessInfo.processInfo.systemUptime
+                if now - current.progressed > Self.progressLimit {
+                    let answered = String(format: "%.1f", now - current.answered)
+                    print("FAIL macOS stress: the harness made no progress for \(Int(Self.progressLimit)) s after \(current.context); the main queue last answered \(answered) s ago, core ticks \(current.ticks)")
+                    exit(1)
+                }
+                if !current.outstanding {
+                    let posted = now
                     DispatchQueue.main.async {
                         let latency = ProcessInfo.processInfo.systemUptime - posted
-                        state.withLock { $0.outstanding = false }
+                        state.withLock {
+                            $0.outstanding = false
+                            $0.answered = posted + latency
+                        }
                         report(posted, latency)
                     }
                 }
