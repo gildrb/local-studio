@@ -128,6 +128,25 @@ fn install_threads(app: &Rc<App>) {
 }
 
 fn install_global(app: &Rc<App>) {
+    let extra: [(&str, AppAction); 5] = [
+        ("git-commit", |app| {
+            git_request(app, "Committing…", |studio, request, dir| studio.commit(request, dir, None));
+        }),
+        ("git-push", |app| git_request(app, "Pushing…", local_studio_core::Studio::push)),
+        ("git-pr", create_pull_request),
+        ("git-view-pr", view_pull_request),
+        ("palette", crate::palette::open),
+    ];
+    for (name, activate) in extra {
+        let action = gio::SimpleAction::new(name, None);
+        let weak = Rc::downgrade(app);
+        action.connect_activate(move |_, _| {
+            if let Some(app) = weak.upgrade() {
+                activate(&app);
+            }
+        });
+        app.window.add_action(&action);
+    }
     let open = gio::SimpleAction::new("open-thread", Some(glib::VariantTy::STRING));
     let weak = Rc::downgrade(app);
     open.connect_activate(move |_, parameter| {
@@ -147,9 +166,61 @@ fn install_global(app: &Rc<App>) {
         ("win.usage", &["<Control>u"][..]),
         ("win.toggle-terminal", &["<Control>j"][..]),
         ("win.toggle-diff", &["<Control>d"][..]),
-        ("win.search", &["<Control>k", "<Control>f"][..]),
+        ("win.search", &["<Control>f"][..]),
+        ("win.palette", &["<Control>k"][..]),
     ] {
         app.application.set_accels_for_action(action, accels);
+    }
+}
+
+fn git_request(app: &Rc<App>, progress: &str, call: fn(&local_studio_core::Studio, String, String)) {
+    let Some(dir) = app.state.borrow().workspace_dir() else { return };
+    let request = app.core.request();
+    app.toast(progress);
+    app.core.run(|studio| call(studio, request, dir));
+}
+
+fn create_pull_request(app: &Rc<App>) {
+    let (dir, title) = {
+        let state = app.state.borrow();
+        let title = state.info.as_ref().map(|info| info.title.clone()).unwrap_or_default();
+        (state.workspace_dir(), title)
+    };
+    let Some(dir) = dir else { return };
+    let dialog = adw::AlertDialog::new(Some("Create Pull Request"), Some("The branch is pushed first when needed."));
+    let fields = gtk::Box::new(gtk::Orientation::Vertical, 8);
+    let entry = gtk::Entry::builder().text(&title).placeholder_text("Title").activates_default(true).build();
+    let draft = gtk::CheckButton::with_label("Open as draft");
+    fields.append(&entry);
+    fields.append(&draft);
+    dialog.set_extra_child(Some(&fields));
+    dialog.add_responses(&[("cancel", "Cancel"), ("create", "Create")]);
+    dialog.set_response_appearance("create", adw::ResponseAppearance::Suggested);
+    dialog.set_default_response(Some("create"));
+    dialog.set_close_response("cancel");
+    let weak = Rc::downgrade(app);
+    dialog.connect_response(Some("create"), move |_, _| {
+        let Some(app) = weak.upgrade() else { return };
+        let title = entry.text().trim().to_string();
+        if title.is_empty() {
+            return;
+        }
+        let (request, dir, draft) = (app.core.request(), dir.clone(), draft.is_active());
+        app.toast("Creating pull request…");
+        app.core.run(|studio| studio.create_pull_request(request, dir, title, String::new(), draft));
+    });
+    dialog.present(Some(&app.window));
+}
+
+fn view_pull_request(app: &Rc<App>) {
+    let url = {
+        let state = app.state.borrow();
+        state.workspace_dir().and_then(|dir| {
+            state.git.get(&dir).and_then(|status| status.pull_request.as_ref().map(|pull| pull.url.clone()))
+        })
+    };
+    if let Some(url) = url {
+        gtk::UriLauncher::new(&url).launch(Some(&app.window), None::<&gio::Cancellable>, |_| {});
     }
 }
 

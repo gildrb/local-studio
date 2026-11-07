@@ -16,6 +16,7 @@ pub struct Header {
     branch: gtk::Label,
     diff: gtk::Button,
     terminal: gtk::Button,
+    git: adw::SplitButton,
 }
 
 impl Header {
@@ -69,10 +70,18 @@ impl Header {
         let branch = gtk::Label::new(None);
         branch.add_css_class("ls-pill");
         branch.add_css_class("ls-mono");
+        let menu = gtk::gio::Menu::new();
+        menu.append(Some("Commit"), Some("win.git-commit"));
+        menu.append(Some("Push"), Some("win.git-push"));
+        menu.append(Some("Create Pull Request…"), Some("win.git-pr"));
+        menu.append(Some("View Pull Request"), Some("win.git-view-pr"));
+        let git = adw::SplitButton::builder().label("Commit").menu_model(&menu).build();
+        git.set_visible(false);
         bar.pack_end(&diff);
         bar.pack_end(&terminal);
+        bar.pack_end(&git);
         bar.pack_end(&branch);
-        Self { bar, toggle, new_thread, crumb, project, slash, title, chevron, page_title, branch, diff, terminal }
+        Self { bar, toggle, new_thread, crumb, project, slash, title, chevron, page_title, branch, diff, terminal, git }
     }
 
     pub fn bind_split(&self, split: &adw::OverlaySplitView) {
@@ -146,5 +155,24 @@ impl Header {
         });
         self.branch.set_visible(on_thread && branch.is_some());
         self.branch.set_label(branch.as_deref().unwrap_or_default());
+        let primary = status.as_ref().filter(|status| status.is_repo).and_then(|status| {
+            if status.dirty || status.changed_files > 0 {
+                Some(("Commit", "win.git-commit", "Commit every change (message generated from the changed paths)"))
+            } else if status.ahead > 0 || (status.upstream.is_none() && status.branch.is_some()) {
+                Some(("Push", "win.git-push", "Push this branch"))
+            } else if status.pull_request.is_some() {
+                Some(("View PR", "win.git-view-pr", "Open the pull request"))
+            } else if status.branch.is_some() && status.branch != status.default_branch {
+                Some(("Create PR", "win.git-pr", "Create a pull request for this branch"))
+            } else {
+                None
+            }
+        });
+        self.git.set_visible(on_thread && primary.is_some());
+        if let Some((label, action, tooltip)) = primary {
+            self.git.set_label(label);
+            self.git.set_action_name(Some(action));
+            self.git.set_tooltip_text(Some(tooltip));
+        }
     }
 }

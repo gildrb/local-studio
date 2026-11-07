@@ -4,8 +4,8 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use gtk::{gio, glib};
 use local_studio_core::{
-    Connection, Delivery, FollowUpBehavior, NewThreadWorkspace, NotificationKind, NotificationMode, PromptDraft, Shelf,
-    ThreadSettings, TranscriptOp, Update, WorktreeChoice,
+    ChatWidth, Connection, Delivery, FollowUpBehavior, NewThreadWorkspace, NotificationKind, NotificationMode,
+    PromptDraft, Shelf, ThreadSettings, TranscriptOp, Update, WorktreeChoice,
 };
 
 use crate::composer::Composer;
@@ -320,6 +320,13 @@ impl App {
             }
             Update::Settings { settings } => {
                 theme::color_scheme(settings.color_scheme);
+                let width = match settings.chat_width {
+                    ChatWidth::Normal => 820,
+                    ChatWidth::Wide => 1150,
+                    ChatWidth::Full => 4000,
+                };
+                self.timeline.set_width(width);
+                self.composer.root.set_maximum_size(width);
                 self.state.borrow_mut().settings = settings;
                 dirty.composer = true;
                 dirty.sidebar = true;

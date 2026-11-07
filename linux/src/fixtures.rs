@@ -14,7 +14,7 @@ use crate::app::{App, Dirty};
 use crate::format;
 use crate::state::{Page, State};
 
-pub const SCENES: [&str; 14] = [
+pub const SCENES: [&str; 15] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -29,6 +29,7 @@ pub const SCENES: [&str; 14] = [
     "12-local",
     "13-usage",
     "14-conversation-light",
+    "15-command-palette",
 ];
 
 const FOCUSED: &str = "t-sidebar";
@@ -132,6 +133,10 @@ pub fn stage(app: &Rc<App>, scene: &str) {
                 row.set_expanded(true);
             }
         }
+        "15-command-palette" => {
+            conversation(app, false);
+            crate::palette::open(app);
+        }
         "13-usage" => {
             app.apply(base());
             app.open_page(Page::Usage);
@@ -145,6 +150,9 @@ pub fn teardown(app: &Rc<App>) {
     let dialog = app.settings.take();
     if let Some(dialog) = dialog {
         dialog.close();
+    }
+    if let Some(dialog) = app.window.visible_dialog() {
+        dialog.force_close();
     }
     app.panel.root.set_visible(false);
     app.split.set_show_sidebar(true);

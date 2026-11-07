@@ -21,6 +21,7 @@ pub struct Timeline {
     filter: gtk::CustomFilter,
     follow: Rc<Cell<bool>>,
     list: gtk::ListView,
+    width: Rc<Cell<i32>>,
 }
 
 impl Timeline {
@@ -46,11 +47,14 @@ impl Timeline {
             item.set_focusable(false);
         });
         let bind_expanded = Rc::clone(&expanded);
+        let width = Rc::new(Cell::new(820));
+        let bind_width = Rc::clone(&width);
         factory.connect_bind(move |_, object| {
             let Some(item) = object.downcast_ref::<gtk::ListItem>() else { return };
             let Some(clamp) = item.child().and_downcast::<adw::Clamp>() else { return };
             let Some(entry) = item.item().and_downcast::<glib::BoxedAnyObject>() else { return };
             let entry = entry.borrow::<Item>();
+            clamp.set_maximum_size(bind_width.get());
             clamp.set_child(Some(&item_widget(&app, &entry, &bind_expanded.borrow())));
         });
         let list = gtk::ListView::new(Some(gtk::NoSelection::new(Some(filtered))), Some(factory));
@@ -71,7 +75,14 @@ impl Timeline {
                 adjustment.set_value(adjustment.upper() - adjustment.page_size());
             }
         });
-        Self { root, store, items: RefCell::new(Vec::new()), hidden, expanded, filter, follow, list }
+        Self { root, store, items: RefCell::new(Vec::new()), hidden, expanded, filter, follow, list, width }
+    }
+
+    pub fn set_width(&self, width: i32) {
+        if self.width.replace(width) != width {
+            let count = self.store.n_items();
+            self.store.items_changed(0, count, count);
+        }
     }
 
     fn scroll_to_end(&self) {

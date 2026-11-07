@@ -6,6 +6,7 @@ mod fixtures;
 mod format;
 mod header;
 mod pages;
+mod palette;
 mod panels;
 mod settings;
 mod sidebar;
