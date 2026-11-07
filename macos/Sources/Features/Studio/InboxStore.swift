@@ -2,15 +2,84 @@ import Foundation
 import LocalStudioKit
 import Observation
 
+struct InboxSections: Equatable {
+    var pinned: [ThreadRow] = []
+    var active: [ThreadRow] = []
+    var working: [ThreadRow] = []
+    var snoozed: [ThreadRow] = []
+    var settled: [ThreadRow] = []
+
+    var isEmpty: Bool {
+        pinned.isEmpty && active.isEmpty && working.isEmpty && snoozed.isEmpty && settled.isEmpty
+    }
+}
+
+enum InboxShelf: String, CaseIterable {
+    case working
+    case snoozed
+    case settled
+
+    var title: String {
+        switch self {
+        case .working: "Working"
+        case .snoozed: "Snoozed"
+        case .settled: "Settled"
+        }
+    }
+}
+
+struct InboxUndo: Equatable {
+    let label: String
+    let threads: [String]
+    let revert: Revert
+
+    enum Revert: Equatable {
+        case pinned(Bool)
+        case settled(Bool)
+        case archived(Bool)
+        case snoozed([String: Int64?])
+        case unread(Bool)
+    }
+}
+
 @MainActor
 @Observable
 final class InboxStore {
+    static let settledPage = 10
+
     private(set) var projects: [Project] = []
     private(set) var threads: [ThreadRow] = []
-    var currentProject: String?
+    private(set) var sections = InboxSections()
+    private(set) var visibleOrder: [String] = []
+    private(set) var searchResults: [ThreadRow] = []
+    private(set) var currentProject: String?
+    private(set) var undo: InboxUndo?
+    private(set) var receivedThreads = false
+
+    var query = "" {
+        didSet { if query != oldValue { rebuild() } }
+    }
+    var projectFilter: String? {
+        didSet { if projectFilter != oldValue { rebuild() } }
+    }
+    var collapsed: Set<InboxShelf> = [] {
+        didSet { if collapsed != oldValue { rebuildOrder() } }
+    }
+    var settledLimit = InboxStore.settledPage {
+        didSet { if settledLimit != oldValue { rebuildOrder() } }
+    }
+    var selection: Set<String> = []
+    var selectionAnchor: String?
+    var renaming: String?
+
+    let shell = ShellState()
+    let panels = PanelState()
+    @ObservationIgnored let notifier = Notifier()
 
     @ObservationIgnored private let core: CoreHandle
     @ObservationIgnored private let requests: RequestCenter
+    @ObservationIgnored private var projectChosen = false
+    @ObservationIgnored private var index: [String: ThreadRow] = [:]
 
     init(core: CoreHandle, requests: RequestCenter) {
         self.core = core
@@ -19,23 +88,220 @@ final class InboxStore {
 
     func setProjects(_ projects: [Project]) {
         self.projects = projects
+        if let filter = projectFilter, !projects.contains(where: { $0.id == filter }) {
+            projectFilter = nil
+        }
         if let current = currentProject, projects.contains(where: { $0.id == current }) { return }
+        if currentProject == nil, projectChosen { return }
         currentProject = projects.first?.id
     }
 
     func setThreads(_ threads: [ThreadRow]) {
+        receivedThreads = true
         self.threads = threads
+        index = Dictionary(threads.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        selection.formIntersection(index.keys)
+        rebuild()
     }
 
-    func notify(thread: String, kind: NotificationKind, title: String, body: String) {}
+    func notify(thread: String, kind: NotificationKind, title: String, body: String) {
+        notifier.deliver(thread: thread, kind: kind, title: title, body: body)
+    }
 
-    func addProject(path: String) {
-        core.run { $0.addProject(path: path) }
-        currentProject = path
+    func thread(_ id: String?) -> ThreadRow? {
+        guard let id else { return nil }
+        return index[id]
     }
 
     func project(_ id: String?) -> Project? {
         guard let id else { return nil }
         return projects.first { $0.id == id }
+    }
+
+    func projectName(_ id: String?) -> String {
+        project(id)?.name ?? "No project"
+    }
+
+    func selectProject(_ project: String?) {
+        projectChosen = true
+        currentProject = project
+    }
+
+    func addProject(path: String) {
+        core.run { $0.addProject(path: path) }
+        selectProject(path)
+    }
+
+    func removeProject(_ project: String) {
+        core.run { $0.removeProject(project: project) }
+    }
+
+    func setPinned(_ ids: [String], _ pinned: Bool) {
+        let changed = ids.filter { index[$0]?.pinned != pinned }
+        guard !changed.isEmpty else { return }
+        core.run { studio in changed.forEach { studio.setPinned(thread: $0, pinned: pinned) } }
+        remember(pinned ? "Pinned" : "Unpinned", changed, .pinned(!pinned))
+    }
+
+    func setSettled(_ ids: [String], _ settled: Bool) {
+        let changed = ids.filter { (index[$0]?.shelf == .settled) != settled }
+        guard !changed.isEmpty else { return }
+        core.run { studio in changed.forEach { studio.setSettled(thread: $0, settled: settled) } }
+        remember(settled ? "Settled" : "Un-settled", changed, .settled(!settled))
+    }
+
+    func snooze(_ ids: [String], until: Int64?) {
+        guard !ids.isEmpty else { return }
+        let previous = Dictionary(ids.map { ($0, index[$0]?.snoozedUntil) }, uniquingKeysWith: { first, _ in first })
+        core.run { studio in ids.forEach { studio.snooze(thread: $0, until: until) } }
+        remember(until == nil ? "Woke" : "Snoozed", ids, .snoozed(previous))
+    }
+
+    func markUnread(_ ids: [String], _ unread: Bool) {
+        guard !ids.isEmpty else { return }
+        core.run { studio in ids.forEach { studio.markUnread(thread: $0, unread: unread) } }
+        remember(unread ? "Marked unread" : "Marked read", ids, .unread(!unread))
+    }
+
+    func setArchived(_ ids: [String], _ archived: Bool) {
+        guard !ids.isEmpty else { return }
+        core.run { studio in ids.forEach { studio.setArchived(thread: $0, archived: archived) } }
+        selection.subtract(ids)
+        remember(archived ? "Archived" : "Unarchived", ids, .archived(!archived))
+    }
+
+    func delete(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        core.run { studio in ids.forEach { studio.deleteThread(thread: $0) } }
+        selection.subtract(ids)
+        undo = nil
+    }
+
+    func rename(_ id: String, to title: String) {
+        renaming = nil
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, index[id]?.title != trimmed else { return }
+        core.run { $0.renameThread(thread: id, title: trimmed) }
+    }
+
+    func performUndo() {
+        guard let undo else { return }
+        self.undo = nil
+        let ids = undo.threads
+        core.run { studio in
+            for id in ids {
+                switch undo.revert {
+                case .pinned(let value): studio.setPinned(thread: id, pinned: value)
+                case .settled(let value): studio.setSettled(thread: id, settled: value)
+                case .archived(let value): studio.setArchived(thread: id, archived: value)
+                case .unread(let value): studio.markUnread(thread: id, unread: value)
+                case .snoozed(let previous): studio.snooze(thread: id, until: previous[id] ?? nil)
+                }
+            }
+        }
+    }
+
+    func dismissUndo() {
+        undo = nil
+    }
+
+    func toggleShelf(_ shelf: InboxShelf) {
+        if collapsed.contains(shelf) {
+            collapsed.remove(shelf)
+        } else {
+            collapsed.insert(shelf)
+        }
+    }
+
+    func showMoreSettled() {
+        settledLimit += Self.settledPage
+    }
+
+    func neighbor(of id: String?, offset: Int) -> String? {
+        guard !visibleOrder.isEmpty else { return nil }
+        guard let id, let position = visibleOrder.firstIndex(of: id) else {
+            return offset > 0 ? visibleOrder.first : visibleOrder.last
+        }
+        let target = position + offset
+        return visibleOrder.indices.contains(target) ? visibleOrder[target] : nil
+    }
+
+    func jumpTarget(_ number: Int) -> String? {
+        let position = number - 1
+        return visibleOrder.indices.contains(position) ? visibleOrder[position] : nil
+    }
+
+    func extendSelection(to id: String) {
+        guard let anchor = selectionAnchor ?? selection.first,
+              let from = visibleOrder.firstIndex(of: anchor),
+              let to = visibleOrder.firstIndex(of: id) else {
+            selection = [id]
+            selectionAnchor = id
+            return
+        }
+        selection = Set(visibleOrder[min(from, to)...max(from, to)])
+    }
+
+    func toggleSelection(_ id: String, focused: String?) {
+        if selection.isEmpty, let focused, focused != id, index[focused] != nil {
+            selection.insert(focused)
+        }
+        if selection.contains(id) {
+            selection.remove(id)
+        } else {
+            selection.insert(id)
+        }
+        selectionAnchor = id
+    }
+
+    func clearSelection() {
+        selection = []
+        selectionAnchor = nil
+    }
+
+    func targets(for id: String) -> [String] {
+        selection.count > 1 && selection.contains(id) ? visibleOrder.filter { selection.contains($0) } : [id]
+    }
+
+    private func remember(_ label: String, _ ids: [String], _ revert: InboxUndo.Revert) {
+        let noun = ids.count == 1 ? "thread" : "\(ids.count) threads"
+        undo = InboxUndo(label: "\(label) \(noun)", threads: ids, revert: revert)
+    }
+
+    private func rebuild() {
+        var next = InboxSections()
+        for row in threads where projectFilter.map({ row.project == $0 }) ?? true {
+            switch row.shelf {
+            case .pinned: next.pinned.append(row)
+            case .active: next.active.append(row)
+            case .working: next.working.append(row)
+            case .snoozed: next.snoozed.append(row)
+            case .settled: next.settled.append(row)
+            }
+        }
+        if next != sections {
+            sections = next
+        }
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        searchResults = needle.isEmpty ? [] : threads.filter { row in
+            (projectFilter.map { row.project == $0 } ?? true)
+                && (row.title.localizedCaseInsensitiveContains(needle)
+                    || projectName(row.project).localizedCaseInsensitiveContains(needle)
+                    || (row.branch?.localizedCaseInsensitiveContains(needle) ?? false))
+        }
+        rebuildOrder()
+    }
+
+    private func rebuildOrder() {
+        var order = sections.pinned.map(\.id) + sections.active.map(\.id)
+        if !collapsed.contains(.working) { order += sections.working.map(\.id) }
+        if !collapsed.contains(.snoozed) { order += sections.snoozed.map(\.id) }
+        if !collapsed.contains(.settled) { order += sections.settled.prefix(settledLimit).map(\.id) }
+        if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            order = searchResults.map(\.id)
+        }
+        if order != visibleOrder {
+            visibleOrder = order
+        }
     }
 }
