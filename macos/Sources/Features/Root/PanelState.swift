@@ -28,6 +28,10 @@ final class PanelState {
     func openFile(project: String, relative: String, line: UInt32?) {
         rightPanelOpen = true
     }
+
+    func closeActiveSurface() {
+        rightPanelOpen = false
+    }
 }
 
 extension StudioStore {

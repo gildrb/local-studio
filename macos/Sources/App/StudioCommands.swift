@@ -62,6 +62,9 @@ struct StudioCommands: Commands {
             Button("Open in Editor") { EditorLauncher.openFavorite(store.workspacePath(for: store.focusedRow)) }
                 .keyboardShortcut(store.shortcut("editor.openFavorite"))
                 .disabled(store.workspacePath(for: store.focusedRow) == nil)
+            Button("Close Panel Tab") { store.panels.closeActiveSurface() }
+                .keyboardShortcut(store.panels.rightPanelOpen ? store.shortcut("rightPanel.close") : nil)
+                .disabled(!store.panels.rightPanelOpen)
         }
         CommandGroup(replacing: .undoRedo) {
             Button(undoTitle) { store.undoOrSendUndo() }

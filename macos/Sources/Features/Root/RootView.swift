@@ -104,7 +104,7 @@ struct RootView: View {
                     .frame(maxWidth: .infinity)
                 }
                 if panels.rightPanelOpen {
-                    RightPanelSeam(store: store)
+                    RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? WindowChrome.collapsedInset : 0)
                 }
             }
         } else {

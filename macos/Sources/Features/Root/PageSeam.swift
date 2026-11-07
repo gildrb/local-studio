@@ -45,6 +45,7 @@ struct PageSeam: View {
 
 struct RightPanelSeam: View {
     let store: StudioStore
+    var leadingInset: CGFloat = 0
 
     var body: some View {
         EmptyView()
