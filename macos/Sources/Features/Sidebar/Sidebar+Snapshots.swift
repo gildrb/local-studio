@@ -136,7 +136,7 @@ enum ShellFixtures {
         )),
         .gitStatus(project: projects[0].id, status: GitStatus(
             branch: "swift/s1", upstream: "origin/swift/s1", ahead: 2, behind: 0, dirty: true,
-            defaultBranch: "main", pullRequest: nil, isRepo: true, changedFiles: 7
+            defaultBranch: "main", pullRequest: nil, isRepo: true, changedFiles: 7, hasRemote: true
         )),
     ]
 
@@ -144,7 +144,7 @@ enum ShellFixtures {
         .gitStatus(project: projects[0].id, status: GitStatus(
             branch: "core/eukhe", upstream: "origin/core/eukhe", ahead: 0, behind: 0, dirty: false, defaultBranch: "main",
             pullRequest: PullRequest(number: 412, title: "Native shell", url: "https://github.com/demo/local-studio/pull/412", state: "OPEN", checks: "passing", head: "core/eukhe", base: "main"),
-            isRepo: true, changedFiles: 0
+            isRepo: true, changedFiles: 0, hasRemote: true
         )),
     ]
 }
