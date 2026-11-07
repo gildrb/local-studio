@@ -27,6 +27,9 @@ struct ThreadView: View {
                 store.conversation.loadModels()
             }
         }
+        .sheet(item: Bindable(store.conversation).gallery) { gallery in
+            ImageGalleryView(store: store, gallery: gallery)
+        }
     }
 
     private var project: String? {
@@ -59,6 +62,14 @@ private struct DraftHero: View {
             }
             .padding(.bottom, 26)
             VStack(spacing: 6) {
+                if let pending = store.conversation.pendingDraft, let setup = store.conversation.worktreeSetup[pending] {
+                    WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
+                        store.conversation.cancelWorktreeSetup()
+                    } workLocally: {
+                        store.conversation.skipWorktreeSetup()
+                    }
+                    .padding(.bottom, 8)
+                }
                 ComposerView(store: store)
                 ThreadContextStrip(store: store)
             }
@@ -349,14 +360,9 @@ private struct TimelineFooter: View {
 
     var body: some View {
         let conversation = store.conversation
-        let setup = conversation.thread.flatMap { conversation.worktreeSetup[$0] }
-        let settingUp = setup.map { !$0.done } ?? false
         VStack(alignment: .leading, spacing: 14) {
-            if let setup, !setup.done || setup.error != nil {
-                WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error)
-            }
-            if let info = conversation.info, info.busy || settingUp {
-                WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty, settingUpWorktree: settingUp)
+            if let info = conversation.info, info.busy {
+                WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty)
             }
             ForEach(conversation.queued, id: \.id) { message in
                 QueuedBubble(message: message, store: store)
