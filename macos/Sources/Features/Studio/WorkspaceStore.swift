@@ -38,6 +38,7 @@ final class WorkspaceStore {
 
     func setSubagents(thread: String, agents: [Subagent]) {
         subagents[thread] = agents
+        panels.subagentsChanged(thread: thread)
     }
 
     func setBranches(request: String, branches: [Branch], total: UInt32) {
@@ -138,6 +139,16 @@ final class WorkspaceStore {
         core.run(body)
     }
 
+    func runScript(project: String, script: ProjectScript, ordinal: Int) -> TerminalSession {
+        let session = TerminalSession(project: project, ordinal: ordinal, workspace: self)
+        session.title = script.name
+        let id = script.id
+        session.request = issue(.terminal(session)) { studio, request in
+            studio.runProjectScript(request: request, project: project, script: id)
+        }
+        return session
+    }
+
     func openTerminal(project: String, ordinal: Int) -> TerminalSession {
         let session = TerminalSession(project: project, ordinal: ordinal, workspace: self)
         session.request = issue(.terminal(session)) { studio, id in
@@ -203,20 +214,6 @@ struct PanelMemory {
     var surfaces: [PanelSurface] = []
     var active: String?
     var miniPlayer: BrowserModel?
-}
-
-struct AgentRun: Identifiable {
-    let id: UInt64
-    let title: String
-    let detail: String
-    let state: ToolState
-    let startedAt: Int64?
-    let endedAt: Int64?
-    let output: String
-
-    var live: Bool {
-        state == .running || state == .pending
-    }
 }
 
 @MainActor
@@ -302,18 +299,32 @@ final class PanelState {
         pages?.settings
     }
 
-    var agents: [AgentRun] {
-        guard let conversation, conversation.thread == thread else { return [] }
-        return conversation.items.compactMap { item in
-            guard case .tool(_, let name, let kind, let summary, _, let state, let output, _, let startedAt, let endedAt) = item.kind,
-                  kind == .agent else { return nil }
-            let title = summary.isEmpty ? name : summary
-            return AgentRun(id: item.id, title: title, detail: name, state: state, startedAt: startedAt, endedAt: endedAt, output: output)
-        }
+    var agents: [Subagent] {
+        guard let thread else { return [] }
+        return workspace?.subagents[thread] ?? []
     }
 
     var liveAgentCount: Int {
-        agents.reduce(0) { $0 + ($1.live ? 1 : 0) }
+        guard let thread else { return 0 }
+        if let row = inbox?.threads.first(where: { $0.id == thread }) {
+            return Int(row.liveAgents)
+        }
+        return agents.filter(\.running).count
+    }
+
+    private(set) var cancelling: Set<String> = []
+    var expandedAgents: Set<String> = []
+
+    func cancelSubagent(_ child: String) {
+        guard let thread, !cancelling.contains(child) else { return }
+        cancelling.insert(child)
+        workspace?.command { $0.cancelSubagent(thread: thread, child: child) }
+    }
+
+    func subagentsChanged(thread: String) {
+        guard thread == self.thread else { return }
+        let running = Set(agents.filter(\.running).map(\.id))
+        cancelling.formIntersection(running)
     }
 
     var settledTurns: [UInt64] {
@@ -571,6 +582,13 @@ final class PanelState {
         let deck = TerminalDeck(project: project, workspace: workspace)
         decks[project] = deck
         return deck
+    }
+
+    func runProjectScript(project: String, script: ProjectScript) {
+        guard let workspace else { return }
+        let deck = deck(for: project)
+        deck.adopt { ordinal in workspace.runScript(project: project, script: script, ordinal: ordinal) }
+        terminalOpen = true
     }
 
     func ensureDrawerTerminal() {

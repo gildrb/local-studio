@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PullRequestsSurfaceView: View {
     @Bindable var model: PullRequestsModel
+    let store: StudioStore
     let settings: LocalStudioKit.Settings?
 
     var body: some View {
@@ -45,8 +46,10 @@ struct PullRequestsSurfaceView: View {
                         }
                         .frame(minHeight: 110, idealHeight: 200)
                         if let detail = model.selectedDetail {
-                            PullRequestDetailView(model: detail, settings: settings)
-                                .frame(minHeight: 260)
+                            PullRequestDetailView(model: detail, store: store, settings: settings) {
+                                model.load()
+                            }
+                            .frame(minHeight: 260)
                         }
                     }
                 }
@@ -102,7 +105,9 @@ private struct PullRequestRow: View {
 
 struct PullRequestDetailView: View {
     @Bindable var model: PullRequestDetailModel
+    let store: StudioStore
     let settings: LocalStudioKit.Settings?
+    var finished: () -> Void = {}
 
     var body: some View {
         let pull = model.current
@@ -138,6 +143,10 @@ struct PullRequestDetailView: View {
                 }
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.secondaryText)
+                PullRequestActionBar(store: store, project: model.project, pull: pull, state: model.actions) {
+                    model.load()
+                    finished()
+                }
                 Picker("Section", selection: $model.tab) {
                     ForEach(PullRequestTab.allCases) { tab in
                         Text(title(tab)).tag(tab)

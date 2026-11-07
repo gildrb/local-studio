@@ -718,6 +718,7 @@ final class PullRequestDetailModel {
     let project: String
     let pull: PullRequest
     var tab = PullRequestTab.summary
+    let actions = PullRequestActionState()
     private(set) var phase: LoadPhase = .idle
     private(set) var detail: PullRequestDetail?
     let code: DiffModel
