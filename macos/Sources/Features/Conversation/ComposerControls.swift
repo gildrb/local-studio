@@ -183,6 +183,7 @@ struct ModelPickerPanel: View {
         let hiddenCount = configured.filter(conversation.isHidden).count
         let sections = sections(configured)
         let current = conversation.currentModel(settings: store.pages.settings)
+        let jumps = jumpOrder(sections)
         VStack(spacing: 0) {
             if configured.count > 8 {
                 HStack(spacing: 6) {
@@ -218,11 +219,13 @@ struct ModelPickerPanel: View {
                                     .padding(.bottom, 3)
                                     .accessibilityAddTraits(.isHeader)
                                 ForEach(section.models, id: \.key) { model in
+                                    let firstAppearance = section.id == "favorites" || !conversation.isFavorite(model)
                                     ModelRow(
                                         model: model,
                                         selected: current?.provider == model.provider && current?.id == model.id,
                                         favorite: conversation.isFavorite(model),
-                                        hidden: conversation.isHidden(model)
+                                        hidden: conversation.isHidden(model),
+                                        jump: firstAppearance ? jumps.firstIndex { $0.key == model.key }.flatMap { $0 < 9 ? $0 + 1 : nil } : nil
                                     ) {
                                         conversation.selectModel(model)
                                         dismiss()
@@ -254,11 +257,20 @@ struct ModelPickerPanel: View {
             }
         }
         .frame(width: 320)
+        .modifier(ModelPickerJumpCommands(store: store, models: jumps) { model in
+            conversation.selectModel(model)
+            dismiss()
+        })
         .task {
             if conversation.models.isEmpty {
                 conversation.loadModels()
             }
         }
+    }
+
+    private func jumpOrder(_ sections: [ModelSection]) -> [ModelOption] {
+        var seen = Set<String>()
+        return sections.filter { $0.id != "hidden" }.flatMap(\.models).filter { seen.insert($0.key).inserted }
     }
 
     private func emptyText(configured: [ModelOption], hiddenCount: Int) -> String {
@@ -320,6 +332,7 @@ private struct ModelRow: View {
     let selected: Bool
     let favorite: Bool
     let hidden: Bool
+    let jump: Int?
     let select: () -> Void
     let toggleFavorite: () -> Void
     let toggleHidden: () -> Void
@@ -339,6 +352,13 @@ private struct ModelRow: View {
                             .foregroundStyle(Theme.secondaryText)
                     }
                     Spacer(minLength: 0)
+                    if let jump {
+                        Text("⌘\(jump)")
+                            .font(.system(size: 11))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.secondaryText.opacity(0.8))
+                            .accessibilityHidden(true)
+                    }
                     if selected {
                         Image(systemName: "checkmark")
                             .font(.system(size: 11, weight: .medium))

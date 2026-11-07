@@ -82,12 +82,13 @@ final class ConversationSmoke {
         case .cancelled:
             guard conversation.queued.count == 1, conversation.composer(project: nil).text == Self.cancelled,
                   conversation.queued.first?.text == Self.followUp else { return }
-            conversation.composer(project: nil).text = ""
+            let binding = store.pages.keybindings.first { $0.command == "thread.steerQueuedMessage" }?.shortcut ?? "unbound"
             guard conversation.steerQueuedMessage() else {
                 finish(passed: false, "⌘⇧Enter found no queued message to steer")
                 return
             }
-            move(to: .steering, "cancelled message returned to the composer; ⌘⇧Enter steered the other")
+            conversation.composer(project: nil).text = ""
+            move(to: .steering, "cancelled message returned to the composer; thread.steerQueuedMessage (\(binding)) steered the other")
         case .steering:
             guard conversation.queued.allSatisfy({ $0.steering || $0.sending }), let approval = conversation.approvals.first else { return }
             conversation.answer(approval, .approve)
@@ -144,15 +145,29 @@ final class ConversationSmoke {
         guard commands.first?.title == "/model", commands.first?.badge == "Built-in" else { return "the / menu lost /model" }
         let skills = ComposerSuggestionSource(store: store).items(for: ComposerTrigger(kind: .skill, query: "", start: 0, end: 1))
         print("ok   triggers / $ @ # detected; / menu \(commands.count) items, $ menu \(skills.count) skills (\(conversation.commands.count) commands loaded)")
-        let intents: [(Bool, Bool, Bool, SendShortcut, String, SubmitIntent?)] = [
-            (false, false, false, .enter, "a", .send), (true, false, false, .enter, "a", nil),
-            (false, true, true, .enter, "a", .alternate), (false, false, false, .modEnter, "a", nil),
-            (false, true, false, .modEnter, "a", .send), (false, false, false, .modEnterMultiline, "a\nb", nil),
-            (false, false, false, .modEnterMultiline, "a", .send), (true, true, true, .modEnter, "a", .alternate),
+        struct Case {
+            let shift: Bool
+            let command: Bool
+            let running: Bool
+            let shortcut: SendShortcut
+            let text: String
+            let expected: SubmitIntent?
+        }
+        let cases = [
+            Case(shift: false, command: false, running: false, shortcut: .enter, text: "a", expected: .send),
+            Case(shift: true, command: false, running: false, shortcut: .enter, text: "a", expected: nil),
+            Case(shift: false, command: true, running: true, shortcut: .enter, text: "a", expected: .alternate),
+            Case(shift: false, command: false, running: false, shortcut: .modEnter, text: "a", expected: nil),
+            Case(shift: false, command: true, running: false, shortcut: .modEnter, text: "a", expected: .send),
+            Case(shift: false, command: false, running: false, shortcut: .modEnterMultiline, text: "a\nb", expected: nil),
+            Case(shift: false, command: false, running: false, shortcut: .modEnterMultiline, text: "a", expected: .send),
+            Case(shift: true, command: true, running: true, shortcut: .modEnter, text: "a", expected: .alternate),
         ]
-        for (shift, command, running, shortcut, text, expected) in intents {
-            let intent = SubmitIntent.resolve(shift: shift, command: command, running: running, shortcut: shortcut, text: text)
-            guard intent == expected else { return "send shortcut \(shortcut) shift=\(shift) cmd=\(command) running=\(running) gave \(String(describing: intent))" }
+        for check in cases {
+            let intent = SubmitIntent.resolve(shift: check.shift, command: check.command, running: check.running, shortcut: check.shortcut, text: check.text)
+            guard intent == check.expected else {
+                return "send shortcut \(check.shortcut) shift=\(check.shift) cmd=\(check.command) running=\(check.running) gave \(String(describing: intent))"
+            }
         }
         guard StreamingText.visible("one\n\ntwo", streaming: true, mode: .paragraph) == "one",
               StreamingText.visible("one", streaming: true, mode: .turn) == nil else { return "response streaming modes render the wrong text" }
