@@ -52,6 +52,12 @@ final class ConversationStore {
         info?.busy == true
     }
 
+    private(set) var worktreeSetup: [String: (stages: [SetupStage], done: Bool, error: String?)] = [:]
+
+    func setWorktreeSetup(thread: String, stages: [SetupStage], done: Bool, error: String?) {
+        worktreeSetup[thread] = (stages, done, error)
+    }
+
     func focus(_ thread: String?) {
         guard thread != self.thread else { return }
         self.thread = thread

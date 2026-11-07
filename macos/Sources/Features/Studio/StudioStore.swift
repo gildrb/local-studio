@@ -149,6 +149,14 @@ final class StudioStore {
             pages.setSettings(settings)
         case .keybindings(let bindings):
             pages.setKeybindings(bindings)
+        case .projectScripts(let project, let scripts):
+            inbox.setProjectScripts(project: project, scripts: scripts)
+        case .projectSettings(let project, let settings, let effective):
+            inbox.setProjectSettings(project: project, settings: settings, effective: effective)
+        case .worktreeSetup(let thread, let stages, let done, let error):
+            conversation.setWorktreeSetup(thread: thread, stages: stages, done: done, error: error)
+        case .daemon(let socket, let version, let pid):
+            pages.setDaemon(socket: socket, version: version, pid: pid)
         case .requestDone(let request, let message):
             requests.complete(request, .done(message))
         case .requestFailed(let request, let message):
