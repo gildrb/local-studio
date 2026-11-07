@@ -5,6 +5,7 @@ import LocalStudioKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store: StudioStore
     private var smoke: Smoke?
+    private var panelSmoke: PanelSmoke?
 
     override init() {
         store = StudioStore(launch: Self.bundledDaemon())
@@ -29,6 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let smoke = Smoke(store: store)
             smoke.start()
             self.smoke = smoke
+        }
+        if let flag = CommandLine.arguments.firstIndex(of: "+smoke-panels") {
+            let path = CommandLine.arguments.indices.contains(flag + 1) ? CommandLine.arguments[flag + 1] : NSTemporaryDirectory() + "ls-smoke-panels-diff.png"
+            let smoke = PanelSmoke(store: store, output: URL(fileURLWithPath: path))
+            smoke.start()
+            panelSmoke = smoke
         }
     }
 
