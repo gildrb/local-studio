@@ -22,6 +22,12 @@ struct ThemeRoleGroup: Identifiable {
         ThemeRoleGroup(title: "Accent and status", roles: [
             ("accent", "Accent"), ("warningForeground", "Warning"), ("errorForeground", "Error"),
         ]),
+        ThemeRoleGroup(title: "Code", roles: [
+            ("codeBackground", "Background"), ("syntaxDefault", "Text"), ("syntaxComment", "Comments"), ("syntaxKeyword", "Keywords"),
+            ("syntaxOperator", "Operators"), ("syntaxString", "Strings"), ("syntaxFunction", "Functions"), ("syntaxType", "Types"),
+            ("syntaxProperty", "Properties"), ("syntaxConstant", "Constants"), ("syntaxNumber", "Numbers"),
+            ("syntaxParameter", "Parameters"), ("syntaxBuiltin", "Built-ins"), ("syntaxPunctuation", "Punctuation"),
+        ]),
     ]
 }
 

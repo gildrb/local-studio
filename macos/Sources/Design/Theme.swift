@@ -1,4 +1,5 @@
 import AppKit
+import LocalStudioKit
 import SwiftUI
 
 enum Theme {
@@ -33,6 +34,7 @@ enum Theme {
     static var diffAddedGutter: Color { ThemeTokens.shared.color(.diffAddedGutter) }
     static var diffRemovedGutter: Color { ThemeTokens.shared.color(.diffRemovedGutter) }
     static var diffHunk: Color { ThemeTokens.shared.color(.diffHunk) }
+    static func syntax(_ kind: SyntaxKind) -> Color { ThemeTokens.shared.color(kind.token) }
 
     enum Metrics {
         static let titlebarHeight: CGFloat = 52
@@ -44,6 +46,26 @@ enum Theme {
         static let sidebarInset: CGFloat = 8
         static let chromeButton: CGFloat = 28
         static let trailingChromeInset: CGFloat = 76
+    }
+}
+
+extension SyntaxKind {
+    var token: ThemeToken {
+        switch self {
+        case .plain, .variable: .syntaxDefault
+        case .comment: .syntaxComment
+        case .keyword: .syntaxKeyword
+        case .operator: .syntaxOperator
+        case .string: .syntaxString
+        case .function: .syntaxFunction
+        case .type: .syntaxType
+        case .property: .syntaxProperty
+        case .constant: .syntaxConstant
+        case .number: .syntaxNumber
+        case .parameter: .syntaxParameter
+        case .builtin: .syntaxBuiltin
+        case .punctuation: .syntaxPunctuation
+        }
     }
 }
 

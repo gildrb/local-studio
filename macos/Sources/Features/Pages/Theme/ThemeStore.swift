@@ -13,6 +13,8 @@ enum ThemeToken: String, CaseIterable, Sendable {
     case terminalAnsiBlue, terminalAnsiMagenta, terminalAnsiCyan, terminalAnsiWhite
     case terminalAnsiBrightBlack, terminalAnsiBrightRed, terminalAnsiBrightGreen, terminalAnsiBrightYellow
     case terminalAnsiBrightBlue, terminalAnsiBrightMagenta, terminalAnsiBrightCyan, terminalAnsiBrightWhite
+    case syntaxDefault, syntaxComment, syntaxKeyword, syntaxOperator, syntaxString, syntaxFunction, syntaxType
+    case syntaxProperty, syntaxConstant, syntaxNumber, syntaxParameter, syntaxBuiltin, syntaxPunctuation
 
     static let ansi: [ThemeToken] = [
         .terminalAnsiBlack, .terminalAnsiRed, .terminalAnsiGreen, .terminalAnsiYellow,
@@ -51,6 +53,8 @@ enum ThemeToken: String, CaseIterable, Sendable {
     var isText: Bool {
         switch self {
         case .text, .secondaryText, .chromeIcon, .tertiaryText, .codeText: true
+        case .syntaxDefault, .syntaxComment, .syntaxKeyword, .syntaxOperator, .syntaxString, .syntaxFunction, .syntaxType: true
+        case .syntaxProperty, .syntaxConstant, .syntaxNumber, .syntaxParameter, .syntaxBuiltin, .syntaxPunctuation: true
         default: false
         }
     }
@@ -82,6 +86,22 @@ enum LegacyPalette {
         "#818383", "#fc391f", "#31e722", "#eaec23", "#5833ff", "#f935f8", "#14f0f0", "#e9ebeb",
     ].compactMap(ThemeColorParser.parse)))
 
+    private static func syntax(_ values: [ThemeToken: String]) -> [ThemeToken: RGBA] {
+        values.compactMapValues(ThemeColorParser.parse)
+    }
+
+    private static let darkSyntax = syntax([
+        .syntaxComment: "#8c929f", .syntaxKeyword: "#93beff", .syntaxOperator: "#b4bed2", .syntaxString: "#83d494",
+        .syntaxFunction: "#d0aafc", .syntaxType: "#44d4e2", .syntaxProperty: "#78c8f6", .syntaxConstant: "#e8b273",
+        .syntaxNumber: "#f9a870", .syntaxParameter: "#ffa282", .syntaxBuiltin: "#62d1dd", .syntaxPunctuation: "#9ea5b2",
+    ])
+
+    private static let lightSyntax = syntax([
+        .syntaxComment: "#696f7b", .syntaxKeyword: "#345fb2", .syntaxOperator: "#454d5e", .syntaxString: "#007834",
+        .syntaxFunction: "#764aa2", .syntaxType: "#007789", .syntaxProperty: "#006c9d", .syntaxConstant: "#8d5400",
+        .syntaxNumber: "#9d4700", .syntaxParameter: "#a24019", .syntaxBuiltin: "#007583", .syntaxPunctuation: "#585e69",
+    ])
+
     static let dark = ThemePalette(colors: [
         .canvas: gray(0.0392), .sidebar: gray(0.068), .card: gray(0.068), .primary: rgb(0.2044, 0.4198, 0.9449),
         .hairline: gray(1, 0.06), .input: gray(1, 0.08), .hover: gray(1, 0.04), .selection: gray(1, 0.07),
@@ -89,12 +109,12 @@ enum LegacyPalette {
         .chromeIcon: gray(1, 0.6), .tertiaryText: gray(0.36), .success: rgb(0.204, 0.827, 0.6), .warning: rgb(0.984, 0.749, 0.141),
         .danger: rgb(0.973, 0.443, 0.443), .working: rgb(0.22, 0.741, 0.973), .woke: rgb(0.984, 0.573, 0.235),
         .overlay: gray(0.086), .shadow: gray(0, 0.5),
-        .code: gray(1, 0.036), .codeText: gray(1, 0.85), .terminal: gray(0.0392), .terminalText: gray(0.86),
+        .code: gray(1, 0.036), .codeText: gray(1, 0.85), .syntaxDefault: gray(1, 0.85), .terminal: gray(0.0392), .terminalText: gray(0.86),
         .terminalCursor: rgb(0.2044, 0.4198, 0.9449), .terminalSelection: gray(1, 0.18),
         .diffAdded: rgb(0.34, 0.80, 0.50), .diffRemoved: rgb(0.96, 0.42, 0.42),
         .diffAddedSurface: rgb(0.18, 0.70, 0.38, 0.10), .diffRemovedSurface: rgb(0.92, 0.30, 0.30, 0.10),
         .diffAddedGutter: rgb(0.18, 0.70, 0.38, 0.16), .diffRemovedGutter: rgb(0.92, 0.30, 0.30, 0.16), .diffHunk: gray(1, 0.03),
-    ].merging(ansi) { current, _ in current })
+    ].merging(ansi) { current, _ in current }.merging(darkSyntax) { current, _ in current })
 
     static let light = ThemePalette(colors: [
         .canvas: gray(0.9895), .sidebar: gray(0.98), .card: gray(1), .primary: rgb(0.1043, 0.3071, 0.8463),
@@ -104,12 +124,12 @@ enum LegacyPalette {
         .tertiaryText: rgb(0.62, 0.62, 0.65), .success: rgb(0.02, 0.588, 0.412), .warning: rgb(0.851, 0.467, 0.024),
         .danger: rgb(0.863, 0.149, 0.149), .working: rgb(0.008, 0.518, 0.78), .woke: rgb(0.918, 0.345, 0.047),
         .overlay: gray(1), .shadow: gray(0, 0.14),
-        .code: rgb(0.957, 0.957, 0.961, 0.6), .codeText: gray(0, 0.85), .terminal: gray(0.9895), .terminalText: gray(0.13),
+        .code: rgb(0.957, 0.957, 0.961, 0.6), .codeText: gray(0, 0.85), .syntaxDefault: gray(0, 0.85), .terminal: gray(0.9895), .terminalText: gray(0.13),
         .terminalCursor: rgb(0.1043, 0.3071, 0.8463), .terminalSelection: gray(0, 0.12),
         .diffAdded: rgb(0.10, 0.50, 0.24), .diffRemoved: rgb(0.76, 0.16, 0.16),
         .diffAddedSurface: rgb(0.18, 0.62, 0.32, 0.10), .diffRemovedSurface: rgb(0.86, 0.22, 0.22, 0.09),
         .diffAddedGutter: rgb(0.18, 0.62, 0.32, 0.16), .diffRemovedGutter: rgb(0.86, 0.22, 0.22, 0.14), .diffHunk: rgb(0.94, 0.95, 0.97),
-    ].merging(ansi) { current, _ in current })
+    ].merging(ansi) { current, _ in current }.merging(lightSyntax) { current, _ in current })
 
     static func palette(_ appearance: ThemeAppearance) -> ThemePalette {
         appearance == .dark ? dark : light
@@ -281,6 +301,7 @@ final class ThemeStore {
         for token in ThemeToken.allCases {
             if let name = token.role, let value = role(name) { colors[token] = value }
         }
+        if source["syntaxDefault"] == nil, let code = colors[.codeText] { colors[.syntaxDefault] = code }
         let text = colors[.text] ?? legacy[.text]
         let canvas = colors[.canvas] ?? legacy[.canvas]
         colors[.selectionStroke] = (colors[.input] ?? legacy[.input]).mixed(with: text, amount: 0.06)

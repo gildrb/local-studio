@@ -82,7 +82,20 @@ enum BuiltInThemeData {
       "terminalAnsiBrightBlue",
       "terminalAnsiBrightMagenta",
       "terminalAnsiBrightCyan",
-      "terminalAnsiBrightWhite"
+      "terminalAnsiBrightWhite",
+      "syntaxDefault",
+      "syntaxComment",
+      "syntaxKeyword",
+      "syntaxOperator",
+      "syntaxString",
+      "syntaxFunction",
+      "syntaxType",
+      "syntaxProperty",
+      "syntaxConstant",
+      "syntaxNumber",
+      "syntaxParameter",
+      "syntaxBuiltin",
+      "syntaxPunctuation"
      ],
      "standard": {
       "light": {
@@ -166,7 +179,20 @@ enum BuiltInThemeData {
        "terminalAnsiBrightBlue": "#5833ff",
        "terminalAnsiBrightMagenta": "#f935f8",
        "terminalAnsiBrightCyan": "#14f0f0",
-       "terminalAnsiBrightWhite": "#e9ebeb"
+       "terminalAnsiBrightWhite": "#e9ebeb",
+       "syntaxDefault": "#27272a",
+       "syntaxComment": "#696f7b",
+       "syntaxKeyword": "#345fb2",
+       "syntaxOperator": "#454d5e",
+       "syntaxString": "#007834",
+       "syntaxFunction": "#764aa2",
+       "syntaxType": "#007789",
+       "syntaxProperty": "#006c9d",
+       "syntaxConstant": "#8d5400",
+       "syntaxNumber": "#9d4700",
+       "syntaxParameter": "#a24019",
+       "syntaxBuiltin": "#007583",
+       "syntaxPunctuation": "#585e69"
       },
       "dark": {
        "canvas": "#0a0a0a",
@@ -249,7 +275,20 @@ enum BuiltInThemeData {
        "terminalAnsiBrightBlue": "#5833ff",
        "terminalAnsiBrightMagenta": "#f935f8",
        "terminalAnsiBrightCyan": "#14f0f0",
-       "terminalAnsiBrightWhite": "#e9ebeb"
+       "terminalAnsiBrightWhite": "#e9ebeb",
+       "syntaxDefault": "#f5f5f5",
+       "syntaxComment": "#8c929f",
+       "syntaxKeyword": "#93beff",
+       "syntaxOperator": "#b4bed2",
+       "syntaxString": "#83d494",
+       "syntaxFunction": "#d0aafc",
+       "syntaxType": "#44d4e2",
+       "syntaxProperty": "#78c8f6",
+       "syntaxConstant": "#e8b273",
+       "syntaxNumber": "#f9a870",
+       "syntaxParameter": "#ffa282",
+       "syntaxBuiltin": "#62d1dd",
+       "syntaxPunctuation": "#9ea5b2"
       }
      },
      "themes": [
@@ -338,7 +377,20 @@ enum BuiltInThemeData {
         "terminalAnsiBrightBlue": "#d6c7b4",
         "terminalAnsiBrightMagenta": "#fbbb9e",
         "terminalAnsiBrightCyan": "#9cd4c8",
-        "terminalAnsiBrightWhite": "#f5eee0"
+        "terminalAnsiBrightWhite": "#f5eee0",
+        "syntaxDefault": "#e0d6c6",
+        "syntaxComment": "#a9a098",
+        "syntaxKeyword": "#d4af5d",
+        "syntaxOperator": "#d4af5d",
+        "syntaxString": "#8ec184",
+        "syntaxFunction": "#79c1b2",
+        "syntaxType": "#c6b4a0",
+        "syntaxProperty": "#c6b4a0",
+        "syntaxConstant": "#c6b4a0",
+        "syntaxNumber": "#eba474",
+        "syntaxParameter": "#eba474",
+        "syntaxBuiltin": "#c6b4a0",
+        "syntaxPunctuation": "#c6c1bb"
        },
        "variants": {
         "light": {
@@ -422,7 +474,20 @@ enum BuiltInThemeData {
          "terminalAnsiBrightBlue": "#7d6f5e",
          "terminalAnsiBrightMagenta": "#9d6349",
          "terminalAnsiBrightCyan": "#457b71",
-         "terminalAnsiBrightWhite": "oklch(35% 0.026 54)"
+         "terminalAnsiBrightWhite": "oklch(35% 0.026 54)",
+         "syntaxDefault": "oklch(21% 0.018 50)",
+         "syntaxComment": "oklch(50% 0.036 58)",
+         "syntaxKeyword": "oklch(21% 0.018 50)",
+         "syntaxOperator": "oklch(50% 0.036 58)",
+         "syntaxString": "oklch(41% 0.03 55)",
+         "syntaxFunction": "oklch(21% 0.018 50)",
+         "syntaxType": "oklch(21% 0.018 50)",
+         "syntaxProperty": "oklch(21% 0.018 50)",
+         "syntaxConstant": "oklch(41% 0.03 55)",
+         "syntaxNumber": "oklch(41% 0.03 55)",
+         "syntaxParameter": "oklch(21% 0.018 50)",
+         "syntaxBuiltin": "oklch(41% 0.03 55)",
+         "syntaxPunctuation": "oklch(50% 0.036 58)"
         }
        }
       },
@@ -487,7 +552,20 @@ enum BuiltInThemeData {
         "terminalCursor": "oklch(0.523295 0.112292 158.089)",
         "terminalSelection": "oklch(0.891377 0.026164 164.929)",
         "terminalScrollbar": "oklch(0.824752 0.001392 294.641)",
-        "terminalScrollbarHover": "oklch(0.755495 0.004415 318.776)"
+        "terminalScrollbarHover": "oklch(0.755495 0.004415 318.776)",
+        "syntaxDefault": "oklch(0.222003 0.03479 328.979)",
+        "syntaxComment": "oklch(0.530 0.020 160)",
+        "syntaxKeyword": "oklch(0.500 0.140 155)",
+        "syntaxOperator": "oklch(0.420 0.030 160)",
+        "syntaxString": "oklch(0.500 0.140 85)",
+        "syntaxFunction": "oklch(0.490 0.140 190)",
+        "syntaxType": "oklch(0.500 0.140 125)",
+        "syntaxProperty": "oklch(0.500 0.119 225)",
+        "syntaxConstant": "oklch(0.500 0.119 65)",
+        "syntaxNumber": "oklch(0.500 0.140 50)",
+        "syntaxParameter": "oklch(0.500 0.140 35)",
+        "syntaxBuiltin": "oklch(0.500 0.119 190)",
+        "syntaxPunctuation": "oklch(0.480 0.020 160)"
        },
        "variants": {
         "dark": {
@@ -547,7 +625,20 @@ enum BuiltInThemeData {
          "terminalCursor": "oklch(0.796228 0.133058 157.319)",
          "terminalSelection": "oklch(0.464636 0.066083 158.72)",
          "terminalScrollbar": "oklch(0.594692 0.006862 176.022)",
-         "terminalScrollbarHover": "oklch(0.687968 0.00354 193.55)"
+         "terminalScrollbarHover": "oklch(0.687968 0.00354 193.55)",
+         "syntaxDefault": "oklch(0.990339 0.008411 325.64)",
+         "syntaxComment": "oklch(0.690 0.020 160)",
+         "syntaxKeyword": "oklch(0.800 0.120 155)",
+         "syntaxOperator": "oklch(0.800 0.030 160)",
+         "syntaxString": "oklch(0.800 0.120 85)",
+         "syntaxFunction": "oklch(0.800 0.120 190)",
+         "syntaxType": "oklch(0.800 0.120 125)",
+         "syntaxProperty": "oklch(0.800 0.102 225)",
+         "syntaxConstant": "oklch(0.800 0.102 65)",
+         "syntaxNumber": "oklch(0.800 0.120 50)",
+         "syntaxParameter": "oklch(0.800 0.120 35)",
+         "syntaxBuiltin": "oklch(0.800 0.102 190)",
+         "syntaxPunctuation": "oklch(0.720 0.020 160)"
         }
        }
       },
@@ -612,7 +703,20 @@ enum BuiltInThemeData {
         "terminalCursor": "oklch(0.536684 0.120219 247.01)",
         "terminalSelection": "oklch(0.895373 0.023469 241.913)",
         "terminalScrollbar": "oklch(0.826271 0.006191 305.456)",
-        "terminalScrollbarHover": "oklch(0.756866 0.008685 313.721)"
+        "terminalScrollbarHover": "oklch(0.756866 0.008685 313.721)",
+        "syntaxDefault": "oklch(0.222003 0.03479 328.979)",
+        "syntaxComment": "oklch(0.530 0.020 245)",
+        "syntaxKeyword": "oklch(0.500 0.140 250)",
+        "syntaxOperator": "oklch(0.420 0.030 245)",
+        "syntaxString": "oklch(0.500 0.140 145)",
+        "syntaxFunction": "oklch(0.490 0.140 200)",
+        "syntaxType": "oklch(0.500 0.140 175)",
+        "syntaxProperty": "oklch(0.500 0.119 280)",
+        "syntaxConstant": "oklch(0.500 0.119 75)",
+        "syntaxNumber": "oklch(0.500 0.140 60)",
+        "syntaxParameter": "oklch(0.500 0.140 35)",
+        "syntaxBuiltin": "oklch(0.500 0.119 200)",
+        "syntaxPunctuation": "oklch(0.480 0.020 245)"
        },
        "variants": {
         "dark": {
@@ -672,7 +776,20 @@ enum BuiltInThemeData {
          "terminalCursor": "oklch(0.758933 0.105833 241.548)",
          "terminalSelection": "oklch(0.439946 0.0561 243.479)",
          "terminalScrollbar": "oklch(0.58613 0.012959 267.22)",
-         "terminalScrollbarHover": "oklch(0.681569 0.010909 276.465)"
+         "terminalScrollbarHover": "oklch(0.681569 0.010909 276.465)",
+         "syntaxDefault": "oklch(0.990339 0.008411 325.64)",
+         "syntaxComment": "oklch(0.670 0.020 245)",
+         "syntaxKeyword": "oklch(0.800 0.120 250)",
+         "syntaxOperator": "oklch(0.800 0.030 245)",
+         "syntaxString": "oklch(0.800 0.120 145)",
+         "syntaxFunction": "oklch(0.800 0.120 200)",
+         "syntaxType": "oklch(0.800 0.120 175)",
+         "syntaxProperty": "oklch(0.800 0.102 280)",
+         "syntaxConstant": "oklch(0.800 0.102 75)",
+         "syntaxNumber": "oklch(0.800 0.120 60)",
+         "syntaxParameter": "oklch(0.800 0.120 35)",
+         "syntaxBuiltin": "oklch(0.800 0.102 200)",
+         "syntaxPunctuation": "oklch(0.720 0.020 245)"
         }
        }
       },
@@ -737,7 +854,20 @@ enum BuiltInThemeData {
         "terminalCursor": "oklch(0.552831 0.129438 44.656)",
         "terminalSelection": "oklch(0.899296 0.022939 49.163)",
         "terminalScrollbar": "oklch(0.828185 0.005884 349.533)",
-        "terminalScrollbarHover": "oklch(0.758584 0.008423 341.16)"
+        "terminalScrollbarHover": "oklch(0.758584 0.008423 341.16)",
+        "syntaxDefault": "oklch(0.222003 0.03479 328.979)",
+        "syntaxComment": "oklch(0.530 0.020 50)",
+        "syntaxKeyword": "oklch(0.500 0.140 45)",
+        "syntaxOperator": "oklch(0.420 0.030 50)",
+        "syntaxString": "oklch(0.500 0.140 135)",
+        "syntaxFunction": "oklch(0.500 0.140 85)",
+        "syntaxType": "oklch(0.500 0.140 20)",
+        "syntaxProperty": "oklch(0.500 0.119 65)",
+        "syntaxConstant": "oklch(0.500 0.119 320)",
+        "syntaxNumber": "oklch(0.500 0.140 350)",
+        "syntaxParameter": "oklch(0.500 0.140 30)",
+        "syntaxBuiltin": "oklch(0.500 0.119 85)",
+        "syntaxPunctuation": "oklch(0.480 0.020 50)"
        },
        "variants": {
         "dark": {
@@ -797,7 +927,20 @@ enum BuiltInThemeData {
          "terminalCursor": "oklch(0.762174 0.124117 52.082)",
          "terminalSelection": "oklch(0.442681 0.0608 50.795)",
          "terminalScrollbar": "oklch(0.587861 0.010463 20.444)",
-         "terminalScrollbarHover": "oklch(0.682876 0.009156 9.796)"
+         "terminalScrollbarHover": "oklch(0.682876 0.009156 9.796)",
+         "syntaxDefault": "oklch(0.990339 0.008411 325.64)",
+         "syntaxComment": "oklch(0.680 0.020 50)",
+         "syntaxKeyword": "oklch(0.800 0.120 45)",
+         "syntaxOperator": "oklch(0.800 0.030 50)",
+         "syntaxString": "oklch(0.800 0.120 135)",
+         "syntaxFunction": "oklch(0.800 0.120 85)",
+         "syntaxType": "oklch(0.800 0.120 20)",
+         "syntaxProperty": "oklch(0.800 0.102 65)",
+         "syntaxConstant": "oklch(0.800 0.102 320)",
+         "syntaxNumber": "oklch(0.800 0.120 350)",
+         "syntaxParameter": "oklch(0.800 0.120 30)",
+         "syntaxBuiltin": "oklch(0.800 0.102 85)",
+         "syntaxPunctuation": "oklch(0.720 0.020 50)"
         }
        }
       },
@@ -862,7 +1005,20 @@ enum BuiltInThemeData {
         "terminalCursor": "oklch(0.525348 0.15373 294.176)",
         "terminalSelection": "oklch(0.897143 0.028558 299.758)",
         "terminalScrollbar": "oklch(0.828195 0.008526 318.858)",
-        "terminalScrollbarHover": "oklch(0.758596 0.010892 321.538)"
+        "terminalScrollbarHover": "oklch(0.758596 0.010892 321.538)",
+        "syntaxDefault": "oklch(0.222003 0.03479 328.979)",
+        "syntaxComment": "oklch(0.530 0.020 300)",
+        "syntaxKeyword": "oklch(0.500 0.140 295)",
+        "syntaxOperator": "oklch(0.420 0.030 300)",
+        "syntaxString": "oklch(0.500 0.140 150)",
+        "syntaxFunction": "oklch(0.500 0.140 255)",
+        "syntaxType": "oklch(0.500 0.140 205)",
+        "syntaxProperty": "oklch(0.500 0.119 275)",
+        "syntaxConstant": "oklch(0.500 0.119 340)",
+        "syntaxNumber": "oklch(0.500 0.140 55)",
+        "syntaxParameter": "oklch(0.500 0.140 30)",
+        "syntaxBuiltin": "oklch(0.500 0.119 205)",
+        "syntaxPunctuation": "oklch(0.480 0.020 300)"
        },
        "variants": {
         "dark": {
@@ -922,7 +1078,20 @@ enum BuiltInThemeData {
          "terminalCursor": "oklch(0.671712 0.169136 293.929)",
          "terminalSelection": "oklch(0.395417 0.085554 294.182)",
          "terminalScrollbar": "oklch(0.578663 0.017888 302.229)",
-         "terminalScrollbarHover": "oklch(0.676012 0.015271 305.433)"
+         "terminalScrollbarHover": "oklch(0.676012 0.015271 305.433)",
+         "syntaxDefault": "oklch(0.990339 0.008411 325.64)",
+         "syntaxComment": "oklch(0.660 0.020 300)",
+         "syntaxKeyword": "oklch(0.800 0.120 295)",
+         "syntaxOperator": "oklch(0.800 0.030 300)",
+         "syntaxString": "oklch(0.800 0.120 150)",
+         "syntaxFunction": "oklch(0.800 0.120 255)",
+         "syntaxType": "oklch(0.800 0.120 205)",
+         "syntaxProperty": "oklch(0.800 0.102 275)",
+         "syntaxConstant": "oklch(0.800 0.102 340)",
+         "syntaxNumber": "oklch(0.800 0.120 55)",
+         "syntaxParameter": "oklch(0.800 0.120 30)",
+         "syntaxBuiltin": "oklch(0.800 0.102 205)",
+         "syntaxPunctuation": "oklch(0.720 0.020 300)"
         }
        }
       }

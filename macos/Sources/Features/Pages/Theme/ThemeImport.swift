@@ -144,10 +144,65 @@ enum ThemeImport {
                 colors[token.rawValue] = color.hex
             }
         }
+        let code = roles["codeBackground"] ?? canvas
+        for (role, color) in syntaxRoles(object["tokenColors"] as? [Any] ?? [], over: code, text: text, standard: colors) {
+            colors[role] = color.hex
+        }
         let name = [object["displayName"], object["name"]].compactMap { $0 as? String }.map(humanize).first { !$0.isEmpty } ?? "VS Code theme"
         return ThemeDefinition(
             id: ThemeLibrary.identifier(for: name, taken: taken), label: String(name.prefix(48)),
             appearance: appearance, colors: colors, variants: nil
         )
+    }
+
+    private static let syntaxScopes: [(String, [String])] = [
+        ("syntaxComment", ["comment"]),
+        ("syntaxKeyword", ["keyword.control", "keyword", "storage.type", "storage"]),
+        ("syntaxOperator", ["keyword.operator"]),
+        ("syntaxString", ["string.quoted", "string"]),
+        ("syntaxFunction", ["entity.name.function", "support.function"]),
+        ("syntaxType", ["entity.name.type", "support.type", "entity.name.class", "support.class"]),
+        ("syntaxProperty", ["variable.other.property", "variable.other.object.property", "support.type.property-name", "meta.object-literal.key"]),
+        ("syntaxConstant", ["constant.language", "variable.other.constant", "constant"]),
+        ("syntaxNumber", ["constant.numeric"]),
+        ("syntaxParameter", ["variable.parameter"]),
+        ("syntaxBuiltin", ["variable.language", "support.variable", "support.constant"]),
+        ("syntaxPunctuation", ["punctuation"]),
+    ]
+
+    private static func syntaxRoles(_ tokenColors: [Any], over code: RGBA, text: RGBA, standard: [String: String]) -> [String: RGBA] {
+        var rules: [(selector: String, color: RGBA)] = []
+        for case let entry as [String: Any] in tokenColors {
+            guard let settings = entry["settings"] as? [String: Any], let raw = settings["foreground"] as? String,
+                  let color = ThemeColorParser.parse(raw) else { continue }
+            let scopes: [String]
+            if let list = entry["scope"] as? [String] {
+                scopes = list
+            } else if let single = entry["scope"] as? String {
+                scopes = single.split(separator: ",").map(String.init)
+            } else {
+                continue
+            }
+            for scope in scopes {
+                let selector = scope.trimmingCharacters(in: .whitespaces)
+                guard !selector.isEmpty, !selector.contains(" ") else { continue }
+                rules.append((selector, color.flattened(over: code)))
+            }
+        }
+        func match(_ target: String) -> RGBA? {
+            let candidates = rules.filter { target == $0.selector || target.hasPrefix($0.selector + ".") }
+            return candidates.max { $0.selector.count < $1.selector.count }?.color
+        }
+        var roles: [String: RGBA] = ["syntaxDefault": text]
+        for (role, targets) in syntaxScopes {
+            if let found = targets.lazy.compactMap(match).first {
+                roles[role] = found
+            } else if let fallback = standard[role].flatMap(ThemeColorParser.parse), fallback.contrast(with: code) >= 4.5 {
+                roles[role] = fallback
+            } else {
+                roles[role] = text
+            }
+        }
+        return roles
     }
 }
