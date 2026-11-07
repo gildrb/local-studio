@@ -18,6 +18,7 @@ enum Phase {
     Project,
     Opening,
     Replying,
+    Workspace,
     Finished,
 }
 
@@ -100,7 +101,24 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
                 finish(app, phase, failed, false, "the thread is missing from the sidebar inbox");
                 return;
             }
-            finish(app, phase, failed, true, &format!("{} transcript items rendered", items.len()));
+            println!("ok   streamed reply rendered ({} transcript items)", items.len());
+            if let Err(error) = std::fs::write(std::path::Path::new(project).join("notes.md"), "smoke notes\n") {
+                finish(app, phase, failed, false, &format!("write notes.md: {error}"));
+                return;
+            }
+            phase.set(Phase::Workspace);
+            app.composer.type_text(app, "look at @notes");
+            app.panel.show("files");
+            app.sidebar.search_text("smoke");
+        }
+        Phase::Workspace => {
+            let mention = app.composer.extras.suggestions().iter().any(|item| item == "@notes.md");
+            let file = app.panel.files.names().iter().any(|name| name == "notes.md");
+            let hits = app.sidebar.hit_count() > 0;
+            if mention && file && hits {
+                println!("ok   @ mention, Files surface and thread search answered through the core");
+                finish(app, phase, failed, true, "inbox, timeline, composer and workspace surfaces exercised");
+            }
         }
         Phase::Finished => {}
     }

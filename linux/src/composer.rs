@@ -3,9 +3,10 @@ use std::rc::Weak;
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
-use local_studio_core::{AccessMode, ApprovalAnswer, Connection, ModelKey, SendShortcut};
+use local_studio_core::{AccessMode, ApprovalAnswer, Connection, ModelKey, PromptDraft, SendShortcut};
 
 use crate::app::{App, Dirty};
+use crate::extras::Extras;
 use crate::format;
 use crate::state::State;
 
@@ -34,6 +35,7 @@ pub struct Composer {
     run_started: Cell<Option<i64>>,
     shortcut: Cell<SendShortcut>,
     app: Weak<App>,
+    pub extras: Extras,
 }
 
 impl Composer {
@@ -132,7 +134,9 @@ impl Composer {
         let send = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text("Send Message").build();
         send.add_css_class("ls-send");
         send.add_css_class("suggested-action");
+        let extras = Extras::new(app.clone());
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+        footer.append(&extras.attach);
         footer.append(&model);
         footer.append(&thinking);
         footer.append(&access);
@@ -144,7 +148,9 @@ impl Composer {
 
         let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
         card.add_css_class("ls-composer");
+        card.append(&extras.menu);
         card.append(&approval);
+        card.append(&extras.chips);
         card.append(&overlay);
         card.append(&footer);
         column.append(&working);
@@ -158,7 +164,28 @@ impl Composer {
 
         let buffer = view.buffer();
         let hint = placeholder.clone();
-        buffer.connect_changed(move |buffer| hint.set_visible(buffer.char_count() == 0));
+        let weak = app.clone();
+        let watched = view.clone();
+        buffer.connect_changed(move |buffer| {
+            hint.set_visible(buffer.char_count() == 0);
+            if let Some(app) = weak.upgrade() {
+                app.composer.extras.changed(&app, &watched);
+            }
+        });
+        let weak = app.clone();
+        view.connect_paste_clipboard(move |view| {
+            let clipboard = view.clipboard();
+            if !clipboard.formats().contains_type(gdk::Texture::static_type()) {
+                return;
+            }
+            view.stop_signal_emission_by_name("paste-clipboard");
+            let weak = weak.clone();
+            clipboard.read_texture_async(None::<&gtk::gio::Cancellable>, move |result| {
+                if let (Some(app), Ok(Some(texture))) = (weak.upgrade(), result) {
+                    app.composer.extras.attach_texture(&texture);
+                }
+            });
+        });
 
         let weak = app.clone();
         send.connect_clicked(move |_| {
@@ -170,10 +197,14 @@ impl Composer {
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let weak = app.clone();
         keys.connect_key_pressed(move |_, key, _, modifiers| {
+            let Some(app) = weak.upgrade() else { return glib::Propagation::Proceed };
+            let view = app.composer.view.clone();
+            if app.composer.extras.key(&app, &view, key) == glib::Propagation::Stop {
+                return glib::Propagation::Stop;
+            }
             if !matches!(key, gdk::Key::Return | gdk::Key::KP_Enter) {
                 return glib::Propagation::Proceed;
             }
-            let Some(app) = weak.upgrade() else { return glib::Propagation::Proceed };
             let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
             let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
             let sends = match app.composer.shortcut.get() {
@@ -304,6 +335,7 @@ impl Composer {
             run_started: Cell::new(None),
             shortcut: Cell::new(SendShortcut::Enter),
             app,
+            extras,
         }
     }
 
@@ -316,6 +348,22 @@ impl Composer {
         self.view.buffer().set_text(text);
     }
 
+    pub fn view(&self) -> gtk::TextView {
+        self.view.clone()
+    }
+
+    pub fn reset(&self) {
+        self.set_text("");
+        self.extras.reset();
+    }
+
+    pub fn type_text(&self, app: &std::rc::Rc<App>, text: &str) {
+        let buffer = self.view.buffer();
+        buffer.set_text(text);
+        buffer.place_cursor(&buffer.end_iter());
+        self.extras.changed(app, &self.view);
+    }
+
     pub fn focus(&self) {
         self.view.grab_focus();
     }
@@ -324,9 +372,14 @@ impl Composer {
         if self.approval.is_visible() {
             return;
         }
-        if app.send(&self.text()) {
-            self.set_text("");
+        let text = self.text().trim().to_string();
+        if text.is_empty() && !self.extras.has_attachments() {
+            return;
         }
+        let (images, files) = self.extras.take();
+        self.extras.remember(&text);
+        self.set_text("");
+        app.send(PromptDraft { text, images, files });
     }
 
     #[allow(clippy::too_many_lines)]
@@ -402,7 +455,11 @@ impl Composer {
             keys.push(None);
             names.push("Default model".to_string());
         }
-        let mut models: Vec<_> = state.models.iter().collect();
+        let mut models: Vec<_> = state
+            .models
+            .iter()
+            .filter(|model| !state.hidden.iter().any(|key| key.provider == model.provider && key.model == model.id))
+            .collect();
         models.sort_by_key(|model| {
             let favorite = state.favorites.iter().any(|key| key.provider == model.provider && key.model == model.id);
             (!favorite, !model.configured, model.provider.clone(), model.name.clone())
@@ -437,7 +494,7 @@ impl Composer {
 
         let levels = state.thinking_levels();
         if *self.level_names.borrow() != levels {
-            let labels: Vec<String> = levels.iter().map(|level| capitalize(level)).collect();
+            let labels: Vec<String> = levels.iter().map(|level| format::capitalize(level)).collect();
             let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
             self.levels.splice(0, self.levels.n_items(), &refs);
             self.level_names.replace(levels);
@@ -462,11 +519,6 @@ fn picker(model: &gtk::StringList, tooltip: &str) -> gtk::DropDown {
     dropdown.add_css_class("flat");
     dropdown.set_show_arrow(true);
     dropdown
-}
-
-fn capitalize(text: &str) -> String {
-    let mut chars = text.chars();
-    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
 }
 
 fn queued_row(app: &Weak<App>, state: &State, id: &str, text: &str, sending: bool, steering: bool) -> gtk::Widget {
