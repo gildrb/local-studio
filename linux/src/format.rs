@@ -16,6 +16,11 @@ pub fn escape(text: &str) -> String {
     glib::markup_escape_text(text).to_string()
 }
 
+pub fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
+}
+
 pub fn relative(at: i64, now: i64) -> String {
     let seconds = (now - at).max(0) / 1000;
     match seconds {
@@ -137,12 +142,12 @@ pub fn notice(level: NoticeLevel) -> (&'static str, &'static str) {
 }
 
 pub fn shortcut_label(binding: &str) -> String {
-    let accelerator = shortcut(binding);
+    let accelerator = accelerator(binding);
     gtk::accelerator_parse(&accelerator)
         .map_or(accelerator, |(key, modifiers)| gtk::accelerator_get_label(key, modifiers).to_string())
 }
 
-fn shortcut(binding: &str) -> String {
+pub fn accelerator(binding: &str) -> String {
     let mut accelerator = String::new();
     let mut key = "";
     for part in binding.split('+').filter(|part| !part.is_empty()) {

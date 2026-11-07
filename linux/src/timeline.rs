@@ -393,7 +393,7 @@ fn assistant_widget(
     column.upcast()
 }
 
-fn markdown_widget(block: Markdown) -> gtk::Widget {
+pub fn markdown_widget(block: Markdown) -> gtk::Widget {
     match block {
         Markdown::Paragraph(markup) => wrapped_label(&markup).upcast(),
         Markdown::Heading(level, markup) => {
@@ -473,7 +473,7 @@ fn changed_files_card(files: &[FileChange]) -> gtk::Widget {
     card.upcast()
 }
 
-fn diff_stat(additions: u32, deletions: u32) -> gtk::Box {
+pub fn diff_stat(additions: u32, deletions: u32) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     let add = gtk::Label::new(Some(&format!("+{additions}")));
     add.add_css_class("ls-add");

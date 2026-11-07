@@ -1,19 +1,23 @@
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
-use gtk::{gio, glib};
+use gtk::gio;
 use local_studio_core::{
-    ChatWidth, Connection, Delivery, FollowUpBehavior, NewThreadWorkspace, NotificationKind, NotificationMode,
-    PromptDraft, Shelf, ThreadSettings, TranscriptOp, Update, WorktreeChoice,
+    ChatWidth, Connection, Delivery, FollowUpBehavior, NotificationKind, NotificationMode, PromptDraft, Shelf,
+    ThreadSettings, TranscriptOp, Update,
 };
 
+use crate::branches::BranchBar;
 use crate::composer::Composer;
 use crate::core::Core;
 use crate::format;
 use crate::header::Header;
 use crate::pages::{LocalPage, UsagePage};
 use crate::panels::Panel;
+use crate::pulls::PullsPage;
+use crate::search::ProjectSearch;
 use crate::settings::SettingsDialog;
 use crate::sidebar::Sidebar;
 use crate::state::{Page, State};
@@ -21,6 +25,22 @@ use crate::theme;
 use crate::timeline::Timeline;
 
 pub type Hook = Rc<dyn Fn(&Rc<App>)>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Commands,
+    Mentions,
+    Branches,
+    Files,
+    Preview,
+    PanelPulls,
+    PanelPull,
+    PagePulls,
+    PagePull,
+    Devices,
+    ThreadSearch,
+    ProjectSearch,
+}
 
 #[derive(Default, Clone, Copy)]
 #[allow(clippy::struct_excessive_bools)]
@@ -58,9 +78,14 @@ pub struct App {
     pub panel: Panel,
     pub local: LocalPage,
     pub usage: UsagePage,
+    pub pulls: PullsPage,
+    pub branches: BranchBar,
+    pub search: ProjectSearch,
     pub hero: Hero,
     pub settings: RefCell<Option<SettingsDialog>>,
     pub on_tick: RefCell<Option<Hook>>,
+    pub requests: RefCell<HashMap<String, Target>>,
+    pub undo: RefCell<Option<Hook>>,
 }
 
 pub struct Hero {
@@ -93,6 +118,9 @@ impl App {
             let local = LocalPage::new(weak.clone());
             let usage = UsagePage::new(weak.clone());
             let hero = Hero::new(weak.clone());
+            let pulls = PullsPage::new(weak.clone());
+            let branches = BranchBar::new(weak.clone());
+            let search = ProjectSearch::new(weak.clone());
             let banner = adw::Banner::new("");
             let conversation = gtk::Stack::new();
             conversation.add_named(&hero.root, Some("hero"));
@@ -101,6 +129,8 @@ impl App {
             let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
             column.append(&conversation);
             column.append(&composer.root);
+            column.append(&branches.root);
+            column.add_controller(crate::extras::drop_target(weak));
             let columns = gtk::Paned::new(gtk::Orientation::Horizontal);
             columns.set_start_child(Some(&column));
             columns.set_end_child(Some(&panel.root));
@@ -112,6 +142,7 @@ impl App {
             stack.add_named(&columns, Some("thread"));
             stack.add_named(&local.root, Some("local"));
             stack.add_named(&usage.root, Some("usage"));
+            stack.add_named(&pulls.root, Some("pulls"));
             let sidebar_view = adw::ToolbarView::new();
             sidebar_view.add_top_bar(&sidebar.header);
             sidebar_view.set_content(Some(&sidebar.root));
@@ -153,6 +184,11 @@ impl App {
                 hero,
                 settings: RefCell::new(None),
                 on_tick: RefCell::new(None),
+                requests: RefCell::new(HashMap::new()),
+                undo: RefCell::new(None),
+                pulls,
+                branches,
+                search,
             }
         });
         app.sidebar.bind_split(&app.split);
@@ -263,6 +299,9 @@ impl App {
                         dirty.page = true;
                     }
                     self.timeline.apply(op);
+                    if self.panel.showing("agents") {
+                        self.panel.agents.render(self);
+                    }
                 }
             }
             Update::Approvals { thread, approvals } => {
@@ -292,15 +331,52 @@ impl App {
                 dirty.composer = true;
                 dirty.settings = true;
             }
-            Update::Commands { .. }
-            | Update::Branches { .. }
-            | Update::Files { .. }
-            | Update::FileContent { .. }
-            | Update::SearchResults { .. }
-            | Update::PullRequests { .. }
-            | Update::PullRequestDetail { .. }
-            | Update::Devices { .. }
-            | Update::ThreadSearch { .. } => {}
+            Update::Commands { request, commands } => {
+                if self.take_request(&request) == Some(Target::Commands) {
+                    self.composer.extras.commands_loaded(commands);
+                }
+            }
+            Update::Branches { request, branches, total } => {
+                if self.take_request(&request) == Some(Target::Branches) {
+                    self.branches.loaded(&branches, total);
+                }
+            }
+            Update::Files { request, entries } => {
+                if self.take_request(&request) == Some(Target::Files) {
+                    self.panel.files.loaded(&entries);
+                }
+            }
+            Update::FileContent { request, path, content } => {
+                if self.take_request(&request) == Some(Target::Preview) {
+                    self.panel.files.preview(&path, &content);
+                }
+            }
+            Update::SearchResults { request, results } => match self.take_request(&request) {
+                Some(Target::Mentions) => self.composer.extras.mentions_loaded(&request, &results),
+                Some(Target::ProjectSearch) => self.search.loaded(&request, &results),
+                _ => {}
+            },
+            Update::PullRequests { request, pulls } => match self.take_request(&request) {
+                Some(Target::PanelPulls) => self.panel.pulls.loaded(&pulls),
+                Some(Target::PagePulls) => self.pulls.loaded(&pulls),
+                _ => {}
+            },
+            Update::PullRequestDetail { request, detail } => match self.take_request(&request) {
+                Some(Target::PanelPull) => self.panel.pulls.detail(&detail),
+                Some(Target::PagePull) => self.pulls.detail(&detail),
+                _ => {}
+            },
+            Update::Devices { request, devices } => {
+                if self.take_request(&request) == Some(Target::Devices) {
+                    self.panel.devices.loaded(&devices);
+                }
+            }
+            Update::ThreadSearch { request, hits } => {
+                if self.take_request(&request) == Some(Target::ThreadSearch) {
+                    self.sidebar.search_loaded(&request, hits);
+                    dirty.sidebar = true;
+                }
+            }
             Update::Notification { thread, kind, title, body } => self.notify(&thread, kind, &title, &body),
             Update::GitStatus { project, status } => {
                 self.state.borrow_mut().git.insert(project, status);
@@ -338,12 +414,20 @@ impl App {
             }
             Update::Keybindings { bindings } => {
                 self.state.borrow_mut().keybindings = bindings;
+                crate::commands::apply_keybindings(self);
                 dirty.settings = true;
             }
             Update::RequestDone { request: _, message } => self.toast(&message),
-            Update::RequestFailed { request: _, message } => {
+            Update::RequestFailed { request, message } => {
                 self.local.request_failed();
-                self.toast(&message);
+                match self.take_request(&request) {
+                    Some(Target::Mentions | Target::Commands | Target::ThreadSearch) => {}
+                    Some(Target::PanelPulls | Target::PanelPull) => self.panel.pulls.failed(&message),
+                    Some(Target::PagePulls | Target::PagePull) => self.pulls.failed(&message),
+                    Some(Target::Files | Target::Preview) => self.panel.files.failed(&message),
+                    Some(Target::Devices) => self.panel.devices.failed(&message),
+                    _ => self.toast(&message),
+                }
             }
             Update::Notice { level: _, text } => self.toast(&text),
         }
@@ -359,8 +443,9 @@ impl App {
             if dirty.header || dirty.page {
                 self.header.render(&state);
             }
-            if dirty.composer {
+            if dirty.composer || dirty.page || dirty.header {
                 self.composer.render(&state);
+                self.branches.render(&state);
             }
             if dirty.page {
                 self.render_page(&state);
@@ -386,6 +471,7 @@ impl App {
             Page::Thread => "thread",
             Page::Local => "local",
             Page::Usage => "usage",
+            Page::PullRequests => "pulls",
         };
         self.stack.set_visible_child_name(page);
         let show_hero = state.selected.is_none();
@@ -411,7 +497,7 @@ impl App {
             state.queue.clear();
         }
         self.timeline.clear();
-        self.composer.set_text("");
+        self.composer.reset();
         self.core.run(|studio| studio.select_thread(thread.clone()));
         self.render(Dirty::all());
         let unread = thread.as_deref().and_then(|id| self.state.borrow().row(id).map(|row| row.unread));
@@ -432,6 +518,7 @@ impl App {
             state.page = Page::Thread;
         }
         self.timeline.clear();
+        self.branches.reset();
         self.core.run(|studio| studio.select_thread(None));
         self.render(Dirty::all());
         self.composer.focus();
@@ -443,42 +530,36 @@ impl App {
             Page::Thread => {}
             Page::Local => self.local.refresh(self),
             Page::Usage => self.usage.refresh(self),
+            Page::PullRequests => self.pulls.refresh(self),
         }
         self.render(Dirty { page: true, header: true, sidebar: true, ..Dirty::default() });
     }
 
-    pub fn send(self: &Rc<Self>, text: &str) -> bool {
-        let text = text.trim();
-        if text.is_empty() {
-            return false;
-        }
-        let prompt = PromptDraft { text: text.to_string(), images: Vec::new(), files: Vec::new() };
+    pub fn ask(&self, target: Target) -> String {
+        let request = self.core.request();
+        self.requests.borrow_mut().insert(request.clone(), target);
+        request
+    }
+
+    fn take_request(&self, request: &str) -> Option<Target> {
+        self.requests.borrow_mut().remove(request)
+    }
+
+    pub fn send(self: &Rc<Self>, prompt: PromptDraft) {
         let mut state = self.state.borrow_mut();
         if let Some(thread) = state.selected.clone() {
             let busy = state.info.as_ref().is_some_and(|info| info.busy);
             let steer = busy && state.settings.follow_up_behavior == FollowUpBehavior::Steer;
             drop(state);
             self.core.run(|studio| studio.send(thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue }));
-            return true;
+            return;
         }
         state.drafts += 1;
         let draft = format!("gtk-draft-{}", state.drafts);
         state.draft = Some(draft.clone());
         let project = state.draft_project.clone().or_else(|| state.current_project());
         let model = state.active_model();
-        let worktree = match state.settings.new_thread_workspace {
-            NewThreadWorkspace::Local => WorktreeChoice::Local,
-            NewThreadWorkspace::Worktree => WorktreeChoice::NewWorktree {
-                branch: format!(
-                    "local-studio/{}",
-                    glib::DateTime::now_local().map_or_else(
-                        |_| draft.clone(),
-                        |now| now.format("%Y%m%d-%H%M%S").map_or_else(|_| draft.clone(), |text| text.to_string())
-                    )
-                ),
-                base: None,
-            },
-        };
+        let worktree = self.branches.choice(&state, &draft);
         let settings = ThreadSettings {
             provider: model.as_ref().map(|model| model.provider.clone()),
             model: model.map(|model| model.model),
@@ -488,7 +569,6 @@ impl App {
         };
         drop(state);
         self.core.run(|studio| studio.start_thread(draft, project, prompt, settings));
-        true
     }
 
     pub fn add_project(self: &Rc<Self>) {

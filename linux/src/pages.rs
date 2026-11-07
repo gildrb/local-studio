@@ -753,6 +753,37 @@ fn report_view(report: &UsageReport) -> gtk::Widget {
     ));
     metrics.append(&metric("Sessions", &report.requests.to_string(), "with usage"));
     column.append(&metrics);
+    if !report.limits.is_empty() {
+        let limits = adw::PreferencesGroup::builder()
+            .title("Limits")
+            .description("Provider rate windows reported by the Eukhe daemon")
+            .build();
+        for limit in &report.limits {
+            let mut subtitle = Vec::new();
+            if let Some(percent) = limit.used_percent {
+                subtitle.push(format!("{percent:.0}% used"));
+            }
+            if let Some(resets) = limit.resets_at {
+                subtitle.push(format!("resets in {}", format::countdown(resets, format::now_ms())));
+            }
+            let row = adw::ActionRow::builder()
+                .title(format::escape(&format!("{} · {}", limit.provider, limit.window)))
+                .subtitle(subtitle.join(" · "))
+                .build();
+            if limit.parked {
+                row.add_suffix(&pill("Parked"));
+            }
+            if let Some(percent) = limit.used_percent {
+                let bar = gtk::LevelBar::for_interval(0.0, 100.0);
+                bar.set_value(percent.clamp(0.0, 100.0));
+                bar.set_size_request(140, 6);
+                bar.set_valign(gtk::Align::Center);
+                row.add_suffix(&bar);
+            }
+            limits.add(&row);
+        }
+        column.append(&limits);
+    }
     column.append(&chart_card("Daily tokens", &report.daily));
     let group = adw::PreferencesGroup::builder().title("By model").build();
     if report.by_model.is_empty() {

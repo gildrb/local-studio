@@ -75,6 +75,19 @@ window, dialog { font-size: 13px; }
 .ls-footer button.active { background: alpha(currentColor, 0.1); }
 .ls-approval button { min-height: 28px; padding: 0 14px; border-radius: 8px; }
 .ls-user-row { margin-top: 14px; }
+.ls-thread.marked { background: alpha(var(--accent-bg-color), 0.10); border-color: alpha(var(--accent-bg-color), 0.30); }
+.ls-bulk { padding: 4px 6px 4px 14px; border-top: 1px solid var(--border-color); }
+.ls-bulk button { min-width: 28px; min-height: 28px; }
+.ls-hint { font-family: monospace; font-size: 10px; padding: 0 5px; }
+.ls-rename { min-height: 26px; padding: 0 6px; }
+.ls-menu { border-bottom: 1px solid var(--border-color); margin-bottom: 4px; padding-bottom: 4px; }
+.ls-menu row { border-radius: 8px; }
+.ls-chip { background: alpha(currentColor, 0.06); border-radius: 8px; padding: 2px 4px 2px 8px; }
+.ls-chip-remove { min-width: 18px; min-height: 18px; padding: 0; margin: 2px; }
+.ls-thumb { border-radius: 8px; }
+.ls-branchbar dropdown > button, .ls-branchbar menubutton > button { min-height: 26px; padding: 0 8px; font-size: 12px; font-weight: normal; }
+.ls-branchbar label { font-weight: normal; }
+.ls-search-hit .title { font-family: monospace; font-size: 12px; }
 ";
 
 const DARK: &str = r"

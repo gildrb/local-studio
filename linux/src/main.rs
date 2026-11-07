@@ -1,18 +1,25 @@
 mod actions;
 mod app;
+mod branches;
+mod commands;
 mod composer;
 mod core;
+mod extras;
 mod fixtures;
 mod format;
 mod header;
 mod pages;
 mod palette;
 mod panels;
+mod pulls;
+mod scenes;
+mod search;
 mod settings;
 mod sidebar;
 mod smoke;
 mod snapshot;
 mod state;
+mod surfaces;
 mod theme;
 mod timeline;
 

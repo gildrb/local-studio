@@ -72,9 +72,11 @@ impl Header {
         branch.add_css_class("ls-mono");
         let menu = gtk::gio::Menu::new();
         menu.append(Some("Commit"), Some("win.git-commit"));
+        menu.append(Some("Pull"), Some("win.git-pull"));
         menu.append(Some("Push"), Some("win.git-push"));
         menu.append(Some("Create Pull Request…"), Some("win.git-pr"));
         menu.append(Some("View Pull Request"), Some("win.git-view-pr"));
+        menu.append(Some("Publish Repository…"), Some("win.git-publish"));
         let git = adw::SplitButton::builder().label("Commit").menu_model(&menu).build();
         git.set_visible(false);
         bar.pack_end(&diff);
@@ -102,6 +104,7 @@ impl Header {
             Page::Thread => "",
             Page::Local => "Local",
             Page::Usage => "Usage",
+            Page::PullRequests => "Pull Requests",
         });
         let project = match &state.selected {
             Some(thread) => state
@@ -158,6 +161,10 @@ impl Header {
         let primary = status.as_ref().filter(|status| status.is_repo).and_then(|status| {
             if status.dirty || status.changed_files > 0 {
                 Some(("Commit", "win.git-commit", "Commit every change (message generated from the changed paths)"))
+            } else if status.behind > 0 {
+                Some(("Pull", "win.git-pull", "Fast-forward this branch from its upstream"))
+            } else if status.upstream.is_none() && status.pull_request.is_none() && status.default_branch.is_none() {
+                Some(("Publish", "win.git-publish", "Create a GitHub repository for this project"))
             } else if status.ahead > 0 || (status.upstream.is_none() && status.branch.is_some()) {
                 Some(("Push", "win.git-push", "Push this branch"))
             } else if status.pull_request.is_some() {
