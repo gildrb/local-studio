@@ -337,9 +337,9 @@ private struct PanelSurfaceView: View {
         case .file(let model):
             FilePreviewView(model: model, settings: panels.settings)
         case .pullRequest(let model):
-            PullRequestDetailView(model: model, settings: panels.settings)
+            PullRequestDetailView(model: model, store: store, settings: panels.settings)
         case .pullRequests(let model):
-            PullRequestsSurfaceView(model: model, settings: panels.settings)
+            PullRequestsSurfaceView(model: model, store: store, settings: panels.settings)
         case .agents:
             AgentsSurfaceView(panels: panels)
         case .device(let model):
@@ -453,8 +453,7 @@ struct PanelMenuButton<Content: View>: View {
 }
 
 struct AgentsSurfaceView: View {
-    let panels: PanelState
-    @State private var expanded: Set<UInt64> = []
+    @Bindable var panels: PanelState
 
     var body: some View {
         let agents = panels.agents
@@ -463,7 +462,7 @@ struct AgentsSurfaceView: View {
                 Text("Subagents")
                     .font(.system(size: 12.5, weight: .medium))
                 Spacer()
-                let live = agents.filter(\.live).count
+                let live = agents.filter(\.running).count
                 Text(live > 0 ? "\(live) running" : "\(agents.count) total")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
@@ -474,13 +473,19 @@ struct AgentsSurfaceView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(agents.reversed()) { agent in
-                            AgentRow(agent: agent, expanded: expanded.contains(agent.id)) {
-                                if expanded.contains(agent.id) {
-                                    expanded.remove(agent.id)
+                        ForEach(agents, id: \.id) { agent in
+                            AgentRow(
+                                agent: agent,
+                                expanded: panels.expandedAgents.contains(agent.id),
+                                cancelling: panels.cancelling.contains(agent.id)
+                            ) {
+                                if panels.expandedAgents.contains(agent.id) {
+                                    panels.expandedAgents.remove(agent.id)
                                 } else {
-                                    expanded.insert(agent.id)
+                                    panels.expandedAgents.insert(agent.id)
                                 }
+                            } cancel: {
+                                panels.cancelSubagent(agent.id)
                             }
                         }
                     }
@@ -492,42 +497,72 @@ struct AgentsSurfaceView: View {
 }
 
 private struct AgentRow: View {
-    let agent: AgentRun
+    let agent: Subagent
     let expanded: Bool
+    let cancelling: Bool
     let toggle: () -> Void
+    let cancel: () -> Void
     @State private var hovering = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                Image(systemName: glyph)
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: style.symbol)
                     .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(tint)
-                    .frame(width: 18)
+                    .foregroundStyle(style.tint)
+                    .frame(width: 18, height: 18)
                     .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(agent.title)
                         .font(.system(size: 13))
                         .lineLimit(expanded ? 3 : 1)
                     meta
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                    if let tool = agent.currentTool, agent.running, !tool.isEmpty {
+                        Text(tool)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
                 Spacer(minLength: 4)
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(Theme.secondaryText)
-                    .opacity(agent.output.isEmpty ? 0 : 1)
-                    .accessibilityHidden(true)
+                if agent.running {
+                    if cancelling {
+                        Text("Stopping…")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.secondaryText)
+                    } else {
+                        Button("Stop", action: cancel)
+                            .controlSize(.small)
+                            .accessibilityLabel("Stop \(agent.title)")
+                    }
+                }
+                if hasDetail {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(height: 18)
+                        .accessibilityHidden(true)
+                }
             }
-            if expanded, !agent.output.isEmpty {
-                Text(agent.output.suffix(4000))
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .foregroundStyle(Theme.secondaryText)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            if expanded, hasDetail {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let note = agent.note, !note.isEmpty {
+                        Text(note)
+                            .font(.system(size: 12))
+                            .textSelection(.enabled)
+                    }
+                    if let answer = agent.answer, !answer.isEmpty {
+                        MarkdownView(text: String(answer.suffix(6000)), size: 12.5)
+                            .textSelection(.enabled)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
         }
         .padding(.horizontal, 10)
@@ -536,53 +571,42 @@ private struct AgentRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: toggle)
         .onHover { hovering = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(agent.output.isEmpty ? [] : .isButton)
-        .accessibilityAction(named: expanded ? "Hide Output" : "Show Output", toggle)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(agent.title)
+        .accessibilityValue(agent.status)
+        .accessibilityAction(named: expanded ? "Hide Details" : "Show Details") { toggle() }
+    }
+
+    private var hasDetail: Bool {
+        !(agent.note ?? "").isEmpty || !(agent.answer ?? "").isEmpty
     }
 
     @ViewBuilder private var meta: some View {
-        let started = agent.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
-        switch agent.state {
-        case .pending:
-            Text("Queued · \(agent.detail)")
-        case .running:
-            if let started {
-                Text("Running for \(started, style: .relative) · \(agent.detail)")
-            } else {
-                Text("Running · \(agent.detail)")
-            }
-        case .succeeded:
-            Text("Done\(duration) · \(agent.detail)")
-        case .failed:
-            Text("Failed\(duration) · \(agent.detail)")
-        case .aborted:
-            Text("Stopped · \(agent.detail)")
+        let parts = [agent.model, agent.tokens > 0 ? "\(Self.tokens(agent.tokens)) tokens" : nil].compactMap { $0 }
+        let suffix = parts.isEmpty ? "" : " · " + parts.joined(separator: " · ")
+        if agent.running, let start = agent.startedAt {
+            Text("\(agent.status) · \(Date(timeIntervalSince1970: TimeInterval(start) / 1000), style: .relative)\(suffix)")
+        } else if let duration = agent.durationMs {
+            Text("\(agent.status) · \(Self.duration(duration))\(suffix)")
+        } else {
+            Text("\(agent.status)\(suffix)")
         }
     }
 
-    private var duration: String {
-        guard let start = agent.startedAt, let end = agent.endedAt, end >= start else { return "" }
-        let seconds = Int((end - start) / 1000)
-        return seconds >= 60 ? " in \(seconds / 60)m \(seconds % 60)s" : " in \(seconds)s"
+    private static func duration(_ millis: UInt64) -> String {
+        let seconds = Int(millis / 1000)
+        return seconds >= 60 ? "\(seconds / 60)m \(seconds % 60)s" : "\(seconds)s"
     }
 
-    private var glyph: String {
-        switch agent.state {
-        case .pending: "clock"
-        case .running: "circle.dotted"
-        case .succeeded: "checkmark.circle"
-        case .failed: "xmark.circle"
-        case .aborted: "minus.circle"
-        }
+    private static func tokens(_ count: UInt64) -> String {
+        count >= 1000 ? String(format: "%.1fk", Double(count) / 1000) : "\(count)"
     }
 
-    private var tint: Color {
-        switch agent.state {
-        case .running: Theme.primary
-        case .failed: PanelPalette.removedText
-        case .succeeded: PanelPalette.addedText
-        case .pending, .aborted: Theme.secondaryText
-        }
+    private var style: (symbol: String, tint: Color) {
+        if agent.running { return ("circle.dotted", Theme.primary) }
+        let status = agent.status.lowercased()
+        if status.contains("fail") || status.contains("error") { return ("xmark.circle", PanelPalette.removedText) }
+        if status.contains("cancel") || status.contains("abort") || status.contains("stop") { return ("minus.circle", Theme.secondaryText) }
+        return ("checkmark.circle", PanelPalette.addedText)
     }
 }
