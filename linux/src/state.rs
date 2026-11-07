@@ -11,6 +11,7 @@ pub enum Page {
     Thread,
     Local,
     Usage,
+    PullRequests,
 }
 
 #[derive(Debug, Clone, Default)]
