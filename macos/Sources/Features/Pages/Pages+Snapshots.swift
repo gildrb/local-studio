@@ -139,7 +139,7 @@ extension SnapshotCatalog {
             SnapshotEntry(
                 name: "pages-theme-editor",
                 size: CGSize(width: 360, height: 760),
-                updates: themed("t3-chat"),
+                updates: themed("gildrb"),
                 view: { store in
                     let model = ThemeEditorModel(source: ThemeStore.shared.active)
                     return AnyView(ThemeEditorView(pages: store.pages, model: model) {}.themeRoot())
@@ -159,6 +159,60 @@ extension SnapshotCatalog {
                 size: CGSize(width: 520, height: 420),
                 updates: themed("iris", custom: imported),
                 view: { store in AnyView(ThemePickerView(pages: store.pages)) }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-gildrb-code",
+                size: CGSize(width: 640, height: 600),
+                updates: themed("gildrb"),
+                view: { _ in
+                    AnyView(VStack(alignment: .leading, spacing: 12) {
+                        CodeBlockView(language: "rust", code: PanelFixtures.rustSource)
+                        DiffStat(additions: 214, deletions: 37)
+                        Spacer(minLength: 0)
+                    }.padding(16).themeRoot())
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-gildrb-diff",
+                size: CGSize(width: 761, height: 760),
+                updates: themed("gildrb") + PanelFixtures.base,
+                view: { store in
+                    let panels = store.workspace.panels
+                    panels.rightPanelWidth = 760
+                    panels.rightPanelOpen = true
+                    panels.openSurface(.diff)
+                    PanelFixtures.feedDiff(store)
+                    if case .diff(let model) = panels.activeContent?.content {
+                        model.layout = .split
+                        model.setAllCollapsed(false)
+                    }
+                    return AnyView(RightPanelView(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-gildrb-file",
+                size: CGSize(width: 481, height: 760),
+                updates: themed("gildrb") + PanelFixtures.base,
+                view: { store in
+                    store.workspace.panels.rightPanelWidth = 480
+                    store.workspace.panels.rightPanelOpen = true
+                    PanelFixtures.feedFile(store, relative: "core/src/workspace/terminal.rs", line: 9, content: .text(text: PanelFixtures.rustSource, language: "rust"))
+                    return AnyView(RightPanelView(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-gildrb-terminal",
+                size: CGSize(width: 900, height: 420),
+                updates: themed("gildrb") + PanelFixtures.base,
+                view: { store in
+                    store.workspace.panels.terminalHeight = 300
+                    store.workspace.panels.terminalOpen = true
+                    PanelFixtures.feedDeck(store)
+                    return AnyView(VStack(spacing: 0) {
+                        Theme.canvas
+                        TerminalDrawerView(store: store)
+                    })
+                }
             ),
             SnapshotEntry(
                 name: "pages-theme-default-reset",
