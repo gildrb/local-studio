@@ -1,0 +1,22 @@
+[package]
+name = "local-studio-kit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The Local Studio core as a C library with generated Swift bindings (LocalStudioKit)"
+
+[lib]
+name = "local_studio_kit"
+crate-type = ["staticlib", "cdylib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+local-studio-core = { workspace = true, features = ["ffi"] }
+uniffi = { workspace = true, features = ["cli"] }
+
+[lints]
+workspace = true
