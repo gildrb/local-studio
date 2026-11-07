@@ -657,7 +657,7 @@ extension AccessMode {
         switch self {
         case .supervised: "Ask before commands and file changes."
         case .autoAcceptEdits: "Apply file edits without asking; ask before commands."
-        case .auto: "Approve routine actions automatically; ask for the rest."
+        case .auto: "Approve routine actions; ask before the rest."
         case .fullAccess: "Allow commands and edits without prompts."
         }
     }
