@@ -144,6 +144,7 @@ struct InboxRowView: View {
         .accessibilityAction { store.open(row.id) }
         .accessibilityAction(named: row.pinned ? "Unpin" : "Pin") { store.togglePin([row.id]) }
         .accessibilityAction(named: row.shelf == .settled ? "Un-settle" : "Settle") { store.toggleSettle([row.id]) }
+        .accessibilityAction(named: "Open Pull Request") { if let pull = row.pullRequest { store.openPullRequest(pull, for: row) } }
         .help(tooltip)
     }
 
@@ -154,6 +155,8 @@ struct InboxRowView: View {
         if row.unread { parts.append("Unread") }
         if row.shelf == .snoozed, let until = row.snoozedUntil { parts.append("Wakes in \(RelativeAge.countdown(millis: until, now: now))") }
         if let branch = row.branch { parts.append("Branch \(branch)") }
+        if let pull = row.pullRequest { parts.append("Pull request \(pull.number), \(pull.state.lowercased())") }
+        if let position = store.inbox.fanOut[row.id] { parts.append("\(position.index) of \(position.count) models") }
         return parts.joined(separator: ", ")
     }
 
@@ -284,6 +287,19 @@ struct InboxRowView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 4)
+            if let position = store.inbox.fanOut[row.id] {
+                HStack(spacing: 2) {
+                    Image(systemName: "square.stack")
+                        .font(.system(size: 9.5))
+                        .accessibilityHidden(true)
+                    Text("\(position.index)/\(position.count)")
+                        .monospacedDigit()
+                }
+                .help("\(position.index) of \(position.count) models")
+            }
+            if let pull = row.pullRequest {
+                PullRequestBadge(pull: pull) { store.openPullRequest(pull, for: row) }
+            }
             if row.additions > 0 || row.deletions > 0 {
                 HStack(spacing: 4) {
                     Text("+\(row.additions)").foregroundStyle(Theme.success)
@@ -302,7 +318,7 @@ struct InboxRowView: View {
     }
 
     private var hasMeta: Bool {
-        row.branch != nil || row.additions > 0 || row.deletions > 0 || row.provider != nil
+        row.branch != nil || row.additions > 0 || row.deletions > 0 || row.provider != nil || row.pullRequest != nil || store.inbox.fanOut[row.id] != nil
     }
 
     private var project: Project? {
@@ -485,5 +501,39 @@ private struct PinnedDropTarget: ViewModifier {
 extension View {
     func pinnedDropTarget(store: StudioStore, before: String?, target: Binding<String?>) -> some View {
         modifier(PinnedDropTarget(store: store, before: before, target: target))
+    }
+}
+
+struct PullRequestBadge: View {
+    let pull: PullRequest
+    let open: () -> Void
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 3) {
+                Image(systemName: "arrow.trianglehead.pull")
+                    .font(.system(size: 9))
+                    .accessibilityHidden(true)
+                Text("#\(pull.number)")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .monospacedDigit()
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5)
+            .frame(height: 15)
+            .background(tint.opacity(0.14), in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("\(pull.title) · \(pull.state.capitalized)")
+        .accessibilityLabel("Pull request \(pull.number), \(pull.state.lowercased())")
+    }
+
+    private var tint: Color {
+        switch pull.state.uppercased() {
+        case "MERGED": Theme.primary
+        case "CLOSED": Theme.danger
+        default: Theme.success
+        }
     }
 }

@@ -43,6 +43,7 @@ final class CommandRefresh: ObservableObject {
         _ = store.conversation.queued
         _ = store.pages.settings?.timeFormat
         _ = store.workspace.gitStatus
+        _ = store.inbox.projectScripts
     }
 }
 
@@ -59,6 +60,7 @@ struct StudioCommands: Commands {
                 .disabled(store.inbox.projects.isEmpty)
             Divider()
             Button("Add Project…") { store.addProjectInteractively() }
+            Button("Clone Repository…") { store.shell.cloneShown = true }
             CommandButton(store: store, title: "Open in Editor", command: "editor.openFavorite")
             CommandButton(store: store, title: "Close Panel Tab", command: "rightPanel.close")
             Menu("Terminal") {
@@ -187,6 +189,8 @@ struct StudioCommands: Commands {
             .disabled(row == nil)
         Button("Regenerate Title") { if let id { store.inbox.regenerateTitles([id]) } }
             .disabled(row == nil)
+        Button("Restart Agent Session") { if let id { store.inbox.restart(id) } }
+            .disabled(row == nil)
         Button(row?.unread == true ? "Mark as Read" : "Mark as Unread") { if let row { store.inbox.markUnread([row.id], !row.unread) } }
             .disabled(row == nil)
         Button("Archive") { if let id { store.archive([id]) } }
@@ -205,6 +209,18 @@ struct StudioCommands: Commands {
         CommandButton(store: store, title: "Copy Reference", command: "thread.copyReference")
         CommandButton(store: store, title: "Copy Pull Request Number", command: "pullRequest.copyNumber")
         Divider()
+        Menu("Project Actions") {
+            let project = store.focusedProject
+            let scripts = project.flatMap { store.inbox.projectScripts[$0] } ?? []
+            ForEach(scripts, id: \.id) { script in
+                Button(script.name) { if let project { store.runProjectScript(script, in: project) } }
+                    .keyboardShortcut(CoreShortcut.parse(script.keybinding))
+            }
+            if !scripts.isEmpty { Divider() }
+            Button("Add Action…") { store.openProjectSettings(project) }
+                .disabled(project == nil)
+        }
+        .disabled(store.focusedProject == nil)
         Button("Project Settings…") { store.openProjectSettings(store.focusedProject) }
             .disabled(store.focusedProject == nil)
     }

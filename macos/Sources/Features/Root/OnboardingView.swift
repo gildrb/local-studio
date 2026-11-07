@@ -29,6 +29,7 @@ extension StudioStore {
 struct OnboardingView: View {
     let store: StudioStore
     @State var step: OnboardingStep = .welcome
+    @State private var cloning = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -89,7 +90,13 @@ struct OnboardingView: View {
                                 .truncationMode(.middle)
                         }
                     }
-                    Button(store.inbox.projects.isEmpty ? "Choose Folder…" : "Add Another Folder…") { chooseFolder() }
+                    HStack {
+                        Button(store.inbox.projects.isEmpty ? "Choose Folder…" : "Add Another Folder…") { chooseFolder() }
+                        Button("Clone Repository…") { cloning = true }
+                    }
+                    .sheet(isPresented: $cloning) {
+                        CloneRepositorySheet(store: store, startThread: false)
+                    }
                 }
             }
         case .done:
