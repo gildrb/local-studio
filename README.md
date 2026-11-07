@@ -42,6 +42,12 @@ Needs Xcode 26+, Rust 1.98, Nushell, and a sibling `eukhe` checkout. Linux: see 
 - Not sandboxed: agents run code with your user permissions.
 - Provider sign-in happens in Eukhe (`eukhe`, then `/login`).
 
+## Credits
+
+- [Eukhe](https://github.com/gildrb/eukhe), the agent core, and this native rework: Gil Rodrigues ([gildrb.com](https://gildrb.com)).
+- Local Studio: Sherif Cherfa ([0xSero](https://github.com/0xSero)) and [contributors](https://github.com/sybil-solutions/local-studio/graphs/contributors).
+- [T3 Code](https://github.com/pingdotgg/t3code) by T3 Tools: the original app and layout Local Studio grew from.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
