@@ -393,6 +393,15 @@ pub enum WritingStyle {
     Custom,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+#[serde(rename_all = "camelCase")]
+pub enum SnapshotSound {
+    #[default]
+    SoftPop,
+    CameraShutter,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 #[serde(default, rename_all = "camelCase")]
@@ -461,6 +470,15 @@ pub struct Settings {
     pub local_controller_url: String,
     pub fleet_key: String,
     pub start_controller: bool,
+    pub onboarding_completed: bool,
+    pub custom_themes: String,
+    pub glass_opacity: u32,
+    pub snapshot_enabled: bool,
+    pub snapshot_include_text: bool,
+    pub snapshot_play_sound: bool,
+    pub snapshot_sound: SnapshotSound,
+    pub snapshot_flash: bool,
+    pub snapshot_animations: bool,
 }
 
 impl Default for Settings {
@@ -529,6 +547,15 @@ impl Default for Settings {
             local_controller_url: String::new(),
             fleet_key: String::new(),
             start_controller: true,
+            onboarding_completed: false,
+            custom_themes: String::new(),
+            glass_opacity: 80,
+            snapshot_enabled: false,
+            snapshot_include_text: true,
+            snapshot_play_sound: true,
+            snapshot_sound: SnapshotSound::SoftPop,
+            snapshot_flash: true,
+            snapshot_animations: true,
         }
     }
 }
