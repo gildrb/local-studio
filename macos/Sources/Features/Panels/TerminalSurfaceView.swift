@@ -163,6 +163,11 @@ final class TerminalSurfaceView: NSView, @preconcurrency NSTextInputClient, NSMe
 
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let dirtyRect = dirtyRect.intersection(bounds)
+        guard !dirtyRect.isEmpty else { return }
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.clip(to: dirtyRect)
         context.setFillColor(palette.background)
         context.fill(dirtyRect)
         guard let session else { return }
