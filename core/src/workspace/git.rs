@@ -55,6 +55,7 @@ pub(crate) async fn status(project: &Path) -> Result<GitStatus, String> {
             pull_request: None,
             is_repo: false,
             changed_files: 0,
+            has_remote: false,
         });
     }
     let porcelain = git(project, &["status", "--porcelain=v2", "--branch", "--untracked-files=normal"], QUICK).await?;
@@ -80,6 +81,7 @@ pub(crate) async fn status(project: &Path) -> Result<GitStatus, String> {
             changed = changed.saturating_add(1);
         }
     }
+    let has_remote = git(project, &["remote"], QUICK).await.is_ok_and(|remotes| !remotes.trim().is_empty());
     Ok(GitStatus {
         branch,
         upstream,
@@ -90,6 +92,7 @@ pub(crate) async fn status(project: &Path) -> Result<GitStatus, String> {
         pull_request: None,
         is_repo: true,
         changed_files: changed,
+        has_remote,
     })
 }
 
