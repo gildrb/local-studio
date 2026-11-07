@@ -19,7 +19,7 @@ Native desktop clients for local LLM work. The agent core is [Eukhe](https://git
 - Add no code comments.
 - Never stop processes, controllers, engines, or GPU jobs this work did not start. Kill only PIDs you spawned.
 - Controller: keep native inference requests as passthrough. Never disable CUDA graphs, enforce eager, or set output caps on vLLM/SGLang. New controllers use port 18091 and a separate data root.
-- `macos/AGENTS.md` holds the macOS build and lint rules.
+- `macos/AGENTS.md` holds the macOS build and lint rules; `linux/AGENTS.md` the Linux ones.
 
 ## Commands
 
