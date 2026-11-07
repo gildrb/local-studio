@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use eukhe_types::daemon::DaemonCommand;
 use serde_json::{Map, Value};
 
-use super::model::{UsageByModel, UsageDay, UsagePeriod, UsageReport};
+use super::model::{UsageByModel, UsageDay, UsageLimit, UsagePeriod, UsageReport};
 use super::time::{day_key, days_since_epoch, parse_rfc3339_ms, DAY_MS};
 use crate::daemon::DaemonQuery;
 
@@ -30,7 +30,52 @@ pub(crate) async fn load(daemon: &DaemonQuery, period: UsagePeriod, now_ms: i64)
         })
         .await?;
     let rows = data.get("sessions").and_then(Value::as_array).cloned().unwrap_or_default();
-    Ok(aggregate(&rows, period, now_ms))
+    let mut report = aggregate(&rows, period, now_ms);
+    let live = daemon
+        .call(DaemonCommand::List {
+            id: None,
+            all: None,
+            cwd: None,
+            session_dir: None,
+            include_client_owned: Some(true),
+            rest: Map::default(),
+        })
+        .await
+        .unwrap_or(Value::Null);
+    let summaries = live.as_array().or_else(|| live.get("sessions").and_then(Value::as_array));
+    report.limits = limits(summaries.map_or(&[], Vec::as_slice));
+    Ok(report)
+}
+
+fn limits(summaries: &[Value]) -> Vec<UsageLimit> {
+    let mut parked: BTreeMap<String, Option<i64>> = BTreeMap::new();
+    for summary in summaries {
+        let summary = summary.get("summary").unwrap_or(summary);
+        let park = summary.get("quotaPark").filter(|park| park.is_object());
+        let is_parked = summary.get("isQuotaParked").and_then(Value::as_bool).unwrap_or(false);
+        if park.is_none() && !is_parked {
+            continue;
+        }
+        let provider = park
+            .and_then(|park| park.get("provider"))
+            .or_else(|| summary.get("model").and_then(|model| model.get("provider")))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let resets_at = park.and_then(|park| park.get("resumeAt")).and_then(Value::as_str).and_then(parse_rfc3339_ms);
+        let entry = parked.entry(provider).or_insert(None);
+        *entry = (*entry).max(resets_at);
+    }
+    parked
+        .into_iter()
+        .map(|(provider, resets_at)| UsageLimit {
+            provider,
+            window: "quota park".to_string(),
+            used_percent: Some(100.0),
+            resets_at,
+            parked: true,
+        })
+        .collect()
 }
 
 struct Spend {
@@ -65,6 +110,7 @@ pub(crate) fn aggregate(rows: &[Value], period: UsagePeriod, now_ms: i64) -> Usa
         requests: 0,
         by_model: Vec::new(),
         daily: Vec::new(),
+        limits: Vec::new(),
     };
     for row in rows {
         let Some(modified) = row.get("modified").and_then(Value::as_str).and_then(parse_rfc3339_ms) else { continue };

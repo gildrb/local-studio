@@ -4,10 +4,17 @@ import LocalStudioKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store: StudioStore
+    let commandRefresh: CommandRefresh
     private var smoke: Smoke?
+    private var conversationSmoke: ConversationSmoke?
+    private var shellSmoke: ShellSmoke?
+    private var monitors: [Any] = []
+    private var commandHold: DispatchWorkItem?
+    private var panelSmoke: PanelSmoke?
 
     override init() {
-        store = StudioStore(launch: Self.bundledDaemon())
+        store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
+        commandRefresh = CommandRefresh(store: store)
         super.init()
     }
 
@@ -18,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let filter = arguments.indices.contains(flag + 2) ? arguments[flag + 2] : nil
             exit(Snapshots.run(into: URL(fileURLWithPath: directory, isDirectory: true), matching: filter))
         }
+        configureNotifier()
+        installKeyMonitors()
         do {
             try store.start()
         } catch {
@@ -25,10 +34,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        if CommandLine.arguments.contains("+smoke") {
+        if arguments.contains("+smoke") {
             let smoke = Smoke(store: store)
             smoke.start()
             self.smoke = smoke
+        }
+        if arguments.contains("+smoke-conversation") {
+            let smoke = ConversationSmoke(store: store)
+            smoke.start()
+            conversationSmoke = smoke
+        }
+        if arguments.contains("+smoke-shell") {
+            let smoke = ShellSmoke(store: store)
+            smoke.start()
+            shellSmoke = smoke
+        }
+        if let flag = arguments.firstIndex(of: "+smoke-panels") {
+            let path = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : NSTemporaryDirectory() + "ls-smoke-panels-diff.png"
+            let smoke = PanelSmoke(store: store, output: URL(fileURLWithPath: path))
+            smoke.start()
+            panelSmoke = smoke
         }
     }
 
@@ -37,17 +62,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        monitors.forEach(NSEvent.removeMonitor)
         store.stop()
     }
 
-    func addProject() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Add Project"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        store.inbox.addProject(path: url.path)
+    private func configureNotifier() {
+        let store = store
+        let notifier = store.inbox.notifier
+        notifier.context = {
+            NotifyContext(
+                mode: store.pages.settings?.notifications ?? .off,
+                inApp: store.pages.settings?.inAppNotifications ?? false,
+                focusedThread: store.shell.route == .thread ? store.focusedThread : nil
+            )
+        }
+        notifier.openThread = { thread in store.open(thread) }
+        notifier.toast = { level, text in store.post(level, text) }
+    }
+
+    private func installKeyMonitors() {
+        let flags = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            self?.flagsChanged(event.modifierFlags)
+            return event
+        }
+        let keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            self?.cancelCommandHold()
+            return event
+        }
+        monitors = [flags, keys].compactMap(\.self)
+    }
+
+    private func flagsChanged(_ flags: NSEvent.ModifierFlags) {
+        let relevant = flags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        guard relevant == .command else {
+            cancelCommandHold()
+            return
+        }
+        guard commandHold == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.store.shell.commandHeld = true
+        }
+        commandHold = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: work)
+    }
+
+    private func cancelCommandHold() {
+        commandHold?.cancel()
+        commandHold = nil
+        if store.shell.commandHeld {
+            store.shell.commandHeld = false
+        }
+    }
+
+    private static func bundledController() -> String? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
+        let main = resources.appendingPathComponent("controller/src/main.ts")
+        return FileManager.default.fileExists(atPath: main.path) ? main.path : nil
     }
 
     private static func bundledDaemon() -> DaemonLaunch? {

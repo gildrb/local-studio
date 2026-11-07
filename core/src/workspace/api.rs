@@ -35,6 +35,30 @@ impl Studio {
         self.workspace.list_pull_requests(request, project);
     }
 
+    pub fn load_pull_request(&self, request: String, project: String, number: u64) {
+        self.workspace.load_pull_request(request, project, number);
+    }
+
+    pub fn pull(&self, request: String, project: String) {
+        self.workspace.pull(request, project);
+    }
+
+    pub fn publish_repository(&self, request: String, project: String, name: String, private: bool) {
+        self.workspace.publish_repository(request, project, name, private);
+    }
+
+    pub fn list_devices(&self, request: String) {
+        self.workspace.list_devices(request);
+    }
+
+    pub fn boot_device(&self, request: String, device: String) {
+        self.workspace.boot_device(request, device);
+    }
+
+    pub fn shutdown_device(&self, request: String, device: String) {
+        self.workspace.shutdown_device(request, device);
+    }
+
     pub fn list_directory(&self, request: String, project: String, relative: String) {
         self.workspace.list_directory(request, project, relative);
     }

@@ -146,6 +146,75 @@ pub struct UsageReport {
     pub requests: u64,
     pub by_model: Vec<UsageByModel>,
     pub daily: Vec<UsageDay>,
+    pub limits: Vec<UsageLimit>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct UsageLimit {
+    pub provider: String,
+    pub window: String,
+    pub used_percent: Option<f64>,
+    pub resets_at: Option<i64>,
+    pub parked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct PullRequestDetail {
+    pub pull: PullRequest,
+    pub body: String,
+    pub author: Option<String>,
+    pub created_at: Option<i64>,
+    pub files: Vec<FileDiff>,
+    pub comments: Vec<PrComment>,
+    pub timeline: Vec<PrEvent>,
+    pub checks: Vec<PrCheck>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct PrComment {
+    pub author: String,
+    pub body: String,
+    pub created_at: Option<i64>,
+    pub path: Option<String>,
+    pub line: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct PrEvent {
+    pub kind: String,
+    pub actor: Option<String>,
+    pub created_at: Option<i64>,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct PrCheck {
+    pub name: String,
+    pub state: String,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum DevicePlatform {
+    IosSimulator,
+    AndroidEmulator,
+    AndroidDevice,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    pub platform: DevicePlatform,
+    pub state: String,
+    pub runtime: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

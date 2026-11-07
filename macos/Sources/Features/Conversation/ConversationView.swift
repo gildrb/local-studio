@@ -1,3 +1,4 @@
+import AppKit
 import LocalStudioKit
 import SwiftUI
 
@@ -6,86 +7,40 @@ struct ThreadView: View {
     let leadingInset: CGFloat
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                ThreadHeader(project: projectName, thread: threadTitle)
-                Spacer(minLength: 12)
-                ChromeIconButton("Open in Editor", symbol: "arrow.up.right.circle") {}
-                ChromeIconButton("Toggle Terminal", symbol: "terminal") {}
-                ChromeIconButton("Toggle Panel", symbol: "sidebar.trailing") {}
-            }
-            .padding(.leading, leadingInset + 16)
-            .padding(.trailing, 10)
-            .frame(height: Theme.Metrics.titlebarHeight)
-            .background(WindowDragArea())
-            Group {
-                if store.conversation.thread == nil {
-                    DraftHero(store: store)
-                } else {
-                    TranscriptView(items: store.conversation.items)
-                        .safeAreaInset(edge: .bottom, spacing: 0) {
-                            VStack(spacing: 8) {
-                                ForEach(store.conversation.approvals, id: \.requestId) { approval in
-                                    ApprovalView(approval: approval, store: store)
-                                }
-                                ComposerView(store: store)
-                            }
-                            .frame(maxWidth: 820)
-                            .padding(.horizontal, 20)
-                            .padding(.bottom, 16)
-                        }
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .overlay(alignment: .top) {
-            if let notice = store.notice {
-                NoticeBar(notice: notice) { store.dismissNotice() }
-                    .padding(.top, Theme.Metrics.titlebarHeight + 8)
+        Group {
+            if let thread = store.conversation.thread {
+                ConversationColumn(store: store)
+                    .id(thread)
+            } else {
+                DraftHero(store: store)
             }
         }
-        .task(id: store.conversation.thread) {
-            if store.conversation.thread != nil {
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard !files.isEmpty else { return false }
+            store.conversation.composer(project: project).attach(urls: files, project: project)
+            return true
+        }
+        .task {
+            if store.conversation.models.isEmpty {
                 store.conversation.loadModels()
             }
         }
     }
 
-    private var projectName: String {
-        let project = store.conversation.info?.project ?? store.inbox.currentProject
-        return store.inbox.project(project)?.name ?? "Local Studio"
-    }
-
-    private var threadTitle: String {
-        store.conversation.info?.title ?? "New thread"
+    private var project: String? {
+        store.conversation.thread == nil ? store.inbox.currentProject : store.conversation.info?.project
     }
 }
 
-private struct ThreadHeader: View {
-    let project: String
-    let thread: String
-
-    var body: some View {
-        HStack(spacing: 7) {
-            ProjectTile(name: project)
-            Text(project)
-                .foregroundStyle(Theme.secondaryText)
-            Text("/")
-                .foregroundStyle(Theme.secondaryText.opacity(0.6))
-            Text(thread)
-                .fontWeight(.medium)
-                .lineLimit(1)
+extension ChatWidth {
+    var maxWidth: CGFloat {
+        switch self {
+        case .normal: 820
+        case .wide: 1_150
+        case .full: .infinity
         }
-        .font(.system(size: 13))
-    }
-}
-
-private struct WindowDragArea: View {
-    var body: some View {
-        Color.clear
-            .contentShape(Rectangle())
-            .gesture(WindowDragGesture())
-            .allowsWindowActivationEvents(true)
     }
 }
 
@@ -93,112 +48,224 @@ private struct DraftHero: View {
     let store: StudioStore
 
     var body: some View {
-        VStack(spacing: 20) {
-            VStack(spacing: 6) {
-                Text("What should we build in \(store.inbox.project(store.inbox.currentProject)?.name ?? "Local Studio")?")
-                    .font(.title.weight(.semibold))
-                Text(subtitle)
-                    .foregroundStyle(.secondary)
+        let project = store.inbox.project(store.inbox.currentProject)
+        VStack(spacing: 0) {
+            Spacer(minLength: 24)
+            VStack(spacing: 14) {
+                Text(project.map { "What should we build in \($0.name)?" } ?? "What should we build?")
+                    .font(.system(size: 26, weight: .semibold))
+                    .multilineTextAlignment(.center)
+                ProjectMenu(store: store)
             }
-            ComposerView(store: store)
-                .frame(maxWidth: 680)
+            .padding(.bottom, 26)
+            VStack(spacing: 6) {
+                ComposerView(store: store)
+                ThreadContextStrip(store: store)
+            }
+            .frame(maxWidth: 720)
+            Spacer(minLength: 24)
+            Spacer(minLength: 0)
         }
-        .padding(32)
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
-
-    private var subtitle: String {
-        switch store.connection {
-        case .connecting: "Connecting to Eukhe…"
-        case .ready: "or start without a project"
-        case .lost(let reason): reason
-        }
-    }
 }
 
-private struct TranscriptView: View {
-    let items: [Item]
+private struct ProjectMenu: View {
+    let store: StudioStore
+    @State private var hovering = false
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(items) { item in
-                        TranscriptItemView(item: item)
-                            .id(item.id)
-                    }
+        let inbox = store.inbox
+        let current = inbox.project(inbox.currentProject)
+        Menu {
+            Picker("Project", selection: Binding(get: { inbox.currentProject }, set: { inbox.selectProject($0) })) {
+                ForEach(inbox.projects, id: \.id) { project in
+                    Label(project.name, systemImage: "folder").tag(Optional(project.id))
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 20)
-                .frame(maxWidth: 820)
-                .frame(maxWidth: .infinity)
+                Label("No project", systemImage: "circle.slash").tag(String?.none)
             }
-            .scrollEdgeEffectStyle(.soft, for: .all)
-            .onChange(of: items.last) { _, last in
-                if let last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
-            }
-            .onAppear {
-                if let last = items.last {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
-            }
+            .pickerStyle(.inline)
+            Divider()
+            Button("Add Project…", action: addProject)
+        } label: {
+            ComposerChip(title: current?.name ?? "No project", symbol: "folder", hovering: hovering)
         }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { hovering = $0 }
+        .help("Project")
+    }
+
+    private func addProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Add Project"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        store.inbox.addProject(path: url.path)
     }
 }
 
-private struct NoticeBar: View {
-    let notice: StudioNotice
-    let dismiss: () -> Void
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Label(notice.text, systemImage: notice.level.symbol)
-                .foregroundStyle(notice.level.tint)
-                .textSelection(.enabled)
-            Spacer()
-            Button("Dismiss", systemImage: "xmark", action: dismiss)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
-        .frame(maxWidth: 720)
-    }
-}
-
-private struct ApprovalView: View {
-    let approval: Approval
+private struct ConversationColumn: View {
     let store: StudioStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("Command approval", systemImage: "shield.lefthalf.filled")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.orange)
-                if let agent = approval.agent {
-                    Text(agent).foregroundStyle(.secondary)
+        let width = store.pages.settings?.chatWidth.maxWidth ?? ChatWidth.normal.maxWidth
+        TimelineScroll(store: store, width: width)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 8) {
+                    ApprovalCard(store: store)
+                    ComposerView(store: store)
+                    ThreadContextStrip(store: store)
+                        .padding(.top, -4)
                 }
-                Spacer()
+                .padding(.horizontal, 16)
+                .frame(maxWidth: width)
+                .padding(.horizontal, 4)
+                .padding(.bottom, 14)
             }
-            Text(approval.command)
-                .font(.system(.callout, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            HStack {
-                Spacer()
-                Button("Decline") { store.conversation.answer(approval, .deny) }
-                Button("Approve") { store.conversation.answer(approval, .approve) }
-                    .buttonStyle(.glassProminent)
-                    .keyboardShortcut(.defaultAction)
+    }
+}
+
+private struct LoadingPlaceholder: View {
+    let conversation: ConversationStore
+
+    var body: some View {
+        if conversation.rows.isEmpty, conversation.info == nil {
+            Text("Loading thread…")
+                .font(.system(size: 12.5))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 40)
+        }
+    }
+}
+
+private final class ScrollTracker {
+    var distance: CGFloat = 0
+    var phase: ScrollPhase = .idle
+
+    var userDriven: Bool {
+        switch phase {
+        case .tracking, .interacting, .decelerating: true
+        case .idle, .animating: false
+        @unknown default: false
+        }
+    }
+}
+
+private struct TimelineScroll: View {
+    let store: StudioStore
+    let width: CGFloat
+    @State private var position = ScrollPosition(edge: .bottom)
+    @State private var tracker = ScrollTracker()
+    @State private var awayFromEnd = false
+
+    private static let followSlack: CGFloat = 40
+
+    var body: some View {
+        let conversation = store.conversation
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 22) {
+                LoadingPlaceholder(conversation: conversation)
+                ForEach(conversation.rows) { row in
+                    TimelineRowView(row: row, store: store)
+                }
+                TimelineFooter(store: store)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 24)
+            .padding(.bottom, 20)
+            .frame(maxWidth: width)
+            .frame(maxWidth: .infinity)
+        }
+        .scrollPosition($position)
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .scrollEdgeEffectStyle(.soft, for: .all)
+        .onScrollPhaseChange { _, phase in
+            let wasUserDriven = tracker.userDriven
+            tracker.phase = phase
+            if wasUserDriven, !tracker.userDriven {
+                follow(tracker.distance < Self.followSlack)
             }
         }
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Theme.hairline))
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height, 0)
+        } action: { _, distance in
+            tracker.distance = distance
+            if tracker.userDriven {
+                follow(distance < Self.followSlack)
+            }
+            let away = distance > 240
+            if away != awayFromEnd {
+                awayFromEnd = away
+            }
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentSize.height
+        } action: { _, _ in
+            if conversation.followsEnd, !tracker.userDriven {
+                position.scrollTo(edge: .bottom)
+            }
+        }
+        .onChange(of: conversation.endRequest) {
+            position.scrollTo(edge: .bottom)
+        }
+        .overlay(alignment: .bottom) {
+            if awayFromEnd, !conversation.followsEnd {
+                ScrollToEndPill { conversation.scrollToEnd() }
+                    .padding(.bottom, 12)
+            }
+        }
+    }
+
+    private func follow(_ value: Bool) {
+        if store.conversation.followsEnd != value {
+            store.conversation.followsEnd = value
+        }
+    }
+}
+
+private struct TimelineFooter: View {
+    let store: StudioStore
+
+    var body: some View {
+        let conversation = store.conversation
+        VStack(alignment: .leading, spacing: 14) {
+            if let info = conversation.info, info.busy {
+                WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty)
+            }
+            ForEach(conversation.queued, id: \.id) { message in
+                QueuedBubble(message: message, store: store)
+            }
+        }
+    }
+}
+
+private struct ScrollToEndPill: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.down")
+                    .font(.system(size: 11, weight: .medium))
+                Text("Scroll to end")
+            }
+            .font(.system(size: 12.5))
+            .foregroundStyle(hovering ? Color.primary : Theme.secondaryText)
+            .padding(.horizontal, 12)
+            .frame(height: 30)
+            .background(Theme.card, in: Capsule())
+            .overlay(Capsule().strokeBorder(Theme.input))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }

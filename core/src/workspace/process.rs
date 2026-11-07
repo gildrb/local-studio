@@ -2,7 +2,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::LazyLock;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -28,6 +28,41 @@ impl Output {
             );
         }
         text.lines().filter(|line| !line.trim().is_empty()).take(6).collect::<Vec<_>>().join("\n")
+    }
+}
+
+fn signal_group(signal: &str, child: &std::process::Child) {
+    let group = format!("-{}", child.id());
+    let _ = std::process::Command::new("/bin/kill")
+        .args([signal, "--", &group])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+pub(crate) fn stop_group(child: &mut std::process::Child, grace: Duration) {
+    signal_group("-TERM", child);
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    signal_group("-KILL", child);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+pub(crate) fn own_group(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    if let Some(path) = joined_path() {
+        command.env("PATH", path);
     }
 }
 
