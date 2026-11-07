@@ -2,6 +2,7 @@ import LocalStudioKit
 import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
+    case project
     case general
     case appearance
     case keybindings
@@ -17,6 +18,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
 
     var title: String {
         switch self {
+        case .project: "Project"
         case .general: "General"
         case .appearance: "Appearance"
         case .keybindings: "Keybindings"
@@ -32,6 +34,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
+        case .project: "folder"
         case .general: "gearshape"
         case .appearance: "circle.lefthalf.filled"
         case .keybindings: "keyboard"
@@ -47,6 +50,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
 
     var tint: Color {
         switch self {
+        case .project: .blue
         case .general: .gray
         case .appearance: .indigo
         case .keybindings: .gray

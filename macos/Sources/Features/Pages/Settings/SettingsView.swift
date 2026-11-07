@@ -92,11 +92,20 @@ struct SettingsView: View {
         }
         .onAppear {
             store.pages.loadProviders()
+            consumeSettingsRequest()
         }
+        .onChange(of: store.shell.settingsRequest) { consumeSettingsRequest() }
+    }
+
+    private func consumeSettingsRequest() {
+        guard let request = store.shell.settingsRequest else { return }
+        store.shell.settingsRequest = nil
+        selection = request
     }
 
     @ViewBuilder private var detail: some View {
         switch selection ?? .general {
+        case .project: ProjectSettingsPane(store: store)
         case .general: GeneralSettings(store: store)
         case .appearance: AppearanceSettings(pages: store.pages)
         case .keybindings: KeybindingsSettings(pages: store.pages)

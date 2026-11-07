@@ -48,6 +48,27 @@ extension ProjectTile {
     }
 }
 
+enum TimeFormatting {
+    static func time(_ date: Date, _ format: TimeFormat?) -> String {
+        switch format ?? .locale {
+        case .locale: date.formatted(date: .omitted, time: .shortened)
+        case .twelveHour: fixed("h:mm a").string(from: date)
+        case .twentyFourHour: fixed("HH:mm").string(from: date)
+        }
+    }
+
+    static func dateTime(_ date: Date, _ format: TimeFormat?) -> String {
+        "\(date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))), \(time(date, format))"
+    }
+
+    private static func fixed(_ pattern: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = .current
+        formatter.dateFormat = pattern
+        return formatter
+    }
+}
+
 enum RelativeAge {
     static func text(millis: Int64, now: Date = .now) -> String {
         let seconds = max(0, now.timeIntervalSince1970 - TimeInterval(millis) / 1_000)

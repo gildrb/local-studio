@@ -115,8 +115,11 @@ private struct ConversationColumn: View {
     let store: StudioStore
 
     var body: some View {
-        let width = store.pages.settings?.chatWidth.maxWidth ?? ChatWidth.normal.maxWidth
+        let settings = store.pages.settings
+        let width = settings?.chatWidth.maxWidth ?? ChatWidth.normal.maxWidth
         TimelineScroll(store: store, width: width)
+            .environment(\.responseStreaming, settings?.responseStreaming ?? .paragraph)
+            .environment(\.timeFormat, settings?.timeFormat ?? .locale)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 8) {
                     ApprovalCard(store: store)
@@ -165,6 +168,8 @@ private struct TimelineScroll: View {
     @State private var position = ScrollPosition(edge: .bottom)
     @State private var tracker = ScrollTracker()
     @State private var awayFromEnd = false
+    @State private var currentAnchor: UInt64?
+    @State private var roomForMinimap = false
 
     private static let followSlack: CGFloat = 40
 
@@ -178,6 +183,7 @@ private struct TimelineScroll: View {
                 }
                 TimelineFooter(store: store)
             }
+            .scrollTargetLayout()
             .padding(.horizontal, 20)
             .padding(.top, 24)
             .padding(.bottom, 20)
@@ -216,11 +222,40 @@ private struct TimelineScroll: View {
         .onChange(of: conversation.endRequest) {
             position.scrollTo(edge: .bottom)
         }
+        .onScrollTargetVisibilityChange(idType: UInt64.self, threshold: 0.3) { ids in
+            updateCurrentAnchor(visible: ids)
+        }
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.containerSize.width >= width + 80
+        } action: { _, room in
+            roomForMinimap = room
+        }
         .overlay(alignment: .bottom) {
             if awayFromEnd, !conversation.followsEnd {
                 ScrollToEndPill { conversation.scrollToEnd() }
                     .padding(.bottom, 12)
             }
+        }
+        .overlay(alignment: .trailing) {
+            if roomForMinimap {
+                TimelineMinimap(anchors: conversation.anchors, current: currentAnchor) { anchor in
+                    follow(false)
+                    currentAnchor = anchor
+                    position.scrollTo(id: anchor, anchor: .top)
+                }
+                .padding(.trailing, 8)
+            }
+        }
+    }
+
+    private func updateCurrentAnchor(visible ids: [UInt64]) {
+        let anchors = store.conversation.anchors
+        guard !anchors.isEmpty else { return }
+        let order = Dictionary(store.conversation.rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        guard let top = ids.compactMap({ order[$0] }).min() else { return }
+        let next = anchors.last { $0.order <= top }?.id ?? anchors.first?.id
+        if next != currentAnchor {
+            currentAnchor = next
         }
     }
 
@@ -228,6 +263,84 @@ private struct TimelineScroll: View {
         if store.conversation.followsEnd != value {
             store.conversation.followsEnd = value
         }
+    }
+}
+
+private struct TimelineMinimap: View {
+    let anchors: [TimelineAnchor]
+    let current: UInt64?
+    let jump: (UInt64) -> Void
+
+    private static let maxTicks = 36
+
+    var body: some View {
+        if anchors.count >= 2 {
+            let index = current.flatMap { id in anchors.firstIndex { $0.id == id } }
+            VStack(spacing: 4) {
+                MinimapStep(title: "Previous message", symbol: "chevron.up", enabled: (index ?? anchors.count) > 0) {
+                    jump(anchors[max((index ?? anchors.count) - 1, 0)].id)
+                }
+                VStack(spacing: 0) {
+                    ForEach(ticks, id: \.id) { anchor in
+                        MinimapTick(anchor: anchor, current: anchor.id == current) { jump(anchor.id) }
+                    }
+                }
+                MinimapStep(title: "Next message", symbol: "chevron.down", enabled: index.map { $0 < anchors.count - 1 } ?? false) {
+                    if let index {
+                        jump(anchors[min(index + 1, anchors.count - 1)].id)
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Timeline")
+        }
+    }
+
+    private var ticks: [TimelineAnchor] {
+        guard anchors.count > Self.maxTicks else { return anchors }
+        let step = Double(anchors.count - 1) / Double(Self.maxTicks - 1)
+        var picked = (0..<Self.maxTicks).map { anchors[Int((Double($0) * step).rounded())] }
+        if let current, let anchor = anchors.first(where: { $0.id == current }), !picked.contains(anchor) {
+            let nearest = picked.indices.min { abs(picked[$0].order - anchor.order) < abs(picked[$1].order - anchor.order) } ?? 0
+            picked[nearest] = anchor
+        }
+        return picked
+    }
+}
+
+private struct MinimapTick: View {
+    let anchor: TimelineAnchor
+    let current: Bool
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Capsule()
+                .fill(current || hovering ? Color.primary.opacity(0.75) : Theme.chromeIcon.opacity(0.35))
+                .frame(width: current ? 14 : 9, height: 2)
+                .frame(width: 20, height: 7, alignment: .trailing)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(anchor.preview)
+        .accessibilityLabel(anchor.preview)
+        .accessibilityAddTraits(current ? .isSelected : [])
+    }
+}
+
+private struct MinimapStep: View {
+    let title: String
+    let symbol: String
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        MessageActionButton(title, symbol: symbol, size: 10, action: action)
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.35)
     }
 }
 

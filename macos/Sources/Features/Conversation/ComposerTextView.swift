@@ -2,8 +2,7 @@ import AppKit
 import SwiftUI
 
 enum ComposerKey {
-    case submit
-    case steer
+    case enter(shift: Bool, command: Bool, option: Bool)
     case up
     case down
     case tab
@@ -14,6 +13,7 @@ struct ComposerTextView: NSViewRepresentable {
     let draft: ComposerDraft
     let fontSize: CGFloat
     let focusToken: Int
+    let markdownShortcuts: Bool
     @Binding var height: CGFloat
     let onCaret: (String, Int) -> Void
     let onKey: (ComposerKey, Int) -> Bool
@@ -72,6 +72,8 @@ struct ComposerTextView: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         textView.onImage = onImage
         textView.onFiles = onFiles
+        textView.onKey = onKey
+        textView.markdownShortcuts = markdownShortcuts
         if textView.font?.pointSize != fontSize {
             textView.font = .systemFont(ofSize: fontSize)
         }
@@ -136,17 +138,13 @@ struct ComposerTextView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             let caret = textView.selectedRange().location
             switch selector {
-            case #selector(NSResponder.insertNewline(_:)):
-                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                let flags = NSApp.currentEvent?.modifierFlags ?? []
+                let key = ComposerKey.enter(shift: flags.contains(.shift), command: flags.contains(.command), option: flags.contains(.option))
+                if !parent.onKey(key, caret) {
                     textView.insertNewlineIgnoringFieldEditor(nil)
-                    return true
                 }
-                if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
-                    return parent.onKey(.steer, caret)
-                }
-                return parent.onKey(.submit, caret)
-            case #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-                return parent.onKey(.steer, caret)
+                return true
             case #selector(NSResponder.moveUp(_:)):
                 return parent.onKey(.up, caret)
             case #selector(NSResponder.moveDown(_:)):
@@ -165,6 +163,44 @@ struct ComposerTextView: NSViewRepresentable {
 final class ComposerNSTextView: NSTextView {
     var onImage: ((Data, String) -> Void)?
     var onFiles: (([URL]) -> Void)?
+    var onKey: ((ComposerKey, Int) -> Bool)?
+    var markdownShortcuts = false
+
+    override func keyDown(with event: NSEvent) {
+        let returnKeys: Set<UInt16> = [36, 76]
+        if returnKeys.contains(event.keyCode), event.modifierFlags.contains(.command), !hasMarkedText() {
+            let flags = event.modifierFlags
+            let key = ComposerKey.enter(shift: flags.contains(.shift), command: true, option: flags.contains(.option))
+            if onKey?(key, selectedRange().location) == true {
+                return
+            }
+        }
+        super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard markdownShortcuts, window?.firstResponder === self, flags == .command,
+              let key = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+        switch key {
+        case "b": wrapSelection(in: "**")
+        case "i": wrapSelection(in: "_")
+        case "e": wrapSelection(in: "`")
+        default: return super.performKeyEquivalent(with: event)
+        }
+        return true
+    }
+
+    private func wrapSelection(in marker: String) {
+        let range = selectedRange()
+        let selected = (string as NSString).substring(with: range)
+        insertText(marker + selected + marker, replacementRange: range)
+        if selected.isEmpty {
+            setSelectedRange(NSRange(location: range.location + (marker as NSString).length, length: 0))
+        }
+    }
 
     override func paste(_ sender: Any?) {
         if attach(from: NSPasteboard.general) {
