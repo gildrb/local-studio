@@ -10,7 +10,7 @@ struct TimelineRowView: View {
         case .entry(let entry, let hidesThinking):
             TimelineEntryView(entry: entry, hidesThinking: hidesThinking, store: store)
         case .tools(let entries):
-            ToolGroupView(entries: entries)
+            ToolGroupView(entries: entries, store: store)
         case .fold(let entry, let expanded):
             TurnFoldRow(entry: entry, expanded: expanded) {
                 store.conversation.toggleFold(entry.id)
@@ -27,8 +27,11 @@ private struct TimelineEntryView: View {
     var body: some View {
         let item = entry.item
         switch item.kind {
-        case .user(let text, let images, let anchor, _):
-            UserBubble(text: text, images: images, createdAt: item.createdAt, anchor: anchor, store: store)
+        case .user(let text, let images, let anchor, let thumbnails):
+            UserBubble(
+                id: item.id, text: text, images: images, thumbnails: thumbnails,
+                createdAt: item.createdAt, anchor: anchor, store: store
+            )
         case .assistant(let blocks, let streaming, let error, let changedFiles):
             AssistantMessage(
                 blocks: blocks, streaming: streaming, error: error, changedFiles: changedFiles,
@@ -46,8 +49,10 @@ private struct TimelineEntryView: View {
 }
 
 private struct UserBubble: View {
+    let id: UInt64
     let text: String
     let images: UInt32
+    let thumbnails: [ImageThumbnail]
     let createdAt: Int64?
     let anchor: String?
     let store: StudioStore
@@ -56,24 +61,33 @@ private struct UserBubble: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            VStack(alignment: .trailing, spacing: 6) {
-                Text(text)
-                    .font(.system(size: 13.5))
-                    .lineSpacing(3)
-                    .lineLimit(collapsible && !expanded ? 14 : nil)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if collapsible {
-                    Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 12))
-                        .foregroundStyle(Theme.secondaryText)
+            if !thumbnails.isEmpty {
+                ThumbnailGrid(id: id, thumbnails: thumbnails) { index in
+                    if let anchor {
+                        store.conversation.openGallery(entry: anchor, thumbnails: thumbnails, index: index)
+                    }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 9)
-            .background(Theme.message, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            if images > 0 {
+            if !text.isEmpty {
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text(text)
+                        .font(.system(size: 13.5))
+                        .lineSpacing(3)
+                        .lineLimit(collapsible && !expanded ? 14 : nil)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if collapsible {
+                        Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(Theme.message, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            }
+            if images > 0, thumbnails.isEmpty {
                 Label(images == 1 ? "1 image" : "\(images) images", systemImage: "photo")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
@@ -321,6 +335,7 @@ private struct ThinkingBlock: View {
 
 private struct ToolGroupView: View {
     let entries: [TimelineEntry]
+    let store: StudioStore
     @State private var showsAll = false
 
     private static let visible = 6
@@ -348,7 +363,11 @@ private struct ToolGroupView: View {
                 .buttonStyle(.plain)
             }
             ForEach(entries.suffix(entries.count - hidden)) { entry in
-                ToolRow(entry: entry)
+                if entry.isAgentCall {
+                    AgentSpawnRow(entry: entry, store: store)
+                } else {
+                    ToolRow(entry: entry)
+                }
             }
         }
     }
@@ -675,14 +694,13 @@ private struct CompactionDivider: View {
 struct WorkingRow: View {
     let info: ThreadInfo
     let waitingForApproval: Bool
-    var settingUpWorktree = false
 
     var body: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(waitingForApproval ? Color.orange : Theme.primary)
                 .frame(width: 6, height: 6)
-            if let started = info.runStartedAt, !waitingForApproval, !settingUpWorktree, !info.compacting, info.retryAttempt == 0 {
+            if let started = info.runStartedAt, !waitingForApproval, !info.compacting, info.retryAttempt == 0 {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text("Working for \(elapsed(since: started, now: context.date))")
                         .monospacedDigit()
@@ -697,9 +715,6 @@ struct WorkingRow: View {
     }
 
     private var label: String {
-        if settingUpWorktree {
-            return "Setting up worktree…"
-        }
         if waitingForApproval {
             return "Waiting for approval"
         }

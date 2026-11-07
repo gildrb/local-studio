@@ -36,7 +36,6 @@ final class ConversationStore {
 
     @ObservationIgnored private let core: CoreHandle
     @ObservationIgnored private let requests: RequestCenter
-    @ObservationIgnored private var draft: String?
     @ObservationIgnored private var drafts: [String: ComposerDraft] = [:]
     @ObservationIgnored private(set) var commandsRequest: String?
     @ObservationIgnored private var sentPrompts: [String] = []
@@ -55,20 +54,103 @@ final class ConversationStore {
     }
 
     private(set) var worktreeSetup: [String: (stages: [SetupStage], done: Bool, error: String?)] = [:]
+    private(set) var pendingDraft: String?
 
     func setWorktreeSetup(thread: String, stages: [SetupStage], done: Bool, error: String?) {
         worktreeSetup[thread] = (stages, done, error)
     }
 
+    func cancelWorktreeSetup() {
+        guard let pendingDraft else { return }
+        core.run { $0.cancelWorktreeSetup(thread: pendingDraft) }
+        self.pendingDraft = nil
+        if let (project, prompt) = pendingPrompt {
+            let draft = composer(project: project)
+            if draft.isEmpty {
+                draft.text = prompt.text
+                draft.files = prompt.files
+                draft.contexts = prompt.contexts
+                focusRequest += 1
+            }
+        }
+        pendingPrompt = nil
+    }
+
+    func skipWorktreeSetup() {
+        guard let pendingDraft else { return }
+        core.run { $0.skipWorktreeSetup(thread: pendingDraft) }
+    }
+
     private(set) var skills: [SkillEntry] = []
+    private(set) var skillsLoaded = false
     private(set) var messageImages: [String: (mimeType: String, data: Data)] = [:]
+    private(set) var messageImageErrors: [String: String] = [:]
+    var gallery: ImageGallery?
+    @ObservationIgnored private(set) var skillsRequest: String?
+    @ObservationIgnored private var skillsProject: String??
+    @ObservationIgnored private var pendingServiceTier: [String: String] = [:]
+    @ObservationIgnored private var pendingPrompt: (project: String?, prompt: StashedPrompt)?
 
     func setSkills(request: String, skills: [SkillEntry]) {
+        guard request == skillsRequest else { return }
+        skillsRequest = nil
         self.skills = skills
+        skillsLoaded = true
+    }
+
+    func loadSkills(project: String?) {
+        guard skillsRequest == nil, skillsProject != .some(project) || !skillsLoaded else { return }
+        let request = requests.issue { [weak self] _ in
+            self?.skillsRequest = nil
+            self?.skillsLoaded = true
+        }
+        skillsRequest = request
+        skillsProject = .some(project)
+        core.run { $0.listSkills(request: request, project: project) }
     }
 
     func setMessageImage(request: String, mimeType: String, data: Data) {
         messageImages[request] = (mimeType, data)
+    }
+
+    func loadMessageImage(entry: String, index: Int) -> String? {
+        guard let thread else { return nil }
+        var request = ""
+        request = requests.issue { [weak self] outcome in
+            if case .failed(let message) = outcome {
+                self?.messageImageErrors[request] = message
+            }
+        }
+        let id = request
+        core.run { $0.loadMessageImage(request: id, thread: thread, entry: entry, index: UInt32(index)) }
+        return id
+    }
+
+    func openGallery(entry: String, thumbnails: [ImageThumbnail], index: Int) {
+        gallery = ImageGallery(entry: entry, thumbnails: thumbnails, index: index)
+    }
+
+    func serviceTiers(settings: Settings?) -> [String] {
+        if thread != nil {
+            return info?.serviceTiers ?? []
+        }
+        return currentModel(settings: settings)?.serviceTiers ?? []
+    }
+
+    func serviceTier(settings: Settings?) -> String? {
+        if thread != nil {
+            return info?.serviceTier
+        }
+        guard let tier = newThread.serviceTier, serviceTiers(settings: settings).contains(tier) else { return nil }
+        return tier
+    }
+
+    func setServiceTier(_ tier: String?) {
+        guard let thread else {
+            newThread.serviceTier = tier
+            return
+        }
+        core.run { $0.setServiceTier(thread: thread, tier: tier) }
     }
 
     func focus(_ thread: String?) {
@@ -85,8 +167,12 @@ final class ConversationStore {
     }
 
     func threadStarted(draft: String, thread: String) -> Bool {
-        guard draft == self.draft else { return false }
-        self.draft = nil
+        if let tier = pendingServiceTier.removeValue(forKey: draft) {
+            core.run { $0.setServiceTier(thread: thread, tier: tier) }
+        }
+        guard draft == pendingDraft else { return false }
+        pendingDraft = nil
+        pendingPrompt = nil
         return true
     }
 
@@ -218,9 +304,8 @@ final class ConversationStore {
 
     func submit(project: String?, alternate: Bool, settings: Settings?, defaultBranch: String? = nil) {
         let draft = composer(project: project)
-        let preferred: Delivery = settings?.followUpBehavior == .steer ? .steer : .queue
-        let opposite: Delivery = preferred == .steer ? .queue : .steer
-        send(draft, project: project, delivery: alternate ? opposite : preferred, settings: settings, defaultBranch: defaultBranch)
+        let opposite: Delivery = settings?.followUpBehavior == .steer ? .queue : .steer
+        send(draft, project: project, delivery: alternate ? opposite : .default, settings: settings, defaultBranch: defaultBranch)
     }
 
     func steerQueuedMessage() -> Bool {
@@ -422,12 +507,14 @@ final class ConversationStore {
         if !typed.isEmpty {
             sentPrompts.append(typed)
         }
+        let snapshot = StashedPrompt(text: draft.text, files: draft.files, contexts: draft.contexts)
         draft.clear()
         followsEnd = true
         endRequest += 1
         guard let thread else {
             let id = UUID().uuidString
-            self.draft = id
+            pendingDraft = id
+            pendingPrompt = (project, snapshot)
             let model = currentModel(settings: settings)
             let options = ThreadSettings(
                 provider: model?.provider,
@@ -436,11 +523,24 @@ final class ConversationStore {
                 access: access(settings: settings),
                 worktree: newThread.worktreeChoice(settings: settings, defaultBranch: defaultBranch)
             )
+            if let tier = serviceTier(settings: settings) {
+                pendingServiceTier[id] = tier
+            }
+            let fanOut = newThread.fanOutModels(available: models)
             newThread.threadStarted()
-            core.run { $0.startThread(draft: id, project: project, prompt: prompt, settings: options) }
+            if fanOut.count >= 2 {
+                for index in 1..<fanOut.count {
+                    if let tier = pendingServiceTier[id] {
+                        pendingServiceTier["\(id)#\(index)"] = tier
+                    }
+                }
+                core.run { $0.startThreads(draft: id, project: project, prompt: prompt, settings: options, models: fanOut) }
+            } else {
+                core.run { $0.startThread(draft: id, project: project, prompt: prompt, settings: options) }
+            }
             return
         }
-        core.run { $0.send(thread: thread, prompt: prompt, delivery: busy ? delivery : .queue) }
+        core.run { $0.send(thread: thread, prompt: prompt, delivery: busy ? delivery : .default) }
     }
 
     private func composer(key: String) -> ComposerDraft {
@@ -591,6 +691,9 @@ final class NewThreadOptions {
     var base: String?
     var existingWorktree: String?
     var existingBranch: String?
+    var serviceTier: String?
+    var multiModel = false
+    var fanOut: [ModelKey] = []
 
     func usesWorktree(_ settings: Settings?) -> Bool {
         worktree ?? (settings?.newThreadWorkspace == .worktree)
@@ -600,10 +703,31 @@ final class NewThreadOptions {
         if let existingWorktree {
             return .existing(path: existingWorktree)
         }
-        guard usesWorktree(settings) else { return .local }
         let name = branch.trimmingCharacters(in: .whitespacesAndNewlines)
+        if worktree == nil, name.isEmpty, base == nil {
+            return .default
+        }
+        guard usesWorktree(settings) else { return .local }
         let origin = (settings?.newWorktreesStartFromOrigin ?? true) ? defaultBranch.map { "origin/" + $0 } : nil
         return .newWorktree(branch: name.isEmpty ? Self.generatedBranch() : name, base: base ?? origin)
+    }
+
+    func isFanOut(_ model: ModelOption) -> Bool {
+        fanOut.contains { $0.provider == model.provider && $0.model == model.id }
+    }
+
+    func toggleFanOut(_ model: ModelOption) {
+        let key = ModelKey(provider: model.provider, model: model.id)
+        if let index = fanOut.firstIndex(of: key) {
+            fanOut.remove(at: index)
+        } else {
+            fanOut.append(key)
+        }
+    }
+
+    func fanOutModels(available: [ModelOption]) -> [ModelKey] {
+        guard multiModel else { return [] }
+        return fanOut.filter { key in available.contains { $0.provider == key.provider && $0.id == key.model && $0.configured } }
     }
 
     func chooseWorkspace(worktree: Bool) {
@@ -616,11 +740,20 @@ final class NewThreadOptions {
         existingWorktree = nil
         existingBranch = nil
         branch = ""
+        multiModel = false
+        fanOut = []
     }
 
     static func generatedBranch() -> String {
         "local-studio/" + UUID().uuidString.prefix(8).lowercased()
     }
+}
+
+struct ImageGallery: Identifiable {
+    let id = UUID()
+    let entry: String
+    let thumbnails: [ImageThumbnail]
+    var index: Int
 }
 
 @MainActor

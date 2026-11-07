@@ -256,7 +256,7 @@ extension SnapshotCatalog {
                     .transcript(thread: "t1", op: .reset(items: Array(fixtures.compaction.suffix(2)))),
                 ],
                 view: { store in
-                    fixtures.loadCommands(store)
+                    fixtures.loadSkills(store)
                     store.conversation.composer(project: nil).text = "Review the diff with $"
                     return thread(store)
                 }
@@ -296,35 +296,81 @@ extension SnapshotCatalog {
             ),
             SnapshotEntry(
                 name: "conversation-worktree-setup",
-                size: CGSize(width: 980, height: 560),
+                size: CGSize(width: 980, height: 640),
+                updates: [.projects(projects: [fixtures.project]), fixtures.modelsUpdate],
+                view: { store in
+                    fixtures.startDraft(store, setup: [
+                        SetupStage(name: "Create worktree", state: .done, outputTail: "Preparing worktree (new branch 'local-studio/3f9a2c1d')"),
+                        SetupStage(name: "Run setup script", state: .running, outputTail: "bun install\nResolving dependencies\nInstalled 412 packages"),
+                        SetupStage(name: "Start agent", state: .pending, outputTail: ""),
+                    ], done: false, error: nil)
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-worktree-setup-failed",
+                size: CGSize(width: 980, height: 640),
+                updates: [.projects(projects: [fixtures.project]), fixtures.modelsUpdate],
+                view: { store in
+                    fixtures.startDraft(store, setup: [
+                        SetupStage(name: "Create worktree", state: .done, outputTail: ""),
+                        SetupStage(name: "Run setup script", state: .failed, outputTail: "error: lockfile had changes, but lockfile is frozen"),
+                        SetupStage(name: "Start agent", state: .skipped, outputTail: ""),
+                    ], done: true, error: "The setup script exited with status 1.")
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-user-images",
+                size: CGSize(width: 980, height: 640),
                 focus: "t1",
                 updates: [
                     fixtures.modelsUpdate,
                     .thread(thread: "t1", info: fixtures.info(busy: false)),
-                    .transcript(thread: "t1", op: .reset(items: [fixtures.user(1, turn: 1, "Prototype the onboarding flow in a worktree.")])),
-                    .worktreeSetup(thread: "t1", stages: [
-                        SetupStage(name: "Create worktree", state: .done, outputTail: "Preparing worktree (new branch 'local-studio/3f9a2c1d')"),
-                        SetupStage(name: "Run setup script", state: .running, outputTail: "bun install\nResolving dependencies\nInstalled 412 packages"),
-                        SetupStage(name: "Start agent", state: .pending, outputTail: ""),
-                    ], done: false, error: nil),
+                    .transcript(thread: "t1", op: .reset(items: [
+                        fixtures.userWithImages(1, "Match these two screens", colors: [.systemBlue, .systemOrange, .systemGreen]),
+                        fixtures.assistant(2, turn: 1, [.text(text: "Both screens use a 20pt corner radius; I'll match it.")]),
+                        fixtures.userWithImages(3, "", colors: [.systemPurple]),
+                    ])),
                 ],
                 view: thread
             ),
             SnapshotEntry(
-                name: "conversation-worktree-setup-failed",
-                size: CGSize(width: 980, height: 560),
+                name: "conversation-subagents",
+                size: CGSize(width: 980, height: 640),
                 focus: "t1",
                 updates: [
                     fixtures.modelsUpdate,
-                    .thread(thread: "t1", info: fixtures.info(busy: false)),
-                    .transcript(thread: "t1", op: .reset(items: [fixtures.user(1, turn: 1, "Prototype the onboarding flow in a worktree.")])),
-                    .worktreeSetup(thread: "t1", stages: [
-                        SetupStage(name: "Create worktree", state: .done, outputTail: ""),
-                        SetupStage(name: "Run setup script", state: .failed, outputTail: "error: lockfile had changes, but lockfile is frozen"),
-                        SetupStage(name: "Start agent", state: .skipped, outputTail: ""),
-                    ], done: true, error: "The setup script exited with status 1."),
+                    .thread(thread: "t1", info: fixtures.goalInfo),
+                    .transcript(thread: "t1", op: .reset(items: fixtures.agentTurn)),
+                    .subagents(thread: "t1", agents: fixtures.agents),
                 ],
                 view: thread
+            ),
+            SnapshotEntry(
+                name: "conversation-fan-out-picker",
+                size: CGSize(width: 320, height: 300),
+                updates: [fixtures.modelsUpdate],
+                view: { store in
+                    let options = store.conversation.newThread
+                    options.multiModel = true
+                    options.fanOut = fixtures.models.map { ModelKey(provider: $0.provider, model: $0.id) }
+                    return AnyView(ModelPickerPanel(store: store) {}.background(Theme.card))
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-fan-out-draft",
+                size: CGSize(width: 980, height: 640),
+                updates: [.projects(projects: [fixtures.project]), fixtures.modelsUpdate],
+                view: { store in
+                    let options = store.conversation.newThread
+                    options.model = ModelKey(provider: "openai", model: "gpt-5")
+                    options.serviceTier = "priority"
+                    options.multiModel = true
+                    options.fanOut = fixtures.models.map { ModelKey(provider: $0.provider, model: $0.id) }
+                    store.conversation.composer(project: fixtures.project.id).text = "Try both models on the onboarding flow"
+                    return thread(store)
+                }
             ),
             SnapshotEntry(
                 name: "conversation-streaming-paragraph",
@@ -411,6 +457,72 @@ enum ConversationFixtures {
             store.receive([.commands(request: request, commands: commands)])
         }
     }
+
+    static let skills: [SkillEntry] = [
+        SkillEntry(name: "release-notes", description: "Draft release notes from merged PRs", source: .repo, path: ".eukhe/skills/release-notes"),
+        SkillEntry(name: "swift-lint", description: "Fix SwiftLint violations", source: .project, path: "macos/.skills/swift-lint"),
+        SkillEntry(name: "web-search", description: "Search the web and cite sources", source: .system, path: "/usr/share/eukhe/skills/web-search"),
+    ]
+
+    @MainActor
+    static func loadSkills(_ store: StudioStore) {
+        store.conversation.loadSkills(project: nil)
+        if let request = store.conversation.skillsRequest {
+            store.receive([.skills(request: request, skills: skills)])
+        }
+    }
+
+    @MainActor
+    static func startDraft(_ store: StudioStore, setup stages: [SetupStage], done: Bool, error: String?) {
+        store.receive([.connection(state: .ready)])
+        let conversation = store.conversation
+        conversation.newThread.chooseWorkspace(worktree: true)
+        conversation.composer(project: project.id).text = "Prototype the onboarding flow in a worktree."
+        conversation.submit(project: project.id, alternate: false, settings: nil)
+        if let draft = conversation.pendingDraft {
+            store.receive([.worktreeSetup(thread: draft, stages: stages, done: done, error: error)])
+        }
+    }
+
+    static func userWithImages(_ id: UInt64, _ text: String, colors: [NSColor]) -> Item {
+        let thumbnails = colors.map { ImageThumbnail(mimeType: "image/png", data: swatch($0), width: 1_280, height: 960) }
+        return Item(id: id, turn: id, createdAt: base + Int64(id) * 20_000, kind: .user(
+            text: text, images: UInt32(thumbnails.count), entry: "e\(id)", thumbnails: thumbnails
+        ))
+    }
+
+    static var goalInfo: ThreadInfo {
+        var info = info(busy: true)
+        info.goal = Goal(
+            objective: "Ship the native onboarding flow with tests", status: "running", active: true,
+            tokensUsed: 184_200, tokenBudget: 500_000, timeUsedSeconds: 1_312
+        )
+        info.serviceTiers = ["auto", "flex", "priority"]
+        info.serviceTier = "priority"
+        return info
+    }
+
+    static let agentTurn: [Item] = [
+        user(1, turn: 1, "Audit the three settings panes in parallel."),
+        assistant(2, turn: 1, [.text(text: "I'll split the audit across three agents.")]),
+        tool(3, turn: 1, .read, "Read macos/Sources/Features/Pages/Settings"),
+        tool(4, turn: 1, .agent, "Spawn 3 agents: audit General, Appearance and Providers", state: .running),
+    ]
+
+    static let agents: [Subagent] = [
+        Subagent(
+            id: "a1", title: "General pane", status: "running", running: true, startedAt: nil, durationMs: nil,
+            tokens: 18_400, currentTool: "Read GeneralSettings.swift", note: nil, model: "claude-sonnet-4-5", answer: nil
+        ),
+        Subagent(
+            id: "a2", title: "Appearance pane", status: "done", running: false, startedAt: nil, durationMs: 94_000,
+            tokens: 31_200, currentTool: nil, note: "2 issues found", model: "claude-sonnet-4-5", answer: "Contrast slider is inert."
+        ),
+        Subagent(
+            id: "a3", title: "Providers pane", status: "failed", running: false, startedAt: nil, durationMs: 12_000,
+            tokens: 2_100, currentTool: nil, note: "Rate limited", model: "gpt-5", answer: nil
+        ),
+    ]
 
     static let pickerModelsUpdate = Update.models(
         models: models + [

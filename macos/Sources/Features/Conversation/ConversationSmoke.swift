@@ -15,7 +15,12 @@ final class ConversationSmoke {
         case steering
         case approved
         case settled
+        case image
         case editing
+        case tier
+        case fanOut
+        case setupProject
+        case setup
         case finished
     }
 
@@ -23,6 +28,11 @@ final class ConversationSmoke {
     private var phase = Phase.connecting
     private var subscription: AnyCancellable?
     private var thread: String?
+    private var anchor: String?
+    private var imageRequest: String?
+    private var tier: String?
+    private var threadCount = 0
+    private var repository: String?
 
     private static let prompt = "run the smoke command"
     private static let followUp = "queued follow-up"
@@ -34,7 +44,7 @@ final class ConversationSmoke {
 
     func start() {
         subscription = store.didTick.sink { [weak self] in self?.advance() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
             guard let self, phase != .finished else { return }
             finish(passed: false, "timed out while \(phase.rawValue)")
         }
@@ -61,6 +71,7 @@ final class ConversationSmoke {
             }
             conversation.newThread.access = .supervised
             conversation.composer(project: project).text = Self.prompt
+            conversation.composer(project: project).attach(image: Self.png, mimeType: "image/png")
             conversation.submit(project: project, alternate: false, settings: store.pages.settings)
             move(to: .opening, "composer started a supervised thread in \(project) with default model \(model.provider)/\(model.id)")
         case .opening:
@@ -106,19 +117,132 @@ final class ConversationSmoke {
                 if case .user(Self.prompt, _, let entry, _) = item.kind { entry } else { nil }
             }).first else { return }
             for item in items {
-                print("     item \(item.id) turn \(item.turn) \(item.kind)")
+                print("     item \(item.id) turn \(item.turn) \(item.kind)".prefix(400))
             }
             print("     \(conversation.rows.count) timeline rows for \(items.count) items")
+            let thumbnails = items.lazy.compactMap { item -> [ImageThumbnail]? in
+                if case .user(Self.prompt, _, _, let thumbnails) = item.kind { thumbnails } else { nil }
+            }.first ?? []
+            guard let thumbnail = thumbnails.first else {
+                finish(passed: false, "the attached image has no thumbnail in the transcript")
+                return
+            }
+            self.anchor = anchor
+            imageRequest = conversation.loadMessageImage(entry: anchor, index: 0)
+            move(to: .image, "follow-up from the queue landed; the attached image shows a \(thumbnail.width)×\(thumbnail.height) thumbnail")
+        case .image:
+            guard let imageRequest else { return }
+            if let error = conversation.messageImageErrors[imageRequest] {
+                finish(passed: false, "loadMessageImage failed: \(error)")
+                return
+            }
+            guard let image = conversation.messageImages[imageRequest], let anchor else { return }
             conversation.composer(project: nil).text = ""
             conversation.editFromHere(entry: anchor)
-            move(to: .editing, "follow-up from the queue landed in the transcript; editing from the first prompt")
+            move(to: .editing, "loadMessageImage returned the full \(image.mimeType) (\(image.data.count) bytes); editing from the first prompt")
         case .editing:
             let rewound = !conversation.items.contains { if case .user(Self.followUp, _, _, _) = $0.kind { true } else { false } }
             guard let thread, rewound, conversation.composer(project: nil).text == Self.prompt, conversation.thread == thread else { return }
-            finish(passed: true, "edit from here filled the composer with “\(Self.prompt)”")
+            move(to: .tier, "edit from here filled the composer with “\(Self.prompt)”")
+            if let first = conversation.info?.serviceTiers.first {
+                tier = first
+                conversation.setServiceTier(first)
+            } else {
+                print("     faux model offers no service tiers; setServiceTier round-trip skipped")
+                startFanOut()
+            }
+        case .tier:
+            guard let tier, conversation.info?.serviceTier == tier else { return }
+            print("ok   setServiceTier(\(tier)) came back in ThreadInfo")
+            startFanOut()
+        case .fanOut:
+            guard store.inbox.threads.count >= threadCount + 2 else { return }
+            move(to: .setupProject, "fan-out over 2 models started \(store.inbox.threads.count - threadCount) threads")
+            guard let repository = Self.makeRepository() else {
+                finish(passed: true, "git is unavailable; worktree setup cancel skipped")
+                return
+            }
+            self.repository = URL(fileURLWithPath: repository).resolvingSymlinksInPath().path
+            store.select(nil)
+            store.inbox.addProject(path: repository)
+        case .setupProject:
+            guard let project = repositoryProject() else { return }
+            if conversation.thread != nil {
+                store.select(nil)
+            }
+            store.inbox.selectProject(project)
+            conversation.newThread.chooseWorkspace(worktree: true)
+            conversation.composer(project: project).text = "work in a worktree"
+            conversation.submit(project: project, alternate: false, settings: store.pages.settings)
+            move(to: .setup, "started a draft in a new worktree of \(project)")
+        case .setup:
+            guard let draft = conversation.pendingDraft else {
+                finish(passed: true, "the worktree was ready before Cancel could run; setup cancel not exercised")
+                return
+            }
+            if let notice = store.notice, notice.level == .error {
+                finish(passed: false, "starting the worktree draft failed: \(notice.text)")
+                return
+            }
+            guard conversation.worktreeSetup[draft] != nil, let project = repositoryProject() else { return }
+            conversation.cancelWorktreeSetup()
+            guard conversation.pendingDraft == nil, conversation.composer(project: project).text == "work in a worktree" else {
+                finish(passed: false, "cancelling the worktree setup did not return the prompt to the composer")
+                return
+            }
+            finish(passed: true, "cancelWorktreeSetup(\(draft)) stopped the setup and returned the prompt to the composer")
         case .finished:
             return
         }
+    }
+
+    private func repositoryProject() -> String? {
+        guard let repository else { return nil }
+        let canonical = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        return store.inbox.projects.first { canonical($0.id) == repository || canonical($0.path) == repository }?.id
+    }
+
+    private func startFanOut() {
+        let conversation = store.conversation
+        guard let model = conversation.models.first(where: \.configured) else {
+            finish(passed: false, "no configured model to fan out over")
+            return
+        }
+        let key = ModelKey(provider: model.provider, model: model.id)
+        threadCount = store.inbox.threads.count
+        store.select(nil)
+        store.inbox.selectProject(nil)
+        conversation.newThread.multiModel = true
+        conversation.newThread.fanOut = [key, key]
+        conversation.composer(project: nil).text = "fan out"
+        conversation.submit(project: nil, alternate: false, settings: store.pages.settings)
+        move(to: .fanOut, "startThreads over \(key.provider)/\(key.model) ×2")
+    }
+
+    private static func makeRepository() -> String? {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+        let path = (home as NSString).appendingPathComponent("repo")
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        let steps = [["init", "-q"], ["-c", "user.name=Smoke", "-c", "user.email=smoke@local", "commit", "-q", "--allow-empty", "-m", "init"]]
+        for arguments in steps {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = arguments
+            process.currentDirectoryURL = URL(fileURLWithPath: path)
+            guard (try? process.run()) != nil else { return nil }
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else { return nil }
+        }
+        return path
+    }
+
+    private static var png: Data {
+        let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 16, pixelsHigh: 12, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        )
+        bitmap?.setColor(.systemBlue, atX: 0, y: 0)
+        return bitmap?.representation(using: .png, properties: [:]) ?? Data()
     }
 
     private func composerChecks(project: String) -> String? {

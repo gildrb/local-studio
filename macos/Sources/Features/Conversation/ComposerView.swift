@@ -140,10 +140,12 @@ struct ComposerView: View {
         }
         let conversation = store.conversation
         switch next?.kind {
-        case .command?, .skill?:
+        case .command?:
             if !conversation.commandsLoaded {
                 conversation.loadCommands(project: project)
             }
+        case .skill?:
+            conversation.loadSkills(project: project)
         case .pullRequest?:
             if let project, conversation.pullsProject != project {
                 conversation.loadPullRequests(project: project)
@@ -260,9 +262,6 @@ struct ComposerView: View {
         case .compact:
             draft.text = text.replacingCharacters(in: range, with: "")
             conversation.compact()
-        case .skill(let name):
-            let rest = text.replacingCharacters(in: range, with: "").trimmingCharacters(in: .whitespaces)
-            draft.text = "/" + name + " " + rest
         case .pullRequest(let pull):
             draft.text = text.replacingCharacters(in: range, with: "#\(pull.number) ")
             conversation.attachPullRequest(pull, to: draft)

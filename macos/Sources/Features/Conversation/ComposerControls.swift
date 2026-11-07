@@ -16,8 +16,10 @@ struct ComposerControls: View {
             ComposerIconButton(title: "Attach files", symbol: "paperclip", action: attach)
             ModelPickerButton(store: store)
             ThinkingMenu(store: store)
+            ServiceTierMenu(store: store)
             AccessMenu(store: store)
             StashMenu(store: store, project: project)
+            GoalChip(store: store)
             Spacer(minLength: 8)
             if settings?.contextWindowMeter ?? true {
                 ContextMeter(store: store)
@@ -155,7 +157,12 @@ private struct ModelPickerButton: View {
     }
 
     private var title: String {
-        store.conversation.currentModel(settings: store.pages.settings)?.name ?? "Model"
+        let conversation = store.conversation
+        let fanOut = conversation.newThread.fanOutModels(available: conversation.models)
+        if conversation.thread == nil, fanOut.count >= 2 {
+            return "\(fanOut.count) models"
+        }
+        return conversation.currentModel(settings: store.pages.settings)?.name ?? "Model"
     }
 }
 
@@ -222,13 +229,12 @@ struct ModelPickerPanel: View {
                                     let firstAppearance = section.id == "favorites" || !conversation.isFavorite(model)
                                     ModelRow(
                                         model: model,
-                                        selected: current?.provider == model.provider && current?.id == model.id,
+                                        selected: multi ? options.isFanOut(model) : current?.provider == model.provider && current?.id == model.id,
                                         favorite: conversation.isFavorite(model),
                                         hidden: conversation.isHidden(model),
                                         jump: firstAppearance ? jumps.firstIndex { $0.key == model.key }.flatMap { $0 < 9 ? $0 + 1 : nil } : nil
                                     ) {
-                                        conversation.selectModel(model)
-                                        dismiss()
+                                        choose(model, current: current)
                                     } toggleFavorite: {
                                         conversation.setFavorite(model, !conversation.isFavorite(model))
                                     } toggleHidden: {
@@ -255,17 +261,59 @@ struct ModelPickerPanel: View {
                 .padding(.horizontal, 12)
                 .frame(height: 34)
             }
+            if conversation.thread == nil, configured.count > 1 {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                Toggle(isOn: Binding(get: { options.multiModel }, set: { setMulti($0, current: current) })) {
+                    Text(multi ? "Run on \(options.fanOut.count) models (⌘-click to add)" : "Run on several models")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
+                .help("Start one thread per selected model, each in its own worktree")
+            }
         }
         .frame(width: 320)
         .modifier(ModelPickerJumpCommands(store: store, models: jumps) { model in
-            conversation.selectModel(model)
-            dismiss()
+            choose(model, current: current)
         })
         .task {
             if conversation.models.isEmpty {
                 conversation.loadModels()
             }
         }
+    }
+
+    private var options: NewThreadOptions {
+        store.conversation.newThread
+    }
+
+    private var multi: Bool {
+        store.conversation.thread == nil && options.multiModel
+    }
+
+    private func setMulti(_ on: Bool, current: ModelOption?) {
+        options.multiModel = on
+        if on, options.fanOut.isEmpty, let current {
+            options.toggleFanOut(current)
+        }
+    }
+
+    private func choose(_ model: ModelOption, current: ModelOption?) {
+        let commandClick = NSApp.currentEvent?.modifierFlags.contains(.command) == true
+        if store.conversation.thread == nil, commandClick || options.multiModel {
+            if !options.multiModel {
+                setMulti(true, current: current)
+            }
+            if !(commandClick && options.fanOut.count == 1 && options.isFanOut(model)) {
+                options.toggleFanOut(model)
+            }
+            return
+        }
+        store.conversation.selectModel(model)
+        dismiss()
     }
 
     private func jumpOrder(_ sections: [ModelSection]) -> [ModelOption] {
@@ -449,6 +497,123 @@ private struct ThinkingMenu: View {
     }
 }
 
+private struct ServiceTierMenu: View {
+    let store: StudioStore
+    @State private var hovering = false
+
+    var body: some View {
+        let conversation = store.conversation
+        let settings = store.pages.settings
+        let tiers = conversation.serviceTiers(settings: settings)
+        if !tiers.isEmpty {
+            let current = conversation.serviceTier(settings: settings)
+            Menu {
+                Picker("Speed", selection: Binding(get: { current }, set: { conversation.setServiceTier($0) })) {
+                    Text("Standard").tag(String?.none)
+                    ForEach(tiers, id: \.self) { tier in
+                        Text(Self.title(tier)).tag(Optional(tier))
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                ComposerChip(title: current.map(Self.title) ?? "Standard", symbol: current == nil ? nil : "bolt", hovering: hovering)
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .onHover { hovering = $0 }
+            .help("Speed (service tier)")
+            .accessibilityLabel("Speed: \(current.map(Self.title) ?? "Standard")")
+        }
+    }
+
+    static func title(_ tier: String) -> String {
+        switch tier {
+        case "priority", "fast": "Fast"
+        case "ultrafast": "Ultrafast"
+        case "flex": "Flex"
+        default: tier.capitalized
+        }
+    }
+}
+
+private struct GoalChip: View {
+    let store: StudioStore
+    @State private var presented = false
+    @State private var hovering = false
+
+    var body: some View {
+        if let goal = store.conversation.info?.goal {
+            Button {
+                presented.toggle()
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "flag")
+                        .font(.system(size: 11.5, weight: .light))
+                        .accessibilityHidden(true)
+                    Text(goal.active ? "Goal" : goal.status.capitalized)
+                        .lineLimit(1)
+                    Text(TokenCount(goal.tokensUsed).text)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.secondaryText.opacity(0.8))
+                }
+                .font(.system(size: 12.5))
+                .foregroundStyle(hovering || presented ? Color.primary : Theme.secondaryText)
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { hovering = $0 }
+            .help(goal.objective)
+            .accessibilityLabel("Goal: \(goal.objective), \(goal.status)")
+            .popover(isPresented: $presented, arrowEdge: .bottom) {
+                GoalPopover(goal: goal)
+            }
+        }
+    }
+}
+
+private struct GoalPopover: View {
+    let goal: Goal
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Goal")
+                .font(.system(size: 13, weight: .semibold))
+            Text(goal.objective)
+                .font(.system(size: 12.5))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
+                GridRow {
+                    Text("Status").foregroundStyle(Theme.secondaryText)
+                    Text(goal.active ? "\(goal.status.capitalized) · active" : goal.status.capitalized)
+                }
+                GridRow {
+                    Text("Tokens").foregroundStyle(Theme.secondaryText)
+                    Text(goal.tokenBudget.map { "\(TokenCount(goal.tokensUsed).text) of \(TokenCount($0).text)" } ?? TokenCount(goal.tokensUsed).text)
+                        .monospacedDigit()
+                }
+                GridRow {
+                    Text("Time").foregroundStyle(Theme.secondaryText)
+                    Text(WorkDuration(milliseconds: goal.timeUsedSeconds * 1_000).text)
+                        .monospacedDigit()
+                }
+            }
+            .font(.system(size: 12))
+            if let budget = goal.tokenBudget, budget > 0 {
+                ProgressView(value: min(Double(goal.tokensUsed) / Double(budget), 1))
+                    .tint(Theme.primary)
+            }
+        }
+        .padding(16)
+        .frame(width: 280)
+    }
+}
+
 private struct AccessMenu: View {
     let store: StudioStore
     @State private var hovering = false
@@ -585,7 +750,12 @@ struct ThreadContextStrip: View {
         } else if let project = store.inbox.project(store.inbox.currentProject), project.isGit {
             let options = conversation.newThread
             strip {
-                if let branch = options.existingBranch, options.existingWorktree != nil {
+                if options.fanOutModels(available: conversation.models).count >= 2 {
+                    Label("One new worktree per model", systemImage: "arrow.triangle.branch")
+                        .padding(.horizontal, 8)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Workspace: one new worktree per model")
+                } else if let branch = options.existingBranch, options.existingWorktree != nil {
                     Label("Worktree · \(branch)", systemImage: "lock")
                         .padding(.horizontal, 8)
                         .help(options.existingWorktree ?? "")
