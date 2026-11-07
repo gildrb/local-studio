@@ -31,7 +31,8 @@ def make-icon [source: path, target: path] {
 def build-kit [repo: path, package: path, profile: string] {
     let cargo_profile = if $profile == "release" { ["--release"] } else { [] }
     ^cargo build --manifest-path ($repo | path join "Cargo.toml") -p local-studio-kit ...$cargo_profile
-    let target = ($repo | path join "target" $profile)
+    let target_root = if ($env.CARGO_TARGET_DIR? | is-not-empty) { $env.CARGO_TARGET_DIR | path expand } else { $repo | path join "target" }
+    let target = ($target_root | path join $profile)
     let generated = ($package | path join "Generated")
     let bindings = (mktemp -d)
     ^cargo run --quiet --manifest-path ($repo | path join "Cargo.toml") -p local-studio-kit --bin uniffi-bindgen ...$cargo_profile -- generate --library ($target | path join "liblocal_studio_kit.dylib") --language swift --out-dir $bindings
@@ -52,6 +53,20 @@ def find-daemon [repo: path]: nothing -> any {
     [($eukhe | path join "release" "eukhe-daemon") ($eukhe | path join "debug" "eukhe-daemon")]
     | where { |candidate| $candidate | path exists }
     | get 0?
+}
+
+def bundle-controller [repo: path, target: path] {
+    let source = ($repo | path join "controller")
+    if not ($source | path join "src" "main.ts" | path exists) {
+        print -e "warning: no controller sources found; the app will only use a running Local controller"
+        return
+    }
+    mkdir $target
+    cp -r ($source | path join "src") $target
+    for file in ["package.json" "bun.lock" "tsconfig.json"] {
+        let path = ($source | path join $file)
+        if ($path | path exists) { cp $path $target }
+    }
 }
 
 def main [
@@ -86,6 +101,7 @@ def main [
         cp ($products | path join "LocalStudio") $executable
         cp ($package | path join "LocalStudio-Info.plist") ($contents | path join "Info.plist")
         make-icon ($repo | path join $icon_source) ($contents | path join "Resources" "AppIcon.icns")
+        bundle-controller $repo ($contents | path join "Resources" "controller")
         let daemon = (find-daemon $repo)
         if $daemon == null {
             print -e "warning: no eukhe-daemon found (set EUKHE_DAEMON); the app will only attach to a running daemon"
@@ -99,7 +115,8 @@ def main [
             "build" => { print $app }
             "run" => { ^$executable }
             "smoke" => { ^$executable "+smoke" }
-            _ => { error make { msg: $"unknown action ($action); expected build, run, or smoke" } }
+            "smoke-shell" => { ^$executable "+smoke-shell" }
+            _ => { error make { msg: $"unknown action ($action); expected build, run, smoke, or smoke-shell" } }
         }
     }
 }

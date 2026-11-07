@@ -12,7 +12,10 @@ struct LocalStudioApp: App {
         .windowToolbarStyle(.unified(showsTitle: false))
         .defaultSize(width: 1280, height: 820)
         .commands {
-            StudioCommands(store: appDelegate.store)
+            StudioCommands(store: appDelegate.store, refresh: appDelegate.commandRefresh)
+        }
+        Settings {
+            SettingsSeam(store: appDelegate.store)
         }
     }
 }

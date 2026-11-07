@@ -79,7 +79,7 @@ private struct ProjectMenu: View {
         let inbox = store.inbox
         let current = inbox.project(inbox.currentProject)
         Menu {
-            Picker("Project", selection: Binding(get: { inbox.currentProject }, set: { inbox.currentProject = $0 })) {
+            Picker("Project", selection: Binding(get: { inbox.currentProject }, set: { inbox.selectProject($0) })) {
                 ForEach(inbox.projects, id: \.id) { project in
                     Label(project.name, systemImage: "folder").tag(Optional(project.id))
                 }

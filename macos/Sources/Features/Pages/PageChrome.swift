@@ -27,7 +27,7 @@ struct PageHeader<Trailing: View>: View {
             trailing
         }
         .padding(.leading, 16 + leadingInset)
-        .padding(.trailing, 12)
+        .padding(.trailing, Theme.Metrics.trailingChromeInset)
         .frame(height: Theme.Metrics.titlebarHeight)
         .background {
             Theme.canvas
