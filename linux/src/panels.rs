@@ -82,7 +82,7 @@ impl Panel {
         let buffer = diff.buffer();
         let table = buffer.tag_table();
         for (name, foreground, background, weight) in [
-            ("file", Some("#ececec"), Some("rgba(255,255,255,0.05)"), 700),
+            ("file", None, Some("rgba(128,128,128,0.10)"), 700),
             ("hunk", Some("#8b949e"), Some("rgba(56,189,248,0.06)"), 400),
             ("add", Some("#3fb950"), Some("rgba(63,185,80,0.10)"), 400),
             ("del", Some("#f85149"), Some("rgba(248,81,73,0.10)"), 400),

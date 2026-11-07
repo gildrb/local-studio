@@ -219,6 +219,22 @@ pub fn thread_menu(state: &State, id: &str) -> gio::Menu {
     menu
 }
 
+pub fn draft_menu(state: &State) -> gio::Menu {
+    let menu = gio::Menu::new();
+    let projects = gio::Menu::new();
+    for project in &state.projects {
+        let item = gio::MenuItem::new(Some(&project.name), None);
+        item.set_action_and_target_value(Some("win.project-new-thread"), Some(&project.id.to_variant()));
+        projects.append_item(&item);
+    }
+    menu.append_section(Some("Start in"), &projects);
+    let other = gio::Menu::new();
+    other.append(Some("No Project"), Some("win.new-thread-without-project"));
+    other.append(Some("Add Project…"), Some("win.add-project"));
+    menu.append_section(None, &other);
+    menu
+}
+
 pub fn popup_menu(parent: &impl IsA<gtk::Widget>, model: &gio::Menu, x: f64, y: f64) {
     let popover = gtk::PopoverMenu::from_model(Some(model));
     popover.set_parent(parent);

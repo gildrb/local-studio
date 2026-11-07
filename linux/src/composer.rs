@@ -25,7 +25,7 @@ pub struct Composer {
     placeholder: gtk::Label,
     model: gtk::DropDown,
     models: gtk::StringList,
-    model_keys: RefCell<Vec<ModelKey>>,
+    model_keys: RefCell<Vec<Option<ModelKey>>>,
     thinking: gtk::DropDown,
     levels: gtk::StringList,
     level_names: RefCell<Vec<String>>,
@@ -223,8 +223,12 @@ impl Composer {
             };
             let thread = app.state.borrow().selected.clone();
             match thread {
-                Some(thread) => app.core.run(|studio| studio.set_model(thread, key.provider, key.model)),
-                None => app.state.borrow_mut().draft_settings.model = Some(key),
+                Some(thread) => {
+                    if let Some(key) = key {
+                        app.core.run(|studio| studio.set_model(thread, key.provider, key.model));
+                    }
+                }
+                None => app.state.borrow_mut().draft_settings.model = key,
             }
             app.render(Dirty { composer: true, ..Dirty::default() });
         });
@@ -392,24 +396,28 @@ impl Composer {
             PLACEHOLDER
         });
 
-        let mut keys: Vec<ModelKey> = Vec::new();
+        let mut keys: Vec<Option<ModelKey>> = Vec::new();
         let mut names: Vec<String> = Vec::new();
+        if state.selected.is_none() && !state.models.is_empty() {
+            keys.push(None);
+            names.push("Default model".to_string());
+        }
         let mut models: Vec<_> = state.models.iter().collect();
         models.sort_by_key(|model| {
             let favorite = state.favorites.iter().any(|key| key.provider == model.provider && key.model == model.id);
             (!favorite, !model.configured, model.provider.clone(), model.name.clone())
         });
         for model in models {
-            keys.push(ModelKey { provider: model.provider.clone(), model: model.id.clone() });
+            keys.push(Some(ModelKey { provider: model.provider.clone(), model: model.id.clone() }));
             names.push(if model.name.is_empty() { model.id.clone() } else { model.name.clone() });
         }
         let active = state.active_model();
-        if let Some(active) = active.as_ref().filter(|active| !keys.contains(active)) {
+        if let Some(active) = active.as_ref().filter(|active| !keys.iter().flatten().any(|key| key == *active)) {
             let name = info
                 .and_then(|info| info.model.as_ref())
                 .and_then(|model| model.name.clone())
                 .unwrap_or_else(|| active.model.clone());
-            keys.push(active.clone());
+            keys.push(Some(active.clone()));
             names.push(name);
         }
         if *self.model_keys.borrow() != keys {
@@ -417,8 +425,11 @@ impl Composer {
             self.models.splice(0, self.models.n_items(), &refs);
             self.model_keys.replace(keys);
         }
-        let selected = active
-            .and_then(|active| self.model_keys.borrow().iter().position(|key| *key == active))
+        let selected = self
+            .model_keys
+            .borrow()
+            .iter()
+            .position(|key| *key == active)
             .and_then(|index| u32::try_from(index).ok())
             .unwrap_or(gtk::INVALID_LIST_POSITION);
         self.model.set_selected(selected);

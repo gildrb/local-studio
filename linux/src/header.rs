@@ -117,7 +117,11 @@ impl Header {
             None => "New thread".to_string(),
         };
         self.title.set_label(&title);
-        let menu = state.selected.as_deref().map(|thread| actions::thread_menu(state, thread));
+        let menu = match state.selected.as_deref() {
+            Some(thread) => Some(actions::thread_menu(state, thread)),
+            None if !state.projects.is_empty() => Some(actions::draft_menu(state)),
+            None => None,
+        };
         self.chevron.set_visible(menu.is_some());
         self.crumb.set_menu_model(menu.as_ref());
         let status = state

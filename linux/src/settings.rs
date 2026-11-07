@@ -137,17 +137,12 @@ impl SettingsDialog {
         for group in self.inner.keys.take() {
             self.inner.keys_page.remove(&group);
         }
-        let mut groups: Vec<(String, adw::PreferencesGroup)> = Vec::new();
+        let group = adw::PreferencesGroup::builder()
+            .title("Keyboard shortcuts")
+            .description("Shortcuts use Ctrl where the macOS app uses ⌘.")
+            .build();
         for binding in &state.keybindings {
-            let (area, action) = binding.title.split_once(": ").unwrap_or(("General", binding.title.as_str()));
-            let group = if let Some((_, group)) = groups.iter().find(|(name, _)| name == area) {
-                group.clone()
-            } else {
-                let group = adw::PreferencesGroup::builder().title(format::escape(area)).build();
-                groups.push((area.to_string(), group.clone()));
-                group
-            };
-            let row = adw::ActionRow::builder().title(format::escape(action)).build();
+            let row = adw::ActionRow::builder().title(format::escape(&binding.title)).build();
             if let Some(when) = &binding.when {
                 row.set_subtitle(&format::escape(when));
             }
@@ -181,17 +176,11 @@ impl SettingsDialog {
             row.add_suffix(&button);
             group.add(&row);
         }
-        let mut stored = Vec::new();
-        for (_, group) in groups {
-            self.inner.keys_page.add(&group);
-            stored.push(group);
-        }
-        if stored.is_empty() {
-            let group = adw::PreferencesGroup::new();
+        if state.keybindings.is_empty() {
             group.add(&adw::ActionRow::builder().title("Keybindings load with the core").build());
-            self.inner.keys_page.add(&group);
-            stored.push(group);
         }
+        self.inner.keys_page.add(&group);
+        let stored = vec![group];
         self.inner.keys.replace(stored);
     }
 
