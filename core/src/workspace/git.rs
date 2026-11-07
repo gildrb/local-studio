@@ -451,11 +451,11 @@ pub(crate) async fn push(project: &Path) -> Result<String, String> {
     Ok(format!("Pushed {branch} to {remote}/{branch}"))
 }
 
-const PR_FIELDS: &str = "number,title,url,state,headRefName,baseRefName,statusCheckRollup";
+pub(crate) const PR_FIELDS: &str = "number,title,url,state,headRefName,baseRefName,statusCheckRollup";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GhPull {
+pub(crate) struct GhPull {
     number: u64,
     #[serde(default)]
     title: String,
@@ -472,7 +472,7 @@ struct GhPull {
 }
 
 impl GhPull {
-    fn into_pull(self) -> PullRequest {
+    pub(crate) fn into_pull(self) -> PullRequest {
         let checks = checks(&self.status_check_rollup);
         PullRequest {
             number: self.number,
@@ -571,4 +571,59 @@ pub(crate) async fn fetch(project: &Path, auto_pull: bool) -> bool {
         }
     }
     true
+}
+
+pub(crate) async fn pull(project: &Path) -> Result<String, String> {
+    let before = status(project).await?;
+    if !before.is_repo {
+        return Err("This project is not a git repository.".to_string());
+    }
+    let branch = before.branch.ok_or("HEAD is detached; check out a branch to pull.")?;
+    let upstream = before.upstream.ok_or_else(|| format!("{branch} has no upstream branch; push it first."))?;
+    git(project, &["fetch", "--quiet"], NETWORK).await?;
+    let after = status(project).await?;
+    if after.behind == 0 {
+        return Ok(format!("{branch} is already up to date with {upstream}."));
+    }
+    if after.ahead > 0 {
+        return Err(format!(
+            "{branch} has diverged from {upstream}: {} local and {} remote commits. Rebase or merge it manually.",
+            after.ahead, after.behind
+        ));
+    }
+    git(project, &["merge", "--ff-only", "--quiet", "@{upstream}"], SLOW).await?;
+    let plural = if after.behind == 1 { "" } else { "s" };
+    Ok(format!("Fast-forwarded {branch} by {} commit{plural} from {upstream}.", after.behind))
+}
+
+pub(crate) async fn publish_repository(project: &Path, name: &str, private: bool) -> Result<String, String> {
+    let name = name.trim();
+    let valid = !name.is_empty()
+        && !name.starts_with(['-', '.', '/'])
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | '/'));
+    if !valid {
+        return Err(format!("`{name}` is not a valid repository name."));
+    }
+    if !is_repo(project).await {
+        return Err("This project is not a git repository.".to_string());
+    }
+    if !has_head(project).await {
+        return Err("Commit something before publishing the repository.".to_string());
+    }
+    let remotes = git(project, &["remote"], QUICK).await?;
+    if remotes.lines().any(|remote| remote.trim() == "origin") {
+        return Err("This repository already has an `origin` remote.".to_string());
+    }
+    let visibility = if private { "--private" } else { "--public" };
+    let out = run_ok(
+        "gh",
+        ["repo", "create", name, visibility, "--source", ".", "--remote", "origin", "--push"],
+        project,
+        NETWORK,
+    )
+    .await?;
+    let url = out.lines().map(str::trim).rfind(|line| line.starts_with("http")).unwrap_or(name).to_string();
+    Ok(format!("Published {url}"))
 }

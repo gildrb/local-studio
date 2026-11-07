@@ -1,11 +1,17 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use eukhe_client::saved_sessions::strip_signal_reply_rules;
 use serde_json::Value;
 
-use crate::model::{Project, Shelf, ThreadRow, ThreadStatus};
+use crate::model::{Project, Shelf, ThreadRow, ThreadSearchHit, ThreadStatus};
 use crate::session::model_ref;
 use crate::store::{StoredProject, ThreadFlags};
+
+const SEARCH_QUERY_LIMIT: usize = 256;
+const SEARCH_TEXT_CAP: usize = 4 * 1024 * 1024;
+const SNIPPET_BEFORE: usize = 40;
+const SNIPPET_AFTER: usize = 100;
 
 const DAY_MS: i64 = 86_400_000;
 const TITLE_LIMIT: usize = 120;
@@ -19,6 +25,59 @@ pub(crate) struct SavedRow {
     pub(crate) modified: i64,
     pub(crate) provider: Option<String>,
     pub(crate) model: Option<String>,
+    pub(crate) text: Arc<str>,
+}
+
+pub(crate) struct SearchDoc {
+    pub(crate) thread: String,
+    pub(crate) title: String,
+    pub(crate) project: Option<String>,
+    pub(crate) text: Arc<str>,
+}
+
+pub(crate) fn search(docs: &[SearchDoc], query: &str, limit: usize) -> Vec<ThreadSearchHit> {
+    let needle: String = query.trim().chars().take(SEARCH_QUERY_LIMIT).collect::<String>().to_ascii_lowercase();
+    if needle.is_empty() || limit == 0 {
+        return Vec::new();
+    }
+    let mut titled = Vec::new();
+    let mut texted = Vec::new();
+    for doc in docs {
+        let text = &doc.text[..doc.text.floor_char_boundary(SEARCH_TEXT_CAP)];
+        let hit = |snippet: String| ThreadSearchHit {
+            thread: doc.thread.clone(),
+            title: doc.title.clone(),
+            snippet,
+            project: doc.project.clone(),
+        };
+        let in_text = text.to_ascii_lowercase().find(&needle);
+        if doc.title.to_ascii_lowercase().contains(&needle) {
+            titled.push(hit(in_text.map_or_else(|| snippet(text, 0, 0), |at| snippet(text, at, needle.len()))));
+        } else if let Some(at) = in_text {
+            texted.push(hit(snippet(text, at, needle.len())));
+        }
+        if titled.len() >= limit {
+            break;
+        }
+    }
+    titled.extend(texted);
+    titled.truncate(limit);
+    titled
+}
+
+fn snippet(text: &str, at: usize, length: usize) -> String {
+    let start = text.floor_char_boundary(at.saturating_sub(SNIPPET_BEFORE));
+    let end = text.floor_char_boundary(at.saturating_add(length).saturating_add(SNIPPET_AFTER));
+    let body = text.get(start..end).unwrap_or_default().split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.push_str(&body);
+    if end < text.len() {
+        out.push('…');
+    }
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -88,6 +147,7 @@ pub(crate) fn saved_rows(data: &Value) -> Vec<SavedRow> {
                 modified: text("modified").and_then(parse_rfc3339).unwrap_or(0),
                 provider: model.as_ref().map(|model| model.provider.clone()).filter(|value| !value.is_empty()),
                 model: model.map(|model| model.id),
+                text: Arc::from(text("allMessagesText").unwrap_or_default()),
             })
         })
         .collect()
@@ -207,12 +267,13 @@ pub(crate) fn row(
     let auto_settled_at = (prefs.auto_settle_inactive
         && !facts.working
         && status == ThreadStatus::Idle
+        && !flags.auto_settle_disabled
         && flags.unsettled_at.is_none_or(|at| at < facts.activity_at))
     .then(|| facts.activity_at.saturating_add(i64::from(prefs.auto_settle_inactive_days).saturating_mul(DAY_MS)))
     .filter(|at| *at <= now);
     let settled_at = flags.settled_at.or(auto_settled_at);
-    let (shelf, updated_at, key) = if let Some(pinned_at) = flags.pinned_at {
-        (Shelf::Pinned, facts.activity_at, -pinned_at)
+    let (shelf, updated_at, key) = if let Some(order) = flags.pin_order {
+        (Shelf::Pinned, facts.activity_at, -order)
     } else if let Some(until) = snoozed {
         (Shelf::Snoozed, facts.activity_at, -until)
     } else if let Some(settled_at) = settled_at.filter(|_| status != ThreadStatus::Working) {
@@ -233,7 +294,7 @@ pub(crate) fn row(
             status_since,
             updated_at,
             snoozed_until: snoozed,
-            pinned: flags.pinned_at.is_some(),
+            pinned: flags.pin_order.is_some(),
             unread: flags.unread,
             branch: head.branch,
             worktree: head.worktree,
@@ -243,6 +304,7 @@ pub(crate) fn row(
             deletions: flags.deletions,
             note: facts.note,
             archived: flags.archived,
+            auto_settle: !flags.auto_settle_disabled,
         },
         key,
     )

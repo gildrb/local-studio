@@ -12,8 +12,8 @@ mod workspace;
 pub use model::{
     AccessMode, Approval, ApprovalAnswer, Block, Connection, ContextUsage, Delivery, FileChange, ImageAttachment, Item,
     ItemKind, ModelKey, ModelOption, ModelRef, NoticeLevel, NotificationKind, Project, PromptDraft, QueuedMessage,
-    Shelf, SlashCommand, ThreadInfo, ThreadRow, ThreadSettings, ThreadStatus, ToolKind, ToolState, TranscriptOp,
-    Update, WorktreeChoice,
+    Shelf, SlashCommand, ThreadInfo, ThreadRow, ThreadSearchHit, ThreadSettings, ThreadStatus, ToolKind, ToolState,
+    TranscriptOp, Update, WorktreeChoice,
 };
 pub use studio::{DaemonLaunch, Studio, StudioConfig, StudioError, Waker};
 pub use workspace::model::*;
