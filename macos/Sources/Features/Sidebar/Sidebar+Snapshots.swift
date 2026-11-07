@@ -68,6 +68,15 @@ extension SnapshotCatalog {
             SnapshotEntry(name: "shell-project-settings-empty", size: CGSize(width: 640, height: 300), updates: [.connection(state: .ready), .projects(projects: [])]) { store in
                 AnyView(ProjectSettingsPane(store: store))
             },
+            SnapshotEntry(name: "shell-project-settings-overrides", size: CGSize(width: 680, height: 1180), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + ShellFixtures.projectConfig) { store in
+                AnyView(ProjectSettingsPane(store: store))
+            },
+            SnapshotEntry(name: "shell-script-editor", size: CGSize(width: 480, height: 420), updates: ShellFixtures.updates) { _ in
+                AnyView(ScriptEditorSheet(draft: ScriptDraft(ShellFixtures.scripts[0])) { _ in }.background(Theme.overlay))
+            },
+            SnapshotEntry(name: "shell-clone-sheet", size: CGSize(width: 480, height: 270), updates: ShellFixtures.updates) { store in
+                AnyView(CloneRepositorySheet(store: store).background(Theme.overlay))
+            },
             SnapshotEntry(name: "shell-sidebar-filtered", size: CGSize(width: 288, height: 560), focus: "t-active-1", updates: ShellFixtures.updates) { store in
                 store.inbox.projectFilter = "/Users/demo/eukhe"
                 return AnyView(SidebarView(store: store))
@@ -129,7 +138,7 @@ enum ShellFixtures {
     private static func row(
         _ id: String, _ project: Int?, _ title: String, shelf: Shelf, status: ThreadStatus = .idle, minutes: Double,
         pinned: Bool = false, unread: Bool = false, branch: String? = nil, provider: String? = nil, model: String? = nil,
-        diff: (UInt32, UInt32) = (0, 0), snoozeHours: Double? = nil
+        diff: (UInt32, UInt32) = (0, 0), snoozeHours: Double? = nil, fanOut: String? = nil, pull: PullRequest? = nil
     ) -> ThreadRow {
         ThreadRow(
             id: id, project: project.map { projects[$0].id }, title: title, shelf: shelf, status: status,
@@ -137,15 +146,19 @@ enum ShellFixtures {
             snoozedUntil: snoozeHours.map { Int64((Date.now.timeIntervalSince1970 + $0 * 3_600) * 1_000) },
             pinned: pinned, unread: unread, branch: branch, worktree: nil, provider: provider, model: model,
             additions: diff.0, deletions: diff.1, note: nil, archived: false, autoSettle: true,
-            liveAgents: 0, fanOut: nil, pullRequest: nil
+            liveAgents: 0, fanOut: fanOut, pullRequest: pull
         )
     }
 
     static let threads: [ThreadRow] = [
-        row("t-pinned", 0, "Native shell parity plan", shelf: .pinned, minutes: 180, pinned: true, branch: "core/eukhe", provider: "anthropic", model: "claude-opus"),
+        row("t-pinned", 0, "Native shell parity plan", shelf: .pinned, minutes: 180, pinned: true, branch: "core/eukhe", provider: "anthropic", model: "claude-opus",
+            pull: PullRequest(number: 412, title: "Native shell", url: "https://github.com/demo/local-studio/pull/412", state: "OPEN", checks: "passing", head: "core/eukhe", base: "main")),
         row("t-active-1", 0, "Sidebar inbox with shelves and snooze", shelf: .active, status: .working, minutes: 3, branch: "swift/s1", provider: "openai-codex", model: "gpt-5", diff: (248, 37)),
-        row("t-active-2", 1, "Approve the daemon socket migration", shelf: .active, status: .approval, minutes: 12, branch: "feat/socket-path", provider: "anthropic", model: "claude-sonnet"),
-        row("t-active-3", 0, "Fix flaky terminal resize test", shelf: .active, status: .failed, minutes: 26, branch: "fix/pty-resize", diff: (12, 4)),
+        row("t-active-2", 1, "Approve the daemon socket migration", shelf: .active, status: .approval, minutes: 12, branch: "feat/socket-path", provider: "anthropic", model: "claude-sonnet",
+            pull: PullRequest(number: 88, title: "Socket path", url: "https://github.com/demo/eukhe/pull/88", state: "MERGED", checks: "passing", head: "feat/socket-path", base: "main")),
+        row("t-active-3", 0, "Fix flaky terminal resize test", shelf: .active, status: .failed, minutes: 26, branch: "fix/pty-resize", provider: "anthropic", diff: (12, 4), fanOut: "fan-1"),
+        row("t-active-7", 0, "Fix flaky terminal resize test", shelf: .active, status: .done, minutes: 27, branch: "fix/pty-resize-2", provider: "openai-codex", diff: (9, 2), fanOut: "fan-1"),
+        row("t-active-8", 2, "Watch the nightly deploy", shelf: .active, status: .monitoring, minutes: 55, provider: "anthropic"),
         row("t-active-4", 2, "Usage chart colours match dashboards", shelf: .active, status: .done, minutes: 41, unread: true, provider: "google"),
         row("t-active-5", 1, "Woke: review retry backoff", shelf: .active, status: .woke, minutes: 70),
         row("t-active-6", nil, "Summarize the release notes", shelf: .active, minutes: 300),
@@ -219,5 +232,28 @@ enum ShellFixtures {
 
     static let unconfiguredProviders = providers.map {
         ProviderStatus(id: $0.id, name: $0.name, configured: false, modelCount: $0.modelCount, auth: "missing")
+    }
+
+    static let scripts = [
+        ProjectScript(id: "dev", name: "Dev server", command: "bun run dev", icon: "globe", keybinding: "cmd+shift+r", runOnWorktreeSetup: false, waitForSetup: false),
+        ProjectScript(id: "install", name: "Install", command: "bun install", icon: "shippingbox", keybinding: nil, runOnWorktreeSetup: true, waitForSetup: true),
+        ProjectScript(id: "test", name: "Tests", command: "cargo test --workspace", icon: nil, keybinding: "cmd+shift+t", runOnWorktreeSetup: false, waitForSetup: false),
+    ]
+
+    static let models = [
+        ModelOption(provider: "anthropic", id: "claude-opus", name: "Claude Opus", reasoning: true, thinkingLevels: ["low", "medium", "high"], contextWindow: 200_000, configured: true, serviceTiers: []),
+        ModelOption(provider: "openai-codex", id: "gpt-5", name: "GPT-5", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high"], contextWindow: 400_000, configured: true, serviceTiers: []),
+    ]
+
+    static var projectConfig: [Update] {
+        [
+            .models(models: models, favorites: [], hidden: []),
+            .projectScripts(project: projects[0].id, scripts: scripts),
+            .projectSettings(
+                project: projects[0].id,
+                settings: ProjectSettings(defaultProvider: "openai-codex", defaultModel: "gpt-5", defaultThinkingLevel: nil, defaultAccess: .autoAcceptEdits, newThreadWorkspace: nil, newWorktreesStartFromOrigin: nil),
+                effective: PagesFixtures.settings
+            ),
+        ]
     }
 }

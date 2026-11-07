@@ -59,6 +59,7 @@ struct StudioCommands: Commands {
                 .disabled(store.inbox.projects.isEmpty)
             Divider()
             Button("Add Project…") { store.addProjectInteractively() }
+            Button("Clone Repository…") { store.shell.cloneShown = true }
             CommandButton(store: store, title: "Open in Editor", command: "editor.openFavorite")
             CommandButton(store: store, title: "Close Panel Tab", command: "rightPanel.close")
             Menu("Terminal") {
@@ -186,6 +187,8 @@ struct StudioCommands: Commands {
         Button("Rename…") { store.shell.headerRenaming = true }
             .disabled(row == nil)
         Button("Regenerate Title") { if let id { store.inbox.regenerateTitles([id]) } }
+            .disabled(row == nil)
+        Button("Restart Agent Session") { if let id { store.inbox.restart(id) } }
             .disabled(row == nil)
         Button(row?.unread == true ? "Mark as Read" : "Mark as Unread") { if let row { store.inbox.markUnread([row.id], !row.unread) } }
             .disabled(row == nil)

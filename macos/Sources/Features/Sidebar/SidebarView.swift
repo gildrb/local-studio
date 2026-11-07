@@ -31,7 +31,7 @@ struct SidebarView: View {
                 handleSearchKey(key)
             }
             ProjectFilterButton(store: store)
-            ChromeIconButton("Add Project", symbol: "folder") { store.addProjectInteractively() }
+            AddProjectMenu(store: store)
         }
         .padding(.horizontal, Theme.Metrics.sidebarInset)
         .padding(.bottom, 6)
@@ -418,5 +418,32 @@ private struct SidebarFooter: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
+    }
+}
+
+private struct AddProjectMenu: View {
+    let store: StudioStore
+    @State private var hovering = false
+
+    var body: some View {
+        Menu {
+            Button("Open Folder…") { store.addProjectInteractively() }
+            Button("Clone Repository…") { store.shell.cloneShown = true }
+        } label: {
+            Image(systemName: "folder")
+                .font(.system(size: 15, weight: .light))
+                .foregroundStyle(Theme.chromeIcon)
+                .accessibilityHidden(true)
+        } primaryAction: {
+            store.addProjectInteractively()
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
+        .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .onHover { hovering = $0 }
+        .help("Add Project (hold for Clone Repository…)")
+        .accessibilityLabel("Add Project")
     }
 }

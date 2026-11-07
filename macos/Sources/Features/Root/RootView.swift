@@ -76,6 +76,9 @@ struct RootView: View {
             OnboardingView(store: store)
                 .interactiveDismissDisabled()
         }
+        .sheet(isPresented: Bindable(shell).cloneShown) {
+            CloneRepositorySheet(store: store)
+        }
         .onChange(of: store.conversation.thread, initial: true) { _, thread in
             store.panels.focus(thread)
             shell.headerRenaming = false

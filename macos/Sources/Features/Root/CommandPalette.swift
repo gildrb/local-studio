@@ -221,6 +221,10 @@ struct CommandPalette: View {
                 store.shell.palette = nil
                 store.addProjectInteractively()
             },
+            PaletteItem(id: "clone", group: group, title: "Clone Repository…", icon: .symbol("arrow.down.circle")) {
+                store.shell.palette = nil
+                store.shell.cloneShown = true
+            },
             PaletteItem(id: "file", group: group, title: "Go to File…", icon: .symbol("doc"), shortcut: store.shortcutText("filePicker.toggle")) { go(.goToFile) },
             PaletteItem(id: "search", group: group, title: "Search Project…", icon: .symbol("magnifyingglass"), shortcut: store.shortcutText("projectSearch.toggle")) { go(.searchProject) },
             PaletteItem(id: "settings", group: group, title: "Open Settings", icon: .symbol("slider.horizontal.3"), shortcut: "⌘,") {
@@ -262,6 +266,10 @@ struct CommandPalette: View {
                 PaletteItem(id: "regenerate", group: group, title: "Regenerate Thread Title", icon: .symbol("sparkles")) {
                     store.shell.palette = nil
                     store.inbox.regenerateTitles([row.id])
+                },
+                PaletteItem(id: "restart", group: group, title: "Restart Agent Session", icon: .symbol("arrow.clockwise")) {
+                    store.shell.palette = nil
+                    store.inbox.restart(row.id)
                 },
                 PaletteItem(id: "copy-ref", group: group, title: "Copy Thread Reference", icon: .symbol("doc.on.doc"), shortcut: store.shortcutText("thread.copyReference")) {
                     store.shell.palette = nil

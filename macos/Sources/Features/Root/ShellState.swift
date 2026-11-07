@@ -37,6 +37,7 @@ final class ShellState {
     var publishProject: String?
     var onboardingDismissed = false
     var onboardingActive = false
+    var cloneShown = false
     var settingsRequest: SettingsPane?
     var settingsProject: String?
 
