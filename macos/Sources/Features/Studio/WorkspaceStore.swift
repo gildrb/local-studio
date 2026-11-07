@@ -263,6 +263,25 @@ final class PanelState {
         self.inbox = inbox
         self.pages = pages
         observeProactive()
+        registerCommands(inbox.commands)
+    }
+
+    private func registerCommands(_ commands: CommandRouter) {
+        commands.register("preview.toggle", owner: self) { [weak self] in self?.togglePreview() }
+        let browser: @MainActor () -> Bool = { [weak self] in self?.activeBrowser != nil }
+        commands.register("preview.refresh", owner: self, enabled: browser) { [weak self] in self?.refreshPreview() }
+        commands.register("preview.focusUrl", owner: self, enabled: browser) { [weak self] in self?.focusPreviewAddress() }
+        commands.register("preview.zoomIn", owner: self, enabled: browser) { [weak self] in self?.zoomPreview(by: 0.1) }
+        commands.register("preview.zoomOut", owner: self, enabled: browser) { [weak self] in self?.zoomPreview(by: -0.1) }
+        commands.register("preview.resetZoom", owner: self, enabled: browser) { [weak self] in self?.resetPreviewZoom() }
+    }
+
+    var commands: CommandRouter? {
+        inbox?.commands
+    }
+
+    func addToChat(_ text: String, source: String) {
+        conversation?.attachContext(text: text, source: source)
     }
 
     var project: String? {

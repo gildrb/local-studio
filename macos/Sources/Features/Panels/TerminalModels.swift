@@ -37,6 +37,7 @@ final class TerminalSession: Identifiable {
     private(set) var status = TerminalStatus.starting
 
     @ObservationIgnored var request: String?
+    @ObservationIgnored var selection: (() -> String?)?
     @ObservationIgnored private(set) var buffer = Data()
     @ObservationIgnored private(set) var columns: UInt16 = 100
     @ObservationIgnored private(set) var rows: UInt16 = 24
@@ -76,6 +77,13 @@ final class TerminalSession: Identifiable {
             kept.removeFirst()
         }
         return kept.joined(separator: "\n")
+    }
+
+    var chatContext: String {
+        if let selected = selection?(), !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return selected
+        }
+        return recentOutput()
     }
 
     var text: String {
