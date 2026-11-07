@@ -12,7 +12,7 @@ enum PagesFixtures {
             notifications: .notificationsAndSound, inAppNotifications: false, timeFormat: .locale,
             responseStreaming: .paragraph, hideWhitespace: true, diffFilesCollapsed: true, diffLayout: .stacked,
             proactivePanels: false, showSkillsInSlashMenu: true, richTextComposer: true, collapseComposerOnScroll: true,
-            sendShortcut: .enter, followUpBehavior: .queue, continueThreadsAfterRestart: false,
+            sendShortcut: .enter, vimMode: false, followUpBehavior: .queue, continueThreadsAfterRestart: false,
             addProjectBaseDirectory: "/Users/gil/Repos", confirmUnpin: false, confirmArchive: false, confirmDelete: true,
             quitConfirmation: .hold, textGenerationProvider: nil, textGenerationModel: nil, contextWindowMeter: false,
             colorScheme: .dark, theme: nil, contrast: 100, diffColors: .redGreen, chatWidth: .normal,
