@@ -99,6 +99,7 @@ struct RootView: View {
                             TerminalDrawerSeam(store: store)
                         }
                     }
+                    .overlay { PreviewMiniPlayerView(store: store) }
                     .frame(maxWidth: .infinity)
                 }
                 if panels.rightPanelOpen {
