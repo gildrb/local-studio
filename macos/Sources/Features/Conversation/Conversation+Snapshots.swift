@@ -392,6 +392,21 @@ extension SnapshotCatalog {
                 view: thread
             ),
             SnapshotEntry(
+                name: "conversation-vim-indicator",
+                size: CGSize(width: 980, height: 640),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .settings(settings: fixtures.settings { $0.vimMode = true }),
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: fixtures.settled)),
+                ],
+                view: { store in
+                    store.conversation.composer(project: nil).text = "Round the send button and keep it 28pt"
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
                 name: "conversation-timeline-focus",
                 size: CGSize(width: 980, height: 640),
                 focus: "t1",

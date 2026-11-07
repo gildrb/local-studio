@@ -9,6 +9,7 @@ struct ComposerView: View {
     @State private var highlighted = 0
     @State private var recall: PromptRecall?
     @State private var hovering = false
+    @State private var editMode = VimMode.insert
 
     var body: some View {
         let conversation = store.conversation
@@ -35,11 +36,13 @@ struct ComposerView: View {
                 fontSize: promptSize,
                 focusToken: conversation.focusRequest,
                 markdownShortcuts: store.pages.settings?.richTextComposer ?? true,
+                vimMode: vimEnabled,
                 height: $height,
                 onCaret: { text, caret in caretMoved(text: text, caret: caret) },
                 onKey: { key, caret in handle(key, caret: caret, draft: draft, suggestions: suggestions) },
                 onImage: { data, mime in draft.attach(image: data, mimeType: mime) },
-                onFiles: { urls in draft.attach(urls: urls, project: project) }
+                onFiles: { urls in draft.attach(urls: urls, project: project) },
+                onVimMode: { editMode = $0 }
             )
             .frame(height: resting ? lineHeight : min(max(height, lineHeight), 220))
             .overlay(alignment: .topLeading) {
@@ -55,12 +58,17 @@ struct ComposerView: View {
             .padding(.top, resting ? 11 : 14)
             .padding(.bottom, resting ? 11 : 6)
             if !resting {
-                ComposerControls(
-                    store: store,
-                    draft: draft,
-                    project: project,
-                    canSend: canSend(draft)
-                ) { submit(alternate: false) }
+                HStack(spacing: 2) {
+                    if vimEnabled {
+                        VimModeLabel(mode: editMode)
+                    }
+                    ComposerControls(
+                        store: store,
+                        draft: draft,
+                        project: project,
+                        canSend: canSend(draft)
+                    ) { submit(alternate: false) }
+                }
                 .padding(.horizontal, 8)
                 .padding(.bottom, 8)
             }
@@ -89,6 +97,10 @@ struct ComposerView: View {
 
     private var promptSize: CGFloat {
         CGFloat(store.pages.settings?.promptFontSize ?? 14)
+    }
+
+    private var vimEnabled: Bool {
+        store.pages.settings?.vimMode ?? false
     }
 
     private var lineHeight: CGFloat {
@@ -185,8 +197,11 @@ struct ComposerView: View {
             return recallPrevious(draft: draft, caret: caret)
         case .down:
             return recallNext(draft: draft, caret: caret)
-        case .tab, .escape:
+        case .tab:
             return false
+        case .escape:
+            store.focus(.timeline)
+            return true
         }
     }
 
@@ -294,4 +309,18 @@ struct PromptRecall {
     let index: Int
     let stash: String
     let text: String
+}
+
+struct VimModeLabel: View {
+    let mode: VimMode
+
+    var body: some View {
+        Text(mode.label)
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .foregroundStyle(Theme.secondaryText)
+            .padding(.leading, 8)
+            .padding(.trailing, 4)
+            .fixedSize()
+            .accessibilityLabel("Vim \(mode.label.lowercased()) mode")
+    }
 }

@@ -14,11 +14,13 @@ struct ComposerTextView: NSViewRepresentable {
     let fontSize: CGFloat
     let focusToken: Int
     let markdownShortcuts: Bool
+    let vimMode: Bool
     @Binding var height: CGFloat
     let onCaret: (String, Int) -> Void
     let onKey: (ComposerKey, Int) -> Bool
     let onImage: (Data, String) -> Void
     let onFiles: ([URL]) -> Void
+    let onVimMode: (VimMode) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -56,6 +58,9 @@ struct ComposerTextView: NSViewRepresentable {
         textView.string = draft.text
         textView.setSelectedRange(NSRange(location: (draft.text as NSString).length, length: 0))
         textView.delegate = context.coordinator
+        textView.vimEnabled = vimMode
+        let coordinator = context.coordinator
+        textView.vim.onMode = { [weak coordinator] mode in coordinator?.parent.onVimMode(mode) }
         scrollView.documentView = textView
         context.coordinator.textView = textView
         context.coordinator.focusToken = focusToken
@@ -63,6 +68,7 @@ struct ComposerTextView: NSViewRepresentable {
             textView.window?.makeFirstResponder(textView)
             context.coordinator.measure()
             context.coordinator.reportCaret()
+            coordinator.parent.onVimMode(textView.vim.mode)
         }
         return scrollView
     }
@@ -74,6 +80,14 @@ struct ComposerTextView: NSViewRepresentable {
         textView.onFiles = onFiles
         textView.onKey = onKey
         textView.markdownShortcuts = markdownShortcuts
+        if textView.vimEnabled != vimMode {
+            textView.vimEnabled = vimMode
+            let coordinator = context.coordinator
+            let mode = textView.vim.mode
+            DispatchQueue.main.async {
+                coordinator.parent.onVimMode(mode)
+            }
+        }
         if textView.font?.pointSize != fontSize {
             textView.font = .systemFont(ofSize: fontSize)
         }
@@ -165,8 +179,19 @@ final class ComposerNSTextView: NSTextView {
     var onFiles: (([URL]) -> Void)?
     var onKey: ((ComposerKey, Int) -> Bool)?
     var markdownShortcuts = false
+    private(set) lazy var vim = ComposerVim()
+    var vimEnabled = false {
+        didSet {
+            if !vimEnabled {
+                vim.reset()
+            }
+        }
+    }
 
     override func keyDown(with event: NSEvent) {
+        if vimEnabled, !hasMarkedText(), let key = VimKey(event: event), vim.handle(key, in: self) {
+            return
+        }
         let returnKeys: Set<UInt16> = [36, 76]
         if returnKeys.contains(event.keyCode), event.modifierFlags.contains(.command), !hasMarkedText() {
             let flags = event.modifierFlags

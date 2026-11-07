@@ -26,6 +26,7 @@ private struct GeneralSettingsForm: View {
             projectDefaults
             organization
             behavior
+            keyboard
             confirmations
             SettingsSection(.textGeneration, footer: "Writes thread titles, commit messages and pull request descriptions.") {
                 SettingRow(.textGenerationModel) {
@@ -220,6 +221,17 @@ private struct GeneralSettingsForm: View {
             }
             SettingRow(.continueThreads) {
                 Toggle(SettingKey.continueThreads.title, isOn: bind(\.continueThreadsAfterRestart))
+            }
+        }
+    }
+
+    @ViewBuilder private var keyboard: some View {
+        SettingsSection(.keyboard) {
+            SettingRow(.vimKeys) {
+                Toggle(isOn: bind(\.vimMode)) {
+                    Text(SettingKey.vimKeys.title)
+                    Text("Modal editing in the composer, plus j/k, gg/G, h/l, / and i in lists.")
+                }
             }
         }
     }
