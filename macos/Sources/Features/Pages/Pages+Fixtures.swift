@@ -101,6 +101,7 @@ enum PagesFixtures {
             .keybindings(bindings: keybindings),
             .models(models: models, favorites: favorites, hidden: [ModelKey(provider: "anthropic", model: "claude-opus-4-1")]),
             .providers(providers: providers),
+            .daemon(socket: "/Users/gil/.eukhe/daemon.sock", version: "0.10.0", pid: 48211),
         ]
     }
 

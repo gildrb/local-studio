@@ -77,7 +77,7 @@ struct RootView: View {
             shell.headerRenaming = false
         }
         .themeRoot()
-        .onAppear { SnapShotService.shared.studio = store }
+        .onAppear { PageCommands.install(store) }
         .transaction { $0.disablesAnimations = true }
     }
 
