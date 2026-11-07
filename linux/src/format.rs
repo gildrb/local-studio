@@ -183,8 +183,17 @@ pub fn accelerator(binding: &str) -> String {
         "/" => "slash",
         other => other,
     };
-    accelerator.push_str(key);
+    if function_key(key) {
+        accelerator.push_str(&key.to_uppercase());
+    } else {
+        accelerator.push_str(key);
+    }
     accelerator
+}
+
+pub fn function_key(key: &str) -> bool {
+    key.strip_prefix(['f', 'F'])
+        .is_some_and(|number| !number.is_empty() && number.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 pub enum Markdown {

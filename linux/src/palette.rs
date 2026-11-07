@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{gdk, glib};
+use gtk::{gdk, gio, glib};
 
 use crate::app::App;
 use crate::format;
@@ -13,13 +13,13 @@ struct Entry {
     group: &'static str,
     title: String,
     subtitle: String,
-    action: &'static str,
+    action: String,
     target: Option<String>,
 }
 
 impl Entry {
-    fn new(group: &'static str, title: &str, subtitle: &str, action: &'static str, target: Option<String>) -> Self {
-        Self { group, title: title.to_string(), subtitle: subtitle.to_string(), action, target }
+    fn new(group: &'static str, title: &str, subtitle: &str, action: &str, target: Option<String>) -> Self {
+        Self { group, title: title.to_string(), subtitle: subtitle.to_string(), action: action.to_string(), target }
     }
 
     fn matches(&self, query: &str) -> bool {
@@ -89,8 +89,11 @@ pub fn open(app: &Rc<App>) {
     let run = Rc::new(move |dialog: &adw::Dialog, entry: &Entry| {
         dialog.close();
         if let Some(app) = weak.upgrade() {
-            let target = entry.target.as_ref().map(ToVariant::to_variant);
-            WidgetExt::activate_action(&app.window, &format!("win.{}", entry.action), target.as_ref()).ok();
+            let detailed = format!("win.{}", entry.action);
+            let (name, parsed) = gio::Action::parse_detailed_name(&detailed)
+                .map_or_else(|_| (detailed.clone(), None), |(name, target)| (name.to_string(), target));
+            let target = entry.target.as_ref().map(ToVariant::to_variant).or(parsed);
+            WidgetExt::activate_action(&app.window, &name, target.as_ref()).ok();
         }
     });
     let activate_list = list.clone();
@@ -143,7 +146,7 @@ fn entries(state: &State) -> Vec<Entry> {
         Entry::new(ACTIONS, "Add project folder…", "", "add-project", None),
         Entry::new(ACTIONS, "Clone repository…", "GitHub owner/name or a git URL", "clone-project", None),
         Entry::new(ACTIONS, "Open usage", "Ctrl+U", "usage", None),
-        Entry::new(ACTIONS, "Open Local", "Machines, models and the registry", "local", None),
+        Entry::new(ACTIONS, "Open Local", "Live figures for each machine in the fleet", "local", None),
         Entry::new(ACTIONS, "Toggle sidebar", "Ctrl+B", "toggle-sidebar", None),
         Entry::new(ACTIONS, "Toggle terminal", "Ctrl+J", "toggle-terminal", None),
         Entry::new(ACTIONS, "Toggle diff", "Ctrl+D", "toggle-diff", None),
@@ -208,5 +211,24 @@ fn entries(state: &State) -> Vec<Entry> {
     ] {
         entries.push(Entry::new("Settings", title, "Settings", "settings-page", Some(name.to_string())));
     }
+    commands(state, &mut entries);
     entries
+}
+
+fn commands(state: &State, entries: &mut Vec<Entry>) {
+    const COMMANDS: &str = "Commands";
+    let vim = state.settings.vim_mode;
+    entries.push(Entry::new(
+        COMMANDS,
+        if vim { "Turn vim keys off" } else { "Turn vim keys on" },
+        "Vim keys: modal composer and j/k in lists",
+        "vim-toggle",
+        None,
+    ));
+    for binding in &state.keybindings {
+        let Some(action) = crate::bindings::action_for(&binding.command) else { continue };
+        let Some(action) = action.strip_prefix("win.") else { continue };
+        let shortcut = binding.shortcut.as_deref().map(format::shortcut_label).unwrap_or_default();
+        entries.push(Entry::new(COMMANDS, &binding.title, &shortcut, action, None));
+    }
 }

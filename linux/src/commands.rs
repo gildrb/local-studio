@@ -309,6 +309,7 @@ fn binding_for(key: gdk::Key, modifiers: gdk::ModifierType) -> Option<String> {
     let key = match name.as_str() {
         "Return" | "KP_Enter" => "return".to_string(),
         "Up" | "Down" | "Left" | "Right" | "Escape" | "Tab" | "Delete" => name.to_lowercase(),
+        "ISO_Left_Tab" => "tab".to_string(),
         "space" => "space".to_string(),
         "bracketleft" => "[".to_string(),
         "bracketright" => "]".to_string(),
@@ -334,7 +335,7 @@ fn binding_for(key: gdk::Key, modifiers: gdk::ModifierType) -> Option<String> {
         parts.push("shift");
     }
     if parts.is_empty() {
-        return None;
+        return crate::format::function_key(&key).then_some(key);
     }
     Some(format!("{}+{key}", parts.join("+")))
 }

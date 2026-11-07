@@ -5,21 +5,23 @@ use adw::prelude::*;
 
 use crate::app::App;
 use crate::format;
+use crate::picker::{Picker, Row, Spec};
 use crate::prefs;
 use crate::state::State;
 
 const SEPARATOR: char = '\u{1e}';
+const PROMPT: &str = "prompt:";
+const STASH_CURRENT: &str = "stash-current";
+const CLEAR_STASH: &str = "clear-stash";
 
 pub struct Tools {
     pub meter: gtk::MenuButton,
-    pub stash: gtk::MenuButton,
+    pub stash: Picker,
     ring: gtk::DrawingArea,
     percent: gtk::Label,
     detail: gtk::Label,
     bar: gtk::LevelBar,
     fraction: Rc<Cell<f64>>,
-    stash_list: gtk::ListBox,
-    stash_label: gtk::Label,
     entries: RefCell<Vec<String>>,
     app: Weak<App>,
 }
@@ -96,42 +98,7 @@ impl Tools {
             }
         });
 
-        let stash_label = gtk::Label::new(None);
-        let stash_face = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-        stash_face.append(&gtk::Image::from_icon_name("document-save-symbolic"));
-        stash_face.append(&stash_label);
-        let stash_list = gtk::ListBox::new();
-        stash_list.add_css_class("navigation-sidebar");
-        stash_list.set_selection_mode(gtk::SelectionMode::None);
-        let heading = gtk::Label::new(Some("Stashed prompts"));
-        heading.add_css_class("heading");
-        heading.set_xalign(0.0);
-        heading.set_margin_start(6);
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 4);
-        column.append(&heading);
-        column.append(
-            &gtk::ScrolledWindow::builder()
-                .hscrollbar_policy(gtk::PolicyType::Never)
-                .propagate_natural_height(true)
-                .max_content_height(320)
-                .min_content_width(320)
-                .child(&stash_list)
-                .build(),
-        );
-        let stash_popover = gtk::Popover::new();
-        stash_popover.set_child(Some(&column));
-        let stash = gtk::MenuButton::builder()
-            .child(&stash_face)
-            .popover(&stash_popover)
-            .tooltip_text("Stashed Prompts (Ctrl+S stashes the draft)")
-            .build();
-        stash.add_css_class("flat");
-        let weak = app.clone();
-        stash_list.connect_row_activated(move |_, row| {
-            if let Some(app) = weak.upgrade() {
-                app.composer.tools.restore(&app, usize::try_from(row.index()).unwrap_or(0));
-            }
-        });
+        let stash = stash_picker(app);
         let entries: Vec<String> = prefs::get("stash")
             .map(|value| value.split(SEPARATOR).map(str::to_string).filter(|entry| !entry.is_empty()).collect())
             .unwrap_or_default();
@@ -143,8 +110,6 @@ impl Tools {
             detail,
             bar,
             fraction,
-            stash_list,
-            stash_label,
             entries: RefCell::new(entries),
             app: app.clone(),
         };
@@ -206,43 +171,81 @@ impl Tools {
         self.render_stash();
     }
 
-    fn render_stash(&self) {
-        self.stash_list.remove_all();
-        let entries = self.entries.borrow();
-        self.stash.set_visible(!entries.is_empty());
-        self.stash_label.set_label(&entries.len().to_string());
-        for (index, entry) in entries.iter().enumerate() {
-            let first = entry.lines().next().unwrap_or_default();
-            let row = adw::ActionRow::builder()
-                .title(format::escape(first))
-                .subtitle(format!("{} lines", entry.lines().count()))
-                .activatable(true)
-                .build();
-            let remove = gtk::Button::builder()
-                .icon_name("user-trash-symbolic")
-                .tooltip_text("Discard")
-                .valign(gtk::Align::Center)
-                .build();
-            remove.add_css_class("flat");
-            let weak = self.app.clone();
-            remove.connect_clicked(move |_| {
-                let Some(app) = weak.upgrade() else { return };
-                let tools = &app.composer.tools;
-                let removed = {
-                    let mut entries = tools.entries.borrow_mut();
-                    (index < entries.len()).then(|| entries.remove(index))
-                };
-                if removed.is_some() {
-                    tools.save();
-                }
-            });
-            row.add_suffix(&remove);
-            self.stash_list.append(&row);
+    fn discard(&self, index: usize) {
+        let removed = {
+            let mut entries = self.entries.borrow_mut();
+            (index < entries.len()).then(|| entries.remove(index))
+        };
+        if removed.is_some() {
+            self.save();
         }
+    }
+
+    fn clear(&self) {
+        self.entries.borrow_mut().clear();
+        self.save();
+    }
+
+    fn render_stash(&self) {
+        let can_stash = self.app.upgrade().is_some_and(|app| !app.composer.text().trim().is_empty());
+        let entries = self.entries.borrow();
+        self.stash.button.set_visible(!entries.is_empty());
+        self.stash.set_label(&entries.len().to_string());
+        let mut rows: Vec<Row> = entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| {
+                let lines = entry.lines().count();
+                Row::new(format!("{PROMPT}{index}"), entry.lines().next().unwrap_or_default())
+                    .icon("text-x-generic-symbolic")
+                    .subtitle(if lines == 1 { "1 line".to_string() } else { format!("{lines} lines") })
+                    .section("Stashed Prompts")
+                    .removable()
+            })
+            .collect();
+        rows.push(Row::new(STASH_CURRENT, "Stash Current Prompt").icon("document-save-symbolic").enabled(can_stash));
+        rows.push(Row::new(CLEAR_STASH, "Clear Stash").icon("user-trash-symbolic").destructive());
+        self.stash.set_rows(rows);
     }
 
     pub fn set_fixture(&self, entries: &[&str]) {
         self.entries.replace(entries.iter().map(ToString::to_string).collect());
         self.render_stash();
     }
+}
+
+fn stash_picker(app: &Weak<App>) -> Picker {
+    let weak = app.clone();
+    let spec = Spec { tooltip: "Stashed Prompts (Ctrl+S stashes the draft)", width: 320, ..Spec::default() };
+    let picker = Picker::new(&spec, move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        let tools = &app.composer.tools;
+        match id {
+            STASH_CURRENT => tools.stash_current(&app),
+            CLEAR_STASH => tools.clear(),
+            _ => {
+                if let Some(index) = prompt_index(id) {
+                    tools.restore(&app, index);
+                }
+            }
+        }
+    });
+    picker.set_icon(Some("document-save-symbolic"));
+    let weak = app.clone();
+    picker.connect_remove(move |id| {
+        if let (Some(app), Some(index)) = (weak.upgrade(), prompt_index(id)) {
+            app.composer.tools.discard(index);
+        }
+    });
+    let weak = app.clone();
+    picker.popover.connect_show(move |_| {
+        if let Some(app) = weak.upgrade() {
+            app.composer.tools.render_stash();
+        }
+    });
+    picker
+}
+
+fn prompt_index(id: &str) -> Option<usize> {
+    id.strip_prefix(PROMPT).and_then(|index| index.parse().ok())
 }

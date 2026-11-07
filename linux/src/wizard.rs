@@ -22,20 +22,16 @@ pub fn present(app: &Rc<App>) {
         ),
     ));
     let providers = adw::PreferencesGroup::new();
-    if state.providers.is_empty() {
-        providers.add(
-            &adw::ActionRow::builder()
-                .title("Providers appear once the model catalog loads")
-                .subtitle("Sign in from a terminal with the eukhe CLI (/login), then refresh.")
-                .build(),
-        );
-    }
-    for provider in &state.providers {
+    let configured: Vec<&local_studio_core::ProviderStatus> =
+        state.providers.iter().filter(|provider| provider.configured).collect();
+    let shown: Vec<&local_studio_core::ProviderStatus> =
+        if configured.is_empty() { state.providers.iter().collect() } else { configured };
+    for provider in shown.iter().take(5) {
         let row = adw::ActionRow::builder()
             .title(format::escape(&provider.name))
             .subtitle(format!("{} models", provider.model_count))
             .build();
-        let label = gtk::Label::new(Some(if provider.configured { "Ready" } else { "Not signed in" }));
+        let label = gtk::Label::new(Some(if provider.configured { "Ready" } else { "Not set up" }));
         label.add_css_class("ls-pill");
         if provider.configured {
             label.add_css_class("status-done");
@@ -44,6 +40,15 @@ pub fn present(app: &Rc<App>) {
         row.add_suffix(&label);
         providers.add(&row);
     }
+    if !state.providers.iter().any(|provider| provider.configured) {
+        let row = adw::ActionRow::builder()
+            .title("No provider is ready yet")
+            .subtitle("Paste an API key or add an OpenAI-compatible endpoint in Settings → Providers, or run eukhe in a terminal and use /login for a subscription, then check again.")
+            .build();
+        providers.add(&row);
+    }
+    let add_provider = adw::ButtonRow::builder().title("Add Provider…").action_name("win.provider-settings").build();
+    providers.add(&add_provider);
     carousel.append(&page(
         "application-x-addon-symbolic",
         "Model providers",

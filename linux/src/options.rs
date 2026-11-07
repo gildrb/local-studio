@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::rc::Weak;
 
 use adw::prelude::*;
@@ -6,15 +5,17 @@ use local_studio_core::{Goal, ModelKey};
 
 use crate::app::App;
 use crate::format;
+use crate::picker::{Picker, Row, Spec};
 use crate::state::State;
+
+const STANDARD: &str = "standard";
+const TIER: &str = "tier:";
 
 pub struct Options {
     pub compare: gtk::MenuButton,
-    pub tier: gtk::DropDown,
+    pub tier: Picker,
     pub goal: gtk::Box,
     compare_list: gtk::Box,
-    tiers: gtk::StringList,
-    tier_names: RefCell<Vec<String>>,
     goal_label: gtk::Label,
     goal_meta: gtk::Label,
     app: Weak<App>,
@@ -46,11 +47,8 @@ impl Options {
             .popover(&popover)
             .build();
         compare.add_css_class("flat");
-        let tiers = gtk::StringList::new(&[]);
-        let tier = gtk::DropDown::new(Some(tiers.clone()), None::<gtk::Expression>);
-        tier.add_css_class("flat");
-        tier.set_tooltip_text(Some("Service Tier"));
-        tier.set_visible(false);
+        let tier = tier_picker(app);
+        tier.button.set_visible(false);
         let goal = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         goal.add_css_class("ls-goal");
         goal.set_visible(false);
@@ -65,47 +63,21 @@ impl Options {
         goal.append(&icon);
         goal.append(&goal_label);
         goal.append(&goal_meta);
-        let options = Self {
-            compare,
-            tier,
-            goal,
-            compare_list,
-            tiers,
-            tier_names: RefCell::new(Vec::new()),
-            goal_label,
-            goal_meta,
-            app: app.clone(),
-        };
-        let weak = app.clone();
-        options.tier.connect_selected_notify(move |dropdown| {
-            let Some(app) = weak.upgrade() else { return };
-            if app.syncing.get() {
-                return;
-            }
-            let Some(thread) = app.state.borrow().selected.clone() else { return };
-            let index = usize::try_from(dropdown.selected()).unwrap_or(0);
-            let tier =
-                index.checked_sub(1).and_then(|index| app.composer.options.tier_names.borrow().get(index).cloned());
-            app.core.run(|studio| studio.set_service_tier(thread, tier));
-        });
-        options
+        Self { compare, tier, goal, compare_list, goal_label, goal_meta, app: app.clone() }
     }
 
     pub fn render(&self, state: &State) {
         self.render_compare(state);
         let info = state.selected.as_ref().and(state.info.as_ref());
         let tiers = info.map(|info| info.service_tiers.clone()).unwrap_or_default();
-        if *self.tier_names.borrow() != tiers {
-            let mut labels = vec!["Default speed".to_string()];
-            labels.extend(tiers.iter().map(|tier| tier_label(tier)));
-            let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-            self.tiers.splice(0, self.tiers.n_items(), &refs);
-            self.tier_names.replace(tiers.clone());
-        }
-        self.tier.set_visible(!tiers.is_empty());
-        let current = info.and_then(|info| info.service_tier.as_ref());
-        let index = current.and_then(|tier| tiers.iter().position(|known| known == tier)).map_or(0, |index| index + 1);
-        self.tier.set_selected(u32::try_from(index).unwrap_or(0));
+        self.tier.button.set_visible(!tiers.is_empty());
+        let current = info.and_then(|info| info.service_tier.as_ref()).filter(|tier| tiers.contains(tier));
+        let mut rows = vec![Row::new(STANDARD, "Standard").checked(current.is_none())];
+        rows.extend(
+            tiers.iter().map(|tier| Row::new(format!("{TIER}{tier}"), tier_label(tier)).checked(current == Some(tier))),
+        );
+        self.tier.set_rows(rows);
+        self.tier.set_label(&current.map_or_else(|| "Standard".to_string(), |tier| tier_label(tier)));
         match info.and_then(|info| info.goal.as_ref()) {
             Some(goal) => self.render_goal(goal),
             None => self.goal.set_visible(false),
@@ -178,6 +150,20 @@ impl Options {
             self.compare_list.append(&check);
         }
     }
+}
+
+fn tier_picker(app: &Weak<App>) -> Picker {
+    let weak = app.clone();
+    let spec = Spec { tooltip: "Speed (service tier)", title: Some("Speed"), width: 220, ..Spec::default() };
+    Picker::new(&spec, move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        if app.syncing.get() {
+            return;
+        }
+        let Some(thread) = app.state.borrow().selected.clone() else { return };
+        let tier = id.strip_prefix(TIER).map(str::to_string);
+        app.core.run(|studio| studio.set_service_tier(thread, tier));
+    })
 }
 
 fn tier_label(tier: &str) -> String {

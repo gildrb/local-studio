@@ -397,6 +397,10 @@ fn archive(app: &Rc<App>, id: String) {
         archive_now(app, id);
         return;
     }
+    confirm_archive(app, id);
+}
+
+pub fn confirm_archive(app: &Rc<App>, id: String) {
     confirm_action(
         app,
         "Archive Thread?",

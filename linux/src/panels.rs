@@ -292,6 +292,19 @@ impl Panel {
         self.open.borrow().iter().position(|open| *open == kind)
     }
 
+    pub fn step_tab(&self, offset: isize) {
+        let open = self.open.borrow().clone();
+        let count = open.len();
+        if count == 0 {
+            return;
+        }
+        let active = *self.active.borrow();
+        let current = active.and_then(|active| open.iter().position(|kind| *kind == active)).unwrap_or(0);
+        let next = (current + count).checked_add_signed(offset).map_or(0, |next| next % count);
+        self.root.set_visible(true);
+        self.activate(open[next]);
+    }
+
     pub fn set_maximized(&self, maximized: bool) {
         if self.maximize.is_active() != maximized {
             self.maximize.set_active(maximized);

@@ -22,11 +22,13 @@ pub struct SettingsDialog {
 struct Inner {
     dialog: adw::PreferencesDialog,
     providers_page: adw::PreferencesPage,
-    providers: RefCell<Option<adw::PreferencesGroup>>,
+    providers: RefCell<Vec<adw::PreferencesGroup>>,
+    providers_shown: RefCell<String>,
     keys_page: adw::PreferencesPage,
     keys: RefCell<Vec<adw::PreferencesGroup>>,
     archive_page: adw::PreferencesPage,
     archive: RefCell<Vec<adw::PreferencesGroup>>,
+    fleet: crate::fleet::Fleet,
 }
 
 impl SettingsDialog {
@@ -43,7 +45,9 @@ impl SettingsDialog {
         dialog.add(&providers_page);
         dialog.add(&source_control_page(&weak, &state));
         dialog.add(&storage_page(&weak));
-        dialog.add(&local_page(&weak));
+        let fleet = crate::fleet::Fleet::new(&weak);
+        fleet.render(&state);
+        dialog.add(&local_page(&weak, &fleet));
         let archive_page = page("archive", "Archive", "folder-download-symbolic");
         dialog.add(&archive_page);
         drop(state);
@@ -51,11 +55,13 @@ impl SettingsDialog {
             inner: Rc::new(Inner {
                 dialog,
                 providers_page,
-                providers: RefCell::new(None),
+                providers: RefCell::new(Vec::new()),
+                providers_shown: RefCell::new(String::new()),
                 keys_page,
                 keys: RefCell::new(Vec::new()),
                 archive_page,
                 archive: RefCell::new(Vec::new()),
+                fleet,
             }),
         };
         settings.refresh(app);
@@ -76,6 +82,10 @@ impl SettingsDialog {
         self.inner.dialog.close();
     }
 
+    pub fn render_local(&self, state: &State) {
+        self.inner.fleet.render(state);
+    }
+
     pub fn present(&self, app: &App) {
         self.inner.dialog.present(Some(&app.window));
     }
@@ -89,15 +99,31 @@ impl SettingsDialog {
     }
 
     fn refresh_providers(&self, app: &Weak<App>, state: &State) {
-        if let Some(group) = self.inner.providers.take() {
+        let shown = format!(
+            "{:?}{:?}{:?}{:?}{:?}{:?}{:?}{:?}{}",
+            state.providers,
+            state.engines,
+            state.provider_errors,
+            state.provider_error,
+            state.provider_pending,
+            state.models,
+            state.favorites,
+            state.hidden,
+            state.daemon.as_ref().map(|daemon| daemon.socket.as_str()).unwrap_or_default()
+        );
+        if *self.inner.providers_shown.borrow() == shown && !self.inner.providers.borrow().is_empty() {
+            return;
+        }
+        self.inner.providers_shown.replace(shown);
+        for group in self.inner.providers.take() {
             self.inner.providers_page.remove(&group);
         }
+        let mut groups = crate::providers::groups(app, state);
         let group = adw::PreferencesGroup::builder()
-            .title("Providers")
-            .description("Model providers known to the Eukhe daemon. Sign in with the eukhe CLI to configure one.")
+            .title("Models")
+            .description("Star models to pin them to the top of the model picker; hide models you never use to keep them out of it.")
             .build();
-        let refresh =
-            gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text("Refresh Provider Status").build();
+        let refresh = gtk::Button::builder().label("Refresh Providers").valign(gtk::Align::Center).build();
         refresh.add_css_class("flat");
         let weak = app.clone();
         refresh.connect_clicked(move |_| {
@@ -123,33 +149,46 @@ impl SettingsDialog {
             row.add_prefix(&dot);
             group.add(&row);
         }
-        if state.providers.is_empty() {
+        let usable: Vec<&local_studio_core::ProviderStatus> =
+            state.providers.iter().filter(|provider| provider.configured && provider.model_count > 0).collect();
+        if usable.is_empty() {
             group.add(
                 &adw::ActionRow::builder()
-                    .title("No providers yet")
-                    .subtitle("Providers appear once the model catalog loads.")
+                    .title(if state.providers_loaded {
+                        "No provider is configured yet."
+                    } else {
+                        "Loading providers…"
+                    })
                     .build(),
             );
         }
-        for provider in &state.providers {
+        for provider in usable {
+            let hidden = state.hidden.iter().filter(|key| key.provider == provider.id).count();
+            let count = if provider.model_count == 1 {
+                "1 model".to_string()
+            } else {
+                format!("{} models", provider.model_count)
+            };
             let row = adw::ExpanderRow::builder()
                 .title(format::escape(&provider.name))
-                .subtitle(format!("{} models · {}", provider.model_count, provider.id))
+                .subtitle(if hidden > 0 { format!("{count} · {hidden} hidden") } else { count })
                 .build();
-            let status = gtk::Label::new(Some(if provider.configured { "Configured" } else { "Not configured" }));
-            status.add_css_class("ls-pill");
-            if provider.configured {
-                status.add_css_class("status-done");
+            let models: Vec<&local_studio_core::ModelOption> =
+                state.models.iter().filter(|model| model.provider == provider.id).collect();
+            if models.is_empty() {
+                row.add_row(&adw::ActionRow::builder().title("No models in the catalog.").build());
             }
-            status.set_valign(gtk::Align::Center);
-            row.add_suffix(&status);
-            for model in state.models.iter().filter(|model| model.provider == provider.id) {
+            for model in models {
                 row.add_row(&model_row(app, state, model));
             }
             group.add(&row);
         }
-        self.inner.providers_page.add(&group);
-        self.inner.providers.replace(Some(group));
+        groups.push(group);
+        groups.push(crate::providers::signin_group());
+        for group in &groups {
+            self.inner.providers_page.add(group);
+        }
+        self.inner.providers.replace(groups);
     }
 
     fn refresh_keys(&self, app: &Weak<App>, state: &State) {
@@ -706,6 +745,16 @@ fn general_page(app: &Weak<App>, state: &State) -> adw::PreferencesPage {
         },
     );
 
+    let keyboard = group(&page, "Keyboard");
+    switch(
+        &keyboard,
+        app,
+        "Vim keys",
+        "Normal and Insert modes in the composer; j/k, gg/G and h/l in lists",
+        |settings| settings.vim_mode,
+        |settings, value| settings.vim_mode = value,
+    );
+
     let projects = group(&page, "Projects and threads");
     entry(
         &projects,
@@ -1203,7 +1252,7 @@ fn storage_page(app: &Weak<App>) -> adw::PreferencesPage {
     page
 }
 
-fn local_page(app: &Weak<App>) -> adw::PreferencesPage {
+fn local_page(app: &Weak<App>, fleet: &crate::fleet::Fleet) -> adw::PreferencesPage {
     let page = page("local", "Local", "network-server-symbolic");
     let controller = group(&page, "Controller");
     controller.set_description(Some("The Local controller serves models on this machine and links your fleet."));
@@ -1248,6 +1297,9 @@ fn local_page(app: &Weak<App>) -> adw::PreferencesPage {
             settings.start_controller = value;
         },
     );
+    let machines = adw::PreferencesGroup::new();
+    machines.add(fleet.widget());
+    page.add(&machines);
     page
 }
 
