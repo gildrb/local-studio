@@ -11,6 +11,7 @@ use crate::app::App;
 
 const PROMPT: &str = "run the smoke command";
 const TIMEOUT: Duration = Duration::from_secs(120);
+const TERMINAL_MARK: &str = "smoke-term";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -19,6 +20,9 @@ enum Phase {
     Opening,
     Replying,
     Workspace,
+    Terminal,
+    Typing,
+    Chat,
     Finished,
 }
 
@@ -117,10 +121,39 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
             let hits = app.sidebar.hit_count() > 0;
             if mention && file && hits {
                 println!("ok   @ mention, Files surface and thread search answered through the core");
-                finish(app, phase, failed, true, "inbox, timeline, composer and workspace surfaces exercised");
+                phase.set(Phase::Terminal);
+                app.drawer.add(app, crate::drawer::Layout::SideBySide);
             }
         }
+        Phase::Terminal | Phase::Typing | Phase::Chat => terminal(app, phase, failed),
         Phase::Finished => {}
+    }
+}
+
+fn terminal(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>) {
+    let expected = format!("{TERMINAL_MARK}-42");
+    match phase.get() {
+        Phase::Terminal => {
+            if app.drawer.focused_text().trim().is_empty() {
+                return;
+            }
+            println!("ok   terminal opened and rendered a prompt");
+            phase.set(Phase::Typing);
+            app.drawer.type_text(app, &format!("echo {TERMINAL_MARK}-$((40 + 2))"));
+        }
+        Phase::Typing => {
+            if !app.drawer.focused_text().lines().any(|line| line.trim() == expected) {
+                return;
+            }
+            println!("ok   keys reached the shell through the core encoder and the output came back as frames");
+            phase.set(Phase::Chat);
+            app.drawer.add_focused_to_chat(app);
+        }
+        Phase::Chat if app.composer.extras.context_texts().iter().any(|text| text.contains(&expected)) => {
+            println!("ok   Add to Chat put the recent terminal output in the composer");
+            finish(app, phase, failed, true, "inbox, timeline, composer, workspace surfaces and terminal exercised");
+        }
+        _ => {}
     }
 }
 

@@ -118,7 +118,7 @@ pub fn install(app: &Rc<App>) {
         }
         let focus = gtk::prelude::GtkWindowExt::focus(&app.window);
         let editable = focus.is_some_and(|widget| {
-            widget.is::<gtk::Text>() || widget.is::<gtk::TextView>() || widget.is::<vte::Terminal>()
+            widget.is::<gtk::Text>() || widget.is::<gtk::TextView>() || widget.has_css_class("ls-terminal")
         });
         if editable {
             return glib::Propagation::Proceed;

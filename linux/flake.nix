@@ -63,6 +63,7 @@
               pkgs.pkg-config
               pkgs.clang
               pkgs.git
+              pkgs.zig_0_15
               pkgs.xvfb-run
               pkgs.xvfb
               pkgs.dbus
@@ -72,7 +73,6 @@
               pkgs.gtk4
               pkgs.libadwaita
               pkgs.glib
-              pkgs.vte-gtk4
               pkgs.webkitgtk_6_0
               pkgs.glib-networking
               pkgs.gst_all_1.gstreamer

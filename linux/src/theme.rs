@@ -94,7 +94,8 @@ window, dialog { font-size: 13px; }
 .ls-drawer { border-top: 1px solid var(--border-color); background: #0d0d0d; }
 .ls-drawer-bar { padding: 2px 6px 2px 12px; border-bottom: 1px solid var(--border-color); }
 .ls-drawer-bar button { min-width: 26px; min-height: 26px; padding: 0; }
-.ls-terminal { padding: 4px 6px; }
+.ls-terminal { padding: 0; }
+.ls-terminal-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: alpha(currentColor, 0.08); color: alpha(currentColor, 0.7); }
 .ls-panel-bar { padding: 6px 6px 6px 8px; }
 .ls-panel-bar button { min-width: 28px; min-height: 28px; }
 .ls-tab { border-radius: 8px; padding: 2px 4px 2px 8px; min-height: 26px; }

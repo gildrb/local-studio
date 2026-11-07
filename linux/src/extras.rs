@@ -125,6 +125,10 @@ impl Extras {
         !self.images.borrow().is_empty() || !self.files.borrow().is_empty() || !self.contexts.borrow().is_empty()
     }
 
+    pub fn context_texts(&self) -> Vec<String> {
+        self.contexts.borrow().iter().map(|(_, text)| text.clone()).collect()
+    }
+
     pub fn add_context(&self, label: &str, text: &str) {
         self.contexts.borrow_mut().push((label.to_string(), text.to_string()));
         self.render_chips();
