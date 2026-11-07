@@ -190,18 +190,59 @@ struct DiffCell: Equatable {
     let kind: DiffLineKind
     let number: UInt32?
     let text: String
+    let segments: [CodeSegment]
 }
 
 struct DiffRow: Identifiable, Equatable {
     enum Kind: Equatable {
         case hunk(String)
-        case line(kind: DiffLineKind, old: UInt32?, new: UInt32?, text: String)
+        case line(kind: DiffLineKind, old: UInt32?, new: UInt32?, text: String, segments: [CodeSegment])
         case split(left: DiffCell?, right: DiffCell?)
         case note(String)
     }
 
     let id: String
     let kind: Kind
+}
+
+struct DiffHighlight: Sendable {
+    let path: String
+    let hunks: [DiffHunk]
+    let old: [[[CodeSegment]]]
+    let new: [[[CodeSegment]]]
+
+    init(_ file: FileDiff) {
+        path = file.path
+        hunks = file.hunks
+        var oldLines: [String] = []
+        var newLines: [String] = []
+        var oldSlots: [(Int, Int)] = []
+        var newSlots: [(Int, Int)] = []
+        for (hunkIndex, hunk) in file.hunks.enumerated() {
+            for (lineIndex, line) in hunk.lines.enumerated() {
+                let text = DiffModel.display(line.text)
+                if line.kind != .added {
+                    oldLines.append(text)
+                    oldSlots.append((hunkIndex, lineIndex))
+                }
+                if line.kind != .removed {
+                    newLines.append(text)
+                    newSlots.append((hunkIndex, lineIndex))
+                }
+            }
+        }
+        let empty = file.hunks.map { [[CodeSegment]](repeating: [], count: $0.lines.count) }
+        var old = empty
+        var new = empty
+        for (slot, segments) in zip(oldSlots, highlightLines(lines: oldLines, language: nil, path: file.oldPath ?? file.path)) {
+            old[slot.0][slot.1] = segments
+        }
+        for (slot, segments) in zip(newSlots, highlightLines(lines: newLines, language: nil, path: file.path)) {
+            new[slot.0][slot.1] = segments
+        }
+        self.old = old
+        self.new = new
+    }
 }
 
 struct DiffSection: Identifiable, Equatable {
@@ -240,6 +281,8 @@ final class DiffModel {
     @ObservationIgnored private var pendingScope: String?
     @ObservationIgnored private var pendingFocus: String?
     @ObservationIgnored private weak var workspace: WorkspaceStore?
+    @ObservationIgnored private var highlights: [String: DiffHighlight] = [:]
+    @ObservationIgnored private var highlightGeneration = 0
 
     init(project: String, thread: String?, workspace: WorkspaceStore, settings: Settings?) {
         self.project = project
@@ -318,7 +361,25 @@ final class DiffModel {
             pendingFocus = nil
             collapsed = Set(files.map(\.path)).subtracting([path])
         }
+        let current = Dictionary(files.map { ($0.path, $0) }) { first, _ in first }
+        highlights = highlights.filter { path, highlight in current[path]?.hunks == highlight.hunks }
         rebuild()
+        highlight()
+    }
+
+    private func highlight() {
+        highlightGeneration += 1
+        let generation = highlightGeneration
+        let pending = files.filter { !$0.binary && !$0.hunks.isEmpty && highlights[$0.path] == nil }
+        guard !pending.isEmpty else { return }
+        Task {
+            let results = await SyntaxHighlighter.shared.run { pending.map(DiffHighlight.init) }
+            guard generation == highlightGeneration else { return }
+            for result in results {
+                highlights[result.path] = result
+            }
+            rebuild()
+        }
     }
 
     private func settleEmpty() {
@@ -399,24 +460,29 @@ final class DiffModel {
                 rows.append(DiffRow(id: "\(file.path)#empty", kind: .note(file.status == "renamed" ? "File renamed without changes." : "No content changes.")))
                 continue
             }
+            let highlight = highlights[file.path]
             for (hunkIndex, hunk) in file.hunks.enumerated() {
                 let prefix = "\(file.path)#\(hunkIndex)"
                 rows.append(DiffRow(id: prefix, kind: .hunk(hunk.header)))
                 for line in hunk.lines {
                     widest = max(widest, line.oldLine ?? 0, line.newLine ?? 0)
                 }
+                let old = highlight.flatMap { $0.old.indices.contains(hunkIndex) ? $0.old[hunkIndex] : nil } ?? []
+                let new = highlight.flatMap { $0.new.indices.contains(hunkIndex) ? $0.new[hunkIndex] : nil } ?? []
                 switch layout {
                 case .stacked:
                     for (lineIndex, line) in hunk.lines.enumerated() {
+                        let side = line.kind == .removed ? old : new
                         rows.append(DiffRow(id: "\(prefix):\(lineIndex)", kind: .line(
                             kind: line.kind,
                             old: line.oldLine,
                             new: line.newLine,
-                            text: Self.display(line.text)
+                            text: Self.display(line.text),
+                            segments: side.indices.contains(lineIndex) ? side[lineIndex] : []
                         )))
                     }
                 case .split:
-                    rows.append(contentsOf: Self.pair(hunk.lines, prefix: prefix))
+                    rows.append(contentsOf: Self.pair(hunk.lines, prefix: prefix, old: old, new: new))
                 }
             }
         }
@@ -424,35 +490,44 @@ final class DiffModel {
         self.sections = sections
     }
 
-    private static func pair(_ lines: [DiffLine], prefix: String) -> [DiffRow] {
+    private static func pair(_ lines: [DiffLine], prefix: String, old: [[CodeSegment]], new: [[CodeSegment]]) -> [DiffRow] {
         var rows: [DiffRow] = []
-        var removed: [DiffLine] = []
-        var added: [DiffLine] = []
+        var removed: [Int] = []
+        var added: [Int] = []
+        func segments(_ side: [[CodeSegment]], _ index: Int) -> [CodeSegment] {
+            side.indices.contains(index) ? side[index] : []
+        }
+        func cell(_ index: Int, _ kind: DiffLineKind) -> DiffCell {
+            let line = lines[index]
+            return kind == .removed
+                ? DiffCell(kind: kind, number: line.oldLine, text: display(line.text), segments: segments(old, index))
+                : DiffCell(kind: kind, number: line.newLine, text: display(line.text), segments: segments(new, index))
+        }
         func flush() {
             for index in 0..<max(removed.count, added.count) {
                 let left = removed.indices.contains(index) ? removed[index] : nil
                 let right = added.indices.contains(index) ? added[index] : nil
                 rows.append(DiffRow(id: "\(prefix):s\(rows.count)", kind: .split(
-                    left: left.map { DiffCell(kind: .removed, number: $0.oldLine, text: display($0.text)) },
-                    right: right.map { DiffCell(kind: .added, number: $0.newLine, text: display($0.text)) }
+                    left: left.map { cell($0, .removed) },
+                    right: right.map { cell($0, .added) }
                 )))
             }
             removed.removeAll()
             added.removeAll()
         }
-        for line in lines {
+        for (index, line) in lines.enumerated() {
             switch line.kind {
             case .removed:
                 if !added.isEmpty { flush() }
-                removed.append(line)
+                removed.append(index)
             case .added:
-                added.append(line)
+                added.append(index)
             case .context:
                 flush()
                 let text = display(line.text)
                 rows.append(DiffRow(id: "\(prefix):s\(rows.count)", kind: .split(
-                    left: DiffCell(kind: .context, number: line.oldLine, text: text),
-                    right: DiffCell(kind: .context, number: line.newLine, text: text)
+                    left: DiffCell(kind: .context, number: line.oldLine, text: text, segments: segments(old, index)),
+                    right: DiffCell(kind: .context, number: line.newLine, text: text, segments: segments(new, index))
                 )))
             }
         }
@@ -460,7 +535,7 @@ final class DiffModel {
         return rows
     }
 
-    private static func display(_ text: String) -> String {
+    nonisolated static func display(_ text: String) -> String {
         text.replacingOccurrences(of: "\t", with: "    ").replacingOccurrences(of: "\r", with: "")
     }
 }
@@ -580,6 +655,7 @@ final class FilePreviewModel {
     private(set) var phase: LoadPhase = .idle
     private(set) var content: FileContent?
     private(set) var lines: [String] = []
+    private(set) var highlighted: [[CodeSegment]] = []
     private(set) var image: NSImage?
 
     @ObservationIgnored private(set) var request: String?
@@ -610,13 +686,15 @@ final class FilePreviewModel {
     func loaded(_ content: FileContent, request: String) {
         guard request == self.request else { return }
         self.content = content
+        highlighted = []
         switch content {
-        case .text(let text, _):
+        case .text(let text, let language):
             lines = text.replacingOccurrences(of: "\t", with: "    ").components(separatedBy: "\n")
             if lines.last?.isEmpty == true, lines.count > 1 {
                 lines.removeLast()
             }
             image = nil
+            highlight(language: language, request: request)
         case .image(_, let data):
             lines = []
             image = NSImage(data: data)
@@ -625,6 +703,16 @@ final class FilePreviewModel {
             image = nil
         }
         phase = .loaded
+    }
+
+    private func highlight(language: String?, request: String) {
+        let lines = lines
+        let path = relative
+        Task {
+            let result = await SyntaxHighlighter.shared.lines(lines, language: language, path: path)
+            guard request == self.request else { return }
+            highlighted = result
+        }
     }
 
     func failed(_ message: String, request: String) {

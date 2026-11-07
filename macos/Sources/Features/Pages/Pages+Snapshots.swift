@@ -160,46 +160,8 @@ extension SnapshotCatalog {
                 updates: themed("iris", custom: imported),
                 view: { store in AnyView(ThemePickerView(pages: store.pages)) }
             ),
-            SnapshotEntry(
-                name: "pages-theme-gildrb-code",
-                size: CGSize(width: 640, height: 600),
-                updates: themed("gildrb"),
-                view: { _ in
-                    AnyView(VStack(alignment: .leading, spacing: 12) {
-                        CodeBlockView(language: "rust", code: PanelFixtures.rustSource)
-                        DiffStat(additions: 214, deletions: 37)
-                        Spacer(minLength: 0)
-                    }.padding(16).themeRoot())
-                }
-            ),
-            SnapshotEntry(
-                name: "pages-theme-gildrb-diff",
-                size: CGSize(width: 761, height: 760),
-                updates: themed("gildrb") + PanelFixtures.base,
-                view: { store in
-                    let panels = store.workspace.panels
-                    panels.rightPanelWidth = 760
-                    panels.rightPanelOpen = true
-                    panels.openSurface(.diff)
-                    PanelFixtures.feedDiff(store)
-                    if case .diff(let model) = panels.activeContent?.content {
-                        model.layout = .split
-                        model.setAllCollapsed(false)
-                    }
-                    return AnyView(RightPanelView(store: store))
-                }
-            ),
-            SnapshotEntry(
-                name: "pages-theme-gildrb-file",
-                size: CGSize(width: 481, height: 760),
-                updates: themed("gildrb") + PanelFixtures.base,
-                view: { store in
-                    store.workspace.panels.rightPanelWidth = 480
-                    store.workspace.panels.rightPanelOpen = true
-                    PanelFixtures.feedFile(store, relative: "core/src/workspace/terminal.rs", line: 9, content: .text(text: PanelFixtures.rustSource, language: "rust"))
-                    return AnyView(RightPanelView(store: store))
-                }
-            ),
+        ] + codeEntries("gildrb", theme: "gildrb") + codeEntries("vscode", theme: imported.first?.id ?? "", custom: imported, only: true)
+            + codeEntries("default", theme: ThemeLibrary.defaultId) + [
             SnapshotEntry(
                 name: "pages-theme-gildrb-terminal",
                 size: CGSize(width: 900, height: 420),
@@ -219,6 +181,54 @@ extension SnapshotCatalog {
                 size: CGSize(width: 200, height: 60),
                 updates: themed("local-studio"),
                 view: { _ in AnyView(Text("Default theme").padding()) }
+            ),
+        ]
+    }
+
+    @MainActor private static func codeEntries(_ name: String, theme: String, custom: [ThemeDefinition] = [], only: Bool = false) -> [SnapshotEntry] {
+        let code = SnapshotEntry(
+            name: "pages-theme-\(name)-code",
+            size: CGSize(width: 640, height: 900),
+            updates: themed(theme, custom: custom),
+            view: { _ in
+                AnyView(VStack(alignment: .leading, spacing: 12) {
+                    CodeBlockView(language: "rust", code: PanelFixtures.rustSource)
+                    CodeBlockView(language: "ts", code: PagesFixtures.typeScriptSource)
+                    DiffStat(additions: 214, deletions: 37)
+                    Spacer(minLength: 0)
+                }.padding(16).themeRoot())
+            }
+        )
+        guard !only else { return [code] }
+        return [
+            code,
+            SnapshotEntry(
+                name: "pages-theme-\(name)-diff",
+                size: CGSize(width: 761, height: 760),
+                updates: themed(theme) + PanelFixtures.base,
+                view: { store in
+                    let panels = store.workspace.panels
+                    panels.rightPanelWidth = 760
+                    panels.rightPanelOpen = true
+                    panels.openSurface(.diff)
+                    PanelFixtures.feedDiff(store)
+                    if case .diff(let model) = panels.activeContent?.content {
+                        model.layout = .split
+                        model.setAllCollapsed(false)
+                    }
+                    return AnyView(RightPanelView(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-\(name)-file",
+                size: CGSize(width: 481, height: 760),
+                updates: themed(theme) + PanelFixtures.base,
+                view: { store in
+                    store.workspace.panels.rightPanelWidth = 480
+                    store.workspace.panels.rightPanelOpen = true
+                    PanelFixtures.feedFile(store, relative: "core/src/workspace/terminal.rs", line: 9, content: .text(text: PanelFixtures.rustSource, language: "rust"))
+                    return AnyView(RightPanelView(store: store))
+                }
             ),
         ]
     }

@@ -417,7 +417,7 @@ private struct ToolRow: View {
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
                 if expanded {
-                    ToolOutput(text: detail(arguments: arguments, output: output, change: change), diff: change != nil && output.isEmpty)
+                    ToolOutput(text: detail(arguments: arguments, output: output, change: change), diff: change != nil && output.isEmpty, path: change?.path)
                         .padding(.leading, 24)
                         .padding(.bottom, 6)
                 }
@@ -464,9 +464,55 @@ private struct ToolStateGlyph: View {
     }
 }
 
+private struct InlineDiff: Equatable, Sendable {
+    let text: String
+    let lines: [[CodeSegment]?]
+
+    init(_ text: String, path: String?) {
+        let raw = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var old: [String] = []
+        var new: [String] = []
+        var oldSlots: [Int] = []
+        var newSlots: [Int] = []
+        for (index, line) in raw.enumerated() where !Self.header(line) {
+            let code = String(line.dropFirst())
+            switch line.first {
+            case "+":
+                new.append(code)
+                newSlots.append(index)
+            case "-":
+                old.append(code)
+                oldSlots.append(index)
+            case " ":
+                old.append(code)
+                oldSlots.append(index)
+                new.append(code)
+                newSlots.append(index)
+            default:
+                break
+            }
+        }
+        var lines = [[CodeSegment]?](repeating: nil, count: raw.count)
+        for (slot, segments) in zip(oldSlots, highlightLines(lines: old, language: nil, path: path)) {
+            lines[slot] = segments
+        }
+        for (slot, segments) in zip(newSlots, highlightLines(lines: new, language: nil, path: path)) {
+            lines[slot] = segments
+        }
+        self.text = text
+        self.lines = lines
+    }
+
+    static func header(_ line: Substring) -> Bool {
+        line.hasPrefix("+++") || line.hasPrefix("---") || line.hasPrefix("@@")
+    }
+}
+
 private struct ToolOutput: View {
     let text: String
     let diff: Bool
+    let path: String?
+    @State private var highlighted: InlineDiff?
 
     private static let limit = 24_000
 
@@ -485,6 +531,14 @@ private struct ToolOutput: View {
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.code, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline))
+        .task(id: diff ? trimmed : "") {
+            guard diff else { return }
+            let text = trimmed
+            let path = path
+            let result = await SyntaxHighlighter.shared.run { InlineDiff(text, path: path) }
+            guard !Task.isCancelled else { return }
+            highlighted = result
+        }
     }
 
     private var trimmed: String {
@@ -494,18 +548,32 @@ private struct ToolOutput: View {
     }
 
     private var rendered: AttributedString {
-        guard diff else { return AttributedString(trimmed) }
+        let body = trimmed
+        guard diff else { return AttributedString(body) }
+        let segments = highlighted?.text == body ? highlighted?.lines ?? [] : []
         var result = AttributedString()
-        for line in trimmed.split(separator: "\n", omittingEmptySubsequences: false) {
-            var part = AttributedString(line + "\n")
-            if line.hasPrefix("+"), !line.hasPrefix("+++") {
-                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.diffAdded
-            } else if line.hasPrefix("-"), !line.hasPrefix("---") {
-                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.diffRemoved
-            } else if line.hasPrefix("@@") {
-                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.secondaryText
+        for (index, line) in body.split(separator: "\n", omittingEmptySubsequences: false).enumerated() {
+            var part: AttributedString
+            let header = InlineDiff.header(line)
+            if !header, let sign = line.first, segments.indices.contains(index), let code = segments[index] {
+                part = AttributedString(String(sign))
+                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = sign == "+" ? Theme.diffAdded : sign == "-" ? Theme.diffRemoved : Theme.secondaryText
+                SyntaxStyle.append(code, to: &part)
+            } else {
+                part = AttributedString(line)
+                if line.hasPrefix("+"), !header {
+                    part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.diffAdded
+                } else if line.hasPrefix("-"), !header {
+                    part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.diffRemoved
+                } else if line.hasPrefix("@@") {
+                    part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.secondaryText
+                }
+            }
+            if !header, line.hasPrefix("+") || line.hasPrefix("-") {
+                part[AttributeScopes.SwiftUIAttributes.BackgroundColorAttribute.self] = line.hasPrefix("+") ? Theme.diffAddedSurface : Theme.diffRemovedSurface
             }
             result += part
+            result += AttributedString("\n")
         }
         return result
     }

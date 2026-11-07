@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import LocalStudioKit
 import SwiftUI
 
 struct MarkdownView: View {
@@ -111,8 +112,10 @@ private struct MarkdownTableView: View {
 struct CodeBlockView: View {
     let language: String?
     let code: String
+    @State private var settled: CodeHighlight?
 
     var body: some View {
+        let key = HighlightKey(text: code, language: language, path: nil)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Text(language?.isEmpty == false ? language ?? "" : "text")
@@ -126,8 +129,7 @@ struct CodeBlockView: View {
             .frame(height: 30)
             Rectangle().fill(Theme.hairline).frame(height: 1)
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(code)
-                    .foregroundStyle(Theme.codeText)
+                Text(rendered(key))
                     .font(.system(size: 12, design: .monospaced))
                     .lineSpacing(2.5)
                     .textSelection(.enabled)
@@ -138,6 +140,29 @@ struct CodeBlockView: View {
         }
         .background(Theme.code, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
+        .task(id: key) { await highlight(key) }
+    }
+
+    private func rendered(_ key: HighlightKey) -> AttributedString {
+        let revision = ThemeTokens.shared.revision
+        if let full = SyntaxHighlighter.shared.rendered(key, revision: revision) {
+            return full
+        }
+        guard let settled, code.hasPrefix(settled.text) else { return SyntaxStyle.plain(code) }
+        var result = SyntaxStyle.attributed(settled.segments)
+        result.append(SyntaxStyle.plain(String(code.dropFirst(settled.text.count))))
+        return result
+    }
+
+    private func highlight(_ key: HighlightKey) async {
+        guard !SyntaxHighlighter.shared.contains(key) else { return }
+        if settled != nil {
+            try? await Task.sleep(for: .milliseconds(80))
+            guard !Task.isCancelled else { return }
+        }
+        let segments = await SyntaxHighlighter.shared.segments(key)
+        guard !Task.isCancelled else { return }
+        settled = CodeHighlight(text: key.text, segments: segments)
     }
 }
 

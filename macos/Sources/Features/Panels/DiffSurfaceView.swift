@@ -294,14 +294,14 @@ private struct DiffRowView: View {
                 .foregroundStyle(Theme.secondaryText)
                 .padding(.horizontal, 14)
                 .frame(maxWidth: .infinity, minHeight: 30, alignment: .leading)
-        case .line(let kind, let old, let new, let text):
+        case .line(let kind, let old, let new, let text, let segments):
             HStack(alignment: .top, spacing: 0) {
                 number(old, kind: kind)
                 number(new, kind: kind)
                 Text(sign(kind))
                     .foregroundStyle(textColor(kind))
                     .frame(width: 18)
-                code(text)
+                code(text, segments)
             }
             .font(metrics.font)
             .background(lineColor(kind))
@@ -323,7 +323,7 @@ private struct DiffRowView: View {
                 Text(sign(cell.kind))
                     .foregroundStyle(textColor(cell.kind))
                     .frame(width: 16)
-                code(cell.text)
+                code(cell.text, cell.segments)
             } else {
                 Color.clear
             }
@@ -345,18 +345,16 @@ private struct DiffRowView: View {
     }
 
     @ViewBuilder
-    private func code(_ text: String) -> some View {
+    private func code(_ text: String, _ segments: [CodeSegment]) -> some View {
         if wrap {
-            Text(verbatim: text.isEmpty ? " " : text)
-                .foregroundStyle(Theme.codeText)
+            Text(SyntaxStyle.line(text, segments))
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 1)
                 .padding(.trailing, 10)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            Text(verbatim: text.isEmpty ? " " : text)
-                .foregroundStyle(Theme.codeText)
+            Text(SyntaxStyle.line(text, segments))
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.vertical, 1)

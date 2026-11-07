@@ -48,7 +48,29 @@ enum PagesFixtures {
         "editorWarning.foreground": "#ffb86c",
         "terminal.background": "#282a36"
       },
-      "tokenColors": []
+      "tokenColors": [
+        { "scope": ["comment", "punctuation.definition.comment"], "settings": { "foreground": "#6272a4", "fontStyle": "italic" } },
+        { "scope": "keyword, storage.type, storage.modifier", "settings": { "foreground": "#ff79c6" } },
+        { "scope": "keyword.operator", "settings": { "foreground": "#ff79c6" } },
+        { "scope": ["string", "punctuation.definition.string"], "settings": { "foreground": "#f1fa8c" } },
+        { "scope": ["entity.name.function", "support.function"], "settings": { "foreground": "#50fa7b" } },
+        { "scope": ["entity.name.type", "support.type", "support.class"], "settings": { "foreground": "#8be9fd", "fontStyle": "italic" } },
+        { "scope": ["constant.numeric", "constant.language"], "settings": { "foreground": "#bd93f9" } },
+        { "scope": "variable.parameter", "settings": { "foreground": "#ffb86c", "fontStyle": "italic" } },
+        { "scope": "variable.language", "settings": { "foreground": "#bd93f9", "fontStyle": "italic" } }
+      ]
+    }
+    """
+
+    static let typeScriptSource = """
+    import { readFile } from "node:fs/promises";
+
+    // Load the fleet manifest and keep only reachable engines.
+    export interface Engine { name: string; port: number; healthy?: boolean }
+
+    export async function reachable(path: string, limit = 8): Promise<Engine[]> {
+      const engines: Engine[] = JSON.parse(await readFile(path, "utf8"));
+      return engines.filter((engine) => engine.healthy !== false).slice(0, limit);
     }
     """
 

@@ -68,6 +68,14 @@ enum Snapshots {
             host.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
         }
+        let deadline = Date(timeIntervalSinceNow: 15)
+        while SyntaxHighlighter.shared.busy, Date() < deadline {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.02))
+        }
+        for _ in 0..<2 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        }
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return "no bitmap for the view" }
         host.cacheDisplay(in: host.bounds, to: bitmap)
         window.close()

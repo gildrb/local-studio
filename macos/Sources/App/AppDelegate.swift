@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let filter = arguments.indices.contains(flag + 2) ? arguments[flag + 2] : nil
             exit(Snapshots.run(into: URL(fileURLWithPath: directory, isDirectory: true), matching: filter))
         }
+        SyntaxHighlighter.shared.warm()
         configureNotifier()
         installKeyMonitors()
         do {

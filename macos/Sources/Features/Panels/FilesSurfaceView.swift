@@ -214,6 +214,7 @@ private struct TextPreview: View {
     var body: some View {
         let digits = max(3, String(model.lines.count).count)
         let gutter = CGFloat(digits) * fontSize * 0.62 + 18
+        let highlighted = model.highlighted
         ScrollViewReader { proxy in
             ScrollView(wrap ? [.vertical] : [.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -225,8 +226,7 @@ private struct TextPreview: View {
                                 .monospacedDigit()
                                 .padding(.trailing, 10)
                                 .frame(width: gutter, alignment: .trailing)
-                            Text(verbatim: line.isEmpty ? " " : line)
-                                .foregroundStyle(Theme.codeText)
+                            Text(SyntaxStyle.line(line, highlighted.indices.contains(index) ? highlighted[index] : []))
                                 .lineLimit(wrap ? nil : 1)
                                 .fixedSize(horizontal: !wrap, vertical: true)
                                 .textSelection(.enabled)
