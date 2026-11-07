@@ -8,9 +8,11 @@ use local_studio_core::{AccessMode, ApprovalAnswer, Connection, ModelKey, Prompt
 use crate::app::{App, Dirty};
 use crate::extras::Extras;
 use crate::format;
+use crate::picker::{Picker, Row, Spec};
 use crate::state::State;
 
 const PLACEHOLDER: &str = "Ask anything, @tag files/folders, or / for commands";
+const ADD_PROVIDER: &str = "\u{1}add-provider";
 
 pub struct Composer {
     pub root: adw::Clamp,
@@ -27,15 +29,14 @@ pub struct Composer {
     model: gtk::DropDown,
     models: gtk::StringList,
     model_keys: RefCell<Vec<Option<ModelKey>>>,
-    thinking: gtk::DropDown,
-    levels: gtk::StringList,
-    level_names: RefCell<Vec<String>>,
-    access: gtk::DropDown,
+    thinking: Picker,
+    access: Picker,
     stop: gtk::Button,
     run_started: Cell<Option<i64>>,
     shortcut: Cell<SendShortcut>,
     app: Weak<App>,
     pub extras: Extras,
+    pub vim: crate::vim::Vim,
     pub tools: crate::tools::Tools,
     setup: crate::setup::SetupCard,
     pub options: crate::options::Options,
@@ -104,6 +105,7 @@ impl Composer {
             .left_margin(6)
             .right_margin(6)
             .build();
+        let vim = crate::vim::Vim::new(&view);
         let placeholder = gtk::Label::new(Some(PLACEHOLDER));
         placeholder.add_css_class("ls-placeholder");
         placeholder.set_halign(gtk::Align::Start);
@@ -131,10 +133,8 @@ impl Composer {
             None::<&gtk::Expression>,
             "string",
         )));
-        let levels = gtk::StringList::new(&[]);
-        let thinking = picker(&levels, "Thinking");
-        let access_names: Vec<&str> = format::ACCESS_MODES.iter().map(|mode| format::access_label(*mode)).collect();
-        let access = picker(&gtk::StringList::new(&access_names), "Permissions");
+        let thinking = thinking_picker(&app);
+        let access = access_picker(&app);
         let stop =
             gtk::Button::builder().icon_name("media-playback-stop-symbolic").tooltip_text("Stop Generation").build();
         stop.add_css_class("ls-stop");
@@ -150,14 +150,15 @@ impl Composer {
         footer.append(&extras.attach);
         footer.append(&model);
         footer.append(&options.compare);
-        footer.append(&thinking);
-        footer.append(&access);
-        footer.append(&options.tier);
+        footer.append(&thinking.button);
+        footer.append(&access.button);
+        footer.append(&options.tier.button);
         footer.append(&tools.meter);
-        footer.append(&tools.stash);
+        footer.append(&tools.stash.button);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         spacer.set_hexpand(true);
         footer.append(&spacer);
+        footer.append(&vim.label);
         footer.append(&stop);
         footer.append(&send);
 
@@ -217,6 +218,12 @@ impl Composer {
             let Some(app) = weak.upgrade() else { return glib::Propagation::Proceed };
             let view = app.composer.view.clone();
             if app.composer.extras.key(&app, &view, key) == glib::Propagation::Stop {
+                return glib::Propagation::Stop;
+            }
+            if app.composer.vim.key(&view, key, modifiers) == glib::Propagation::Stop {
+                return glib::Propagation::Stop;
+            }
+            if key == gdk::Key::Escape && crate::keyboard::plain(modifiers) && crate::keyboard::composer_escape(&app) {
                 return glib::Propagation::Stop;
             }
             let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
@@ -285,6 +292,11 @@ impl Composer {
             else {
                 return;
             };
+            if key.as_ref().is_some_and(|key| key.provider == ADD_PROVIDER) {
+                app.render(Dirty { composer: true, ..Dirty::default() });
+                app.open_settings(Some("providers"));
+                return;
+            }
             let thread = app.state.borrow().selected.clone();
             match thread {
                 Some(thread) => {
@@ -295,42 +307,6 @@ impl Composer {
                 None => app.state.borrow_mut().draft_settings.model = key,
             }
             app.render(Dirty { composer: true, ..Dirty::default() });
-        });
-        let weak = app.clone();
-        thinking.connect_selected_notify(move |dropdown| {
-            let Some(app) = weak.upgrade() else { return };
-            if app.syncing.get() {
-                return;
-            }
-            let Some(level) = usize::try_from(dropdown.selected())
-                .ok()
-                .and_then(|index| app.composer.level_names.borrow().get(index).cloned())
-            else {
-                return;
-            };
-            let thread = app.state.borrow().selected.clone();
-            match thread {
-                Some(thread) => app.core.run(|studio| studio.set_thinking_level(thread, level)),
-                None => app.state.borrow_mut().draft_settings.thinking = Some(level),
-            }
-        });
-        let weak = app.clone();
-        access.connect_selected_notify(move |dropdown| {
-            let Some(app) = weak.upgrade() else { return };
-            if app.syncing.get() {
-                return;
-            }
-            let Some(mode) =
-                usize::try_from(dropdown.selected()).ok().and_then(|index| format::ACCESS_MODES.get(index).copied())
-            else {
-                return;
-            };
-            dropdown.set_tooltip_text(Some(format::access_detail(mode)));
-            let thread = app.state.borrow().selected.clone();
-            match thread {
-                Some(thread) => app.core.run(|studio| studio.set_access_mode(thread, mode)),
-                None => app.state.borrow_mut().draft_settings.access = Some(mode),
-            }
         });
         let weak = app.clone();
         let label = working.clone();
@@ -361,14 +337,13 @@ impl Composer {
             models,
             model_keys: RefCell::new(Vec::new()),
             thinking,
-            levels,
-            level_names: RefCell::new(Vec::new()),
             access,
             stop,
             run_started: Cell::new(None),
             shortcut: Cell::new(SendShortcut::Enter),
             app,
             extras,
+            vim,
             tools,
             setup,
             options,
@@ -412,6 +387,7 @@ impl Composer {
     pub fn reset(&self) {
         self.set_text("");
         self.extras.reset();
+        self.vim.reset(&self.view);
     }
 
     pub fn type_text(&self, app: &std::rc::Rc<App>, text: &str) {
@@ -422,13 +398,14 @@ impl Composer {
     }
 
     pub fn open_picker(&self, which: &str) {
-        let dropdown = match which {
-            "model" => &self.model,
-            "thinking" => &self.thinking,
-            _ => &self.access,
-        };
-        if dropdown.is_visible() {
-            dropdown.activate();
+        match which {
+            "model" => {
+                if self.model.is_visible() {
+                    self.model.activate();
+                }
+            }
+            "thinking" => self.thinking.popup(),
+            _ => self.access.popup(),
         }
     }
 
@@ -464,6 +441,7 @@ impl Composer {
     #[allow(clippy::too_many_lines)]
     pub fn render(&self, state: &State) {
         self.shortcut.set(state.settings.send_shortcut);
+        self.vim.render(&self.view, state);
         self.markdown.set(state.settings.rich_text_composer);
         self.tools.render(state);
         self.setup.render(state);
@@ -560,6 +538,8 @@ impl Composer {
             keys.push(Some(active.clone()));
             names.push(name);
         }
+        keys.push(Some(ModelKey { provider: ADD_PROVIDER.to_string(), model: String::new() }));
+        names.push("Add Provider…".to_string());
         if *self.model_keys.borrow() != keys {
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             self.models.splice(0, self.models.n_items(), &refs);
@@ -573,26 +553,24 @@ impl Composer {
             .and_then(|index| u32::try_from(index).ok())
             .unwrap_or(gtk::INVALID_LIST_POSITION);
         self.model.set_selected(selected);
-        self.model.set_visible(!self.model_keys.borrow().is_empty());
+        self.model.set_visible(true);
 
         let levels = state.thinking_levels();
-        if *self.level_names.borrow() != levels {
-            let labels: Vec<String> = levels.iter().map(|level| format::capitalize(level)).collect();
-            let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-            self.levels.splice(0, self.levels.n_items(), &refs);
-            self.level_names.replace(levels);
-        }
-        self.thinking.set_visible(!self.level_names.borrow().is_empty());
-        let thinking = state
-            .active_thinking()
-            .and_then(|level| self.level_names.borrow().iter().position(|candidate| *candidate == level))
-            .and_then(|index| u32::try_from(index).ok())
-            .unwrap_or(gtk::INVALID_LIST_POSITION);
-        self.thinking.set_selected(thinking);
+        self.thinking.button.set_visible(!levels.is_empty());
+        let current =
+            state.active_thinking().filter(|level| levels.contains(level)).or_else(|| levels.first().cloned());
+        let rows: Vec<Row> = levels
+            .iter()
+            .map(|level| Row::new(level, level_title(level)).checked(current.as_ref() == Some(level)))
+            .collect();
+        self.thinking.set_rows(rows);
+        self.thinking.set_label(&current.as_deref().map(level_title).unwrap_or_default());
 
         let access: AccessMode = state.active_access();
-        self.access.set_selected(format::access_index(access));
-        self.access.set_tooltip_text(Some(format::access_detail(access)));
+        self.access.set_rows(access_rows(access));
+        self.access.set_label(format::access_label(access));
+        self.access.set_icon(Some(access_icon(access)));
+        self.access.button.set_tooltip_text(Some(format::access_detail(access)));
     }
 }
 
@@ -602,6 +580,74 @@ fn picker(model: &gtk::StringList, tooltip: &str) -> gtk::DropDown {
     dropdown.add_css_class("flat");
     dropdown.set_show_arrow(true);
     dropdown
+}
+
+fn thinking_picker(app: &Weak<App>) -> Picker {
+    let weak = app.clone();
+    let spec = Spec { tooltip: "Thinking", title: Some("Thinking"), width: 220, ..Spec::default() };
+    Picker::new(&spec, move |level| {
+        let Some(app) = weak.upgrade() else { return };
+        if app.syncing.get() {
+            return;
+        }
+        let level = level.to_string();
+        let thread = app.state.borrow().selected.clone();
+        match thread {
+            Some(thread) => app.core.run(|studio| studio.set_thinking_level(thread, level)),
+            None => app.state.borrow_mut().draft_settings.thinking = Some(level),
+        }
+        app.render(Dirty { composer: true, ..Dirty::default() });
+    })
+}
+
+fn access_picker(app: &Weak<App>) -> Picker {
+    let weak = app.clone();
+    let spec = Spec { tooltip: "Permissions", title: Some("Access"), width: 300, ..Spec::default() };
+    Picker::new(&spec, move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        if app.syncing.get() {
+            return;
+        }
+        let Some(mode) = id.parse::<usize>().ok().and_then(|index| format::ACCESS_MODES.get(index).copied()) else {
+            return;
+        };
+        let thread = app.state.borrow().selected.clone();
+        match thread {
+            Some(thread) => app.core.run(|studio| studio.set_access_mode(thread, mode)),
+            None => app.state.borrow_mut().draft_settings.access = Some(mode),
+        }
+        app.render(Dirty { composer: true, ..Dirty::default() });
+    })
+}
+
+fn access_rows(current: AccessMode) -> Vec<Row> {
+    format::ACCESS_MODES
+        .iter()
+        .enumerate()
+        .map(|(index, mode)| {
+            Row::new(index.to_string(), format::access_label(*mode))
+                .icon(access_icon(*mode))
+                .subtitle(format::access_detail(*mode))
+                .checked(*mode == current)
+        })
+        .collect()
+}
+
+fn access_icon(mode: AccessMode) -> &'static str {
+    match mode {
+        AccessMode::Supervised => "changes-prevent-symbolic",
+        AccessMode::AutoAcceptEdits => "document-edit-symbolic",
+        AccessMode::Auto => "emblem-ok-symbolic",
+        AccessMode::FullAccess => "changes-allow-symbolic",
+    }
+}
+
+fn level_title(level: &str) -> String {
+    match level {
+        "off" => "Thinking off".to_string(),
+        "xhigh" => "Extra high".to_string(),
+        other => format::capitalize(other),
+    }
 }
 
 fn queued_row(app: &Weak<App>, state: &State, id: &str, text: &str, sending: bool, steering: bool) -> gtk::Widget {

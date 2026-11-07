@@ -5,14 +5,23 @@ use local_studio_core::{
     AccessMode, Approval, Block, ColorScheme, Connection, ContextUsage, DiffHunk, DiffLine, DiffLineKind, FileChange,
     FileDiff, GitStatus, Item, ItemKind, Keybinding, LocalController, LocalEndpoint, LocalGpu, LocalHardware, LocalJob,
     LocalModelUsage, LocalRecipe, LocalRegistry, LocalRegistryMatch, LocalSnapshot, LocalUsage, ModelKey, ModelOption,
-    ModelRef, NoticeLevel, Project, ProviderStatus, QueuedMessage, RegistryModel, RegistryVariant, Settings, Shelf,
-    ThreadInfo, ThreadRow, ThreadStatus, ToolKind, ToolState, TranscriptOp, Update, UsageByModel, UsageDay, UsageLimit,
-    UsagePeriod, UsageReport,
+    ModelRef, NoticeLevel, Project, ProviderCredential, ProviderKind, ProviderStatus, QueuedMessage, RegistryModel,
+    RegistryVariant, Settings, Shelf, ThreadInfo, ThreadRow, ThreadStatus, ToolKind, ToolState, TranscriptOp, Update,
+    UsageByModel, UsageDay, UsageLimit, UsagePeriod, UsageReport,
 };
 
 use crate::app::{App, Dirty};
 use crate::format;
 use crate::state::{Page, State};
+
+pub fn scenes() -> Vec<&'static str> {
+    let mut all: Vec<&'static str> = SCENES.to_vec();
+    all.extend(crate::scenes_providers::SCENES);
+    all.extend(crate::scenes_pickers::SCENES);
+    all.extend(crate::dashboard_scenes::SCENES);
+    all.extend(crate::keyboard::SCENES);
+    all
+}
 
 pub const SCENES: [&str; 55] = [
     "01-empty",
@@ -161,7 +170,7 @@ pub fn stage(app: &Rc<App>, scene: &str) {
         "10-settings-general" => {
             conversation(app, false);
             app.open_settings(Some("general"));
-            app.apply(vec![Update::Providers { providers: providers() }]);
+            app.apply(vec![Update::Providers { providers: providers(), engines: Vec::new(), errors: Vec::new() }]);
         }
         "11-settings-keybindings" => {
             conversation(app, false);
@@ -206,6 +215,7 @@ pub fn teardown(app: &Rc<App>) {
     app.composer.reset();
     app.composer.tools.set_fixture(&[]);
     crate::scenes_workflow::reset(app);
+    crate::scenes_pickers::reset(app);
     app.branches.reset();
     app.timeline.clear();
     *app.state.borrow_mut() = State::default();
@@ -644,17 +654,34 @@ pub fn diff_files_public() -> Vec<FileDiff> {
     ]
 }
 
-fn providers() -> Vec<ProviderStatus> {
-    [("anthropic", "Anthropic", true, 9), ("openai", "OpenAI", true, 14), ("google", "Google", false, 6)]
-        .into_iter()
-        .map(|(id, name, configured, count)| ProviderStatus {
-            id: id.to_string(),
-            name: name.to_string(),
-            configured,
-            model_count: count,
-            auth: if configured { "configured" } else { "missing" }.to_string(),
-        })
-        .collect()
+pub fn provider(
+    id: &str,
+    name: &str,
+    kind: ProviderKind,
+    credential: ProviderCredential,
+    count: u32,
+) -> ProviderStatus {
+    ProviderStatus {
+        id: id.to_string(),
+        name: name.to_string(),
+        kind,
+        configured: !matches!(credential, ProviderCredential::Missing),
+        credential,
+        model_count: count,
+        env_var: (kind == ProviderKind::BuiltIn).then(|| format!("{}_API_KEY", id.to_uppercase())),
+        base_url: None,
+        api: None,
+        models: Vec::new(),
+    }
+}
+
+pub fn providers() -> Vec<ProviderStatus> {
+    vec![
+        provider("anthropic", "Anthropic", ProviderKind::BuiltIn, ProviderCredential::StoredKey, 9),
+        provider("openai", "OpenAI", ProviderKind::BuiltIn, ProviderCredential::Environment, 14),
+        provider("google", "Google", ProviderKind::BuiltIn, ProviderCredential::Missing, 6),
+        provider("openrouter", "OpenRouter", ProviderKind::BuiltIn, ProviderCredential::Missing, 0),
+    ]
 }
 
 fn keybindings() -> Vec<Keybinding> {

@@ -9,7 +9,7 @@ use crate::state::Page;
 
 type AppAction = fn(&Rc<App>);
 
-const BINDINGS: [(&str, &str); 35] = [
+const BINDINGS: [(&str, &str); 47] = [
     ("sidebar.toggle", "win.toggle-sidebar"),
     ("navigation.back", "win.nav-back"),
     ("navigation.forward", "win.nav-forward"),
@@ -45,29 +45,63 @@ const BINDINGS: [(&str, &str); 35] = [
     ("thread.undo", "win.undo"),
     ("snapshot.capture", "win.snapshot-capture"),
     ("composer.previousWorktree", "win.composer-workspace"),
+    ("chat.newTab", crate::keyboard::NEW_THREAD_HERE),
+    ("thread.close", "win.thread-close"),
+    ("thread.recentNext", "win.thread-recent-next"),
+    ("thread.recentPrevious", "win.thread-recent-previous"),
+    ("focus.next", "win.focus-next"),
+    ("focus.previous", "win.focus-previous"),
+    ("focus.cycle", "win.focus-cycle"),
+    ("focus.cycleBack", "win.focus-cycle-back"),
+    ("focus.composer", "win.focus-composer"),
+    ("rightPanel.previousTab", "win.panel-previous-tab"),
+    ("rightPanel.nextTab", "win.panel-next-tab"),
+    ("timeline.copyMessage", "win.timeline-copy-message"),
 ];
+
+pub fn action_for(command: &str) -> Option<String> {
+    BINDINGS
+        .iter()
+        .find(|(known, _)| *known == command)
+        .map(|(_, action)| (*action).to_string())
+        .or_else(|| command.strip_prefix("thread.jump.").map(|index| format!("win.thread-jump({index})")))
+        .or_else(|| {
+            command.strip_prefix("usage.period.").and_then(|period| {
+                ["day", "week", "month", "quarter"]
+                    .iter()
+                    .position(|known| *known == period)
+                    .map(|index| format!("win.usage-period({index})"))
+            })
+        })
+}
 
 pub fn apply(app: &App) {
     let bindings = app.state.borrow().keybindings.clone();
+    let closing =
+        bindings.iter().find(|binding| binding.command == "thread.close").and_then(|binding| binding.shortcut.clone());
     for binding in &bindings {
-        let action = BINDINGS
-            .iter()
-            .find(|(command, _)| *command == binding.command)
-            .map(|(_, action)| (*action).to_string())
-            .or_else(|| binding.command.strip_prefix("thread.jump.").map(|index| format!("win.thread-jump({index})")))
-            .or_else(|| {
-                binding.command.strip_prefix("usage.period.").and_then(|period| {
-                    ["day", "week", "month", "quarter"]
-                        .iter()
-                        .position(|known| *known == period)
-                        .map(|index| format!("win.usage-period({index})"))
-                })
-            });
-        let Some(action) = action else { continue };
-        let accel = binding.shortcut.as_deref().map(crate::format::accelerator);
-        let accels: Vec<&str> = accel.iter().map(String::as_str).collect();
+        let Some(action) = action_for(&binding.command) else { continue };
+        let scoped = binding.when.as_deref() == Some("timelineFocus");
+        let shadowed =
+            binding.command == "rightPanel.close" && binding.shortcut.is_some() && binding.shortcut == closing;
+        let owned = match binding.shortcut.as_deref() {
+            Some(shortcut) if !scoped && !shadowed => accelerators(shortcut),
+            _ => Vec::new(),
+        };
+        let accels: Vec<&str> = owned.iter().map(String::as_str).collect();
         app.application.set_accels_for_action(&action, &accels);
     }
+}
+
+fn accelerators(shortcut: &str) -> Vec<String> {
+    let primary = crate::format::accelerator(shortcut);
+    let alias = primary
+        .strip_suffix("Tab")
+        .filter(|prefix| prefix.contains("<Shift>"))
+        .map(|prefix| format!("{prefix}ISO_Left_Tab"));
+    let mut list = vec![primary];
+    list.extend(alias);
+    list
 }
 
 fn install_usage_keys(app: &Rc<App>) {
@@ -177,6 +211,7 @@ pub fn install(app: &Rc<App>) {
     ] {
         app.application.set_accels_for_action(action, &[accel]);
     }
+    crate::keyboard::install(app);
 }
 
 fn pull_request(app: &App) -> Option<(u64, String)> {

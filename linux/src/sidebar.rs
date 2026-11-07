@@ -43,6 +43,9 @@ pub struct Sidebar {
     filter: gtk::MenuButton,
     projects: gtk::ListBox,
     store: gio::ListStore,
+    list: gtk::ListView,
+    cursor: RefCell<Option<String>>,
+    ring: Cell<bool>,
     bulk: gtk::Box,
     bulk_label: gtk::Label,
     bulk_unpin: gtk::Button,
@@ -125,6 +128,7 @@ impl Sidebar {
             let holder = adw::Bin::new();
             install_row_controllers(&weak, item, &holder);
             item.set_child(Some(&holder));
+            item.set_focusable(false);
         });
         let weak = app.clone();
         factory.connect_bind(move |_, object| {
@@ -132,10 +136,16 @@ impl Sidebar {
             let Some(holder) = item.child().and_downcast::<adw::Bin>() else { return };
             let Some(entry) = entry_of(item) else { return };
             item.set_activatable(!matches!(entry, Entry::Empty(_)));
-            holder.set_child(Some(&entry_widget(&weak, &entry)));
+            let widget = entry_widget(&weak, &entry);
+            if weak.upgrade().is_some_and(|app| app.sidebar.ringed(&entry)) {
+                widget.add_css_class("ls-focus-ring");
+            }
+            holder.set_child(Some(&widget));
         });
         let list = gtk::ListView::new(Some(gtk::NoSelection::new(Some(store.clone()))), Some(factory));
         list.add_css_class("ls-list");
+        list.set_focusable(true);
+        install_list_keys(&app, &list, &search);
         let weak = app.clone();
         list.connect_activate(move |list, position| {
             let Some(app) = weak.upgrade() else { return };
@@ -247,6 +257,9 @@ impl Sidebar {
             filter,
             projects,
             store,
+            list,
+            cursor: RefCell::new(None),
+            ring: Cell::new(false),
             bulk,
             bulk_label,
             bulk_unpin,
@@ -269,6 +282,95 @@ impl Sidebar {
 
     pub fn focus_search(&self) {
         self.search.grab_focus();
+    }
+
+    pub fn type_search(&self, input: char) {
+        let text = format!("{}{input}", self.search.text());
+        self.search.set_text(&text);
+        self.search.grab_focus();
+        self.search.set_position(-1);
+    }
+
+    pub fn focus_list(&self, app: &App) {
+        let order = self.cursor_order();
+        let keep = self.cursor.borrow().as_ref().is_some_and(|cursor| order.contains(cursor));
+        if !keep {
+            let selected = app.state.borrow().selected.clone().filter(|selected| order.contains(selected));
+            self.set_cursor(selected.or_else(|| order.first().cloned()));
+        }
+        self.set_ring(true);
+        gtk::prelude::RootExt::set_focus(&app.window, Some(&self.list));
+        self.scroll_to_cursor();
+    }
+
+    pub fn set_ring(&self, on: bool) {
+        if self.ring.replace(on) != on {
+            let cursor = self.cursor.borrow().clone();
+            self.refresh_row(cursor.as_deref());
+        }
+    }
+
+    pub fn cursor_thread(&self) -> Option<String> {
+        self.cursor.borrow().clone()
+    }
+
+    pub fn move_cursor(&self, offset: isize) {
+        let order = self.cursor_order();
+        let Some(last) = order.len().checked_sub(1) else { return };
+        let index = self.cursor.borrow().as_ref().and_then(|cursor| order.iter().position(|known| known == cursor));
+        let next = match index {
+            Some(index) => index.saturating_add_signed(offset).min(last),
+            None if offset > 0 => 0,
+            None => last,
+        };
+        self.set_cursor(order.get(next).cloned());
+    }
+
+    pub fn cursor_edge(&self, top: bool) {
+        let order = self.cursor_order();
+        let target = if top { order.first() } else { order.last() };
+        self.set_cursor(target.cloned());
+    }
+
+    fn ringed(&self, entry: &Entry) -> bool {
+        self.ring.get() && entry_thread(entry).is_some_and(|id| self.cursor.borrow().as_deref() == Some(id))
+    }
+
+    fn cursor_order(&self) -> Vec<String> {
+        self.entries.try_borrow().map_or_else(
+            |_| Vec::new(),
+            |entries| entries.iter().filter_map(entry_thread).map(ToString::to_string).collect(),
+        )
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    fn set_cursor(&self, next: Option<String>) {
+        let previous = self.cursor.replace(next.clone());
+        if previous != next {
+            self.refresh_row(previous.as_deref());
+            self.refresh_row(next.as_deref());
+        }
+        self.scroll_to_cursor();
+    }
+
+    fn position_of(&self, thread: &str) -> Option<u32> {
+        let entries = self.entries.try_borrow().ok()?;
+        entries.iter().position(|entry| entry_thread(entry) == Some(thread)).and_then(|index| u32::try_from(index).ok())
+    }
+
+    fn refresh_row(&self, thread: Option<&str>) {
+        let Some(position) = thread.and_then(|thread| self.position_of(thread)) else { return };
+        let entry = self.entries.try_borrow().ok().and_then(|entries| entries.get(position as usize).cloned());
+        if let Some(entry) = entry {
+            self.store.splice(position, 1, &[glib::BoxedAnyObject::new(entry)]);
+        }
+    }
+
+    fn scroll_to_cursor(&self) {
+        let cursor = self.cursor.borrow().clone();
+        if let Some(position) = cursor.as_deref().and_then(|thread| self.position_of(thread)) {
+            self.list.scroll_to(position, gtk::ListScrollFlags::NONE, None);
+        }
     }
 
     pub fn search_loaded(&self, request: &str, hits: Vec<ThreadSearchHit>) {
@@ -334,6 +436,8 @@ impl Sidebar {
         self.marked.borrow_mut().clear();
         self.renaming.replace(None);
         self.hints.set(false);
+        self.cursor.replace(None);
+        self.ring.set(false);
         self.hits.replace(None);
         self.search.set_text("");
     }
@@ -742,6 +846,48 @@ fn activate(app: &Rc<App>, entry: &Entry, modifiers: gdk::ModifierType) {
 
 fn entry_of(item: &gtk::ListItem) -> Option<Entry> {
     item.item().and_downcast::<glib::BoxedAnyObject>().map(|object| object.borrow::<Entry>().clone())
+}
+
+fn entry_thread(entry: &Entry) -> Option<&str> {
+    match entry {
+        Entry::Thread(card) => Some(card.row.id.as_str()),
+        Entry::Hit { hit, .. } => Some(hit.thread.as_str()),
+        _ => None,
+    }
+}
+
+fn install_list_keys(app: &Weak<App>, list: &gtk::ListView, search: &gtk::SearchEntry) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let (weak, watched) = (app.clone(), list.downgrade());
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let (Some(app), Some(list)) = (weak.upgrade(), watched.upgrade()) else { return glib::Propagation::Proceed };
+        if !list.is_focus() {
+            return glib::Propagation::Proceed;
+        }
+        crate::keyboard::nav(key, modifiers)
+            .map_or(glib::Propagation::Proceed, |nav| crate::keyboard::sidebar_key(&app, nav))
+    });
+    list.add_controller(keys);
+    let focus = gtk::EventControllerFocus::new();
+    let weak = app.clone();
+    focus.connect_leave(move |_| {
+        if let Some(app) = weak.upgrade() {
+            app.sidebar.set_ring(false);
+        }
+    });
+    list.add_controller(focus);
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let (weak, field) = (app.clone(), search.downgrade());
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let (Some(app), Some(field)) = (weak.upgrade(), field.upgrade()) else { return glib::Propagation::Proceed };
+        if !crate::keyboard::plain(modifiers) {
+            return glib::Propagation::Proceed;
+        }
+        crate::keyboard::search_key(&app, key, field.text().is_empty())
+    });
+    search.add_controller(keys);
 }
 
 fn entry_widget(app: &Weak<App>, entry: &Entry) -> gtk::Widget {

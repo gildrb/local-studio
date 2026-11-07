@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use local_studio_core::{
-    AccessMode, Approval, Connection, GitStatus, Keybinding, LocalSnapshot, ModelKey, ModelOption, Project,
-    ProjectScript, ProjectSettings, ProviderStatus, QueuedMessage, Settings, SetupStage, Subagent, ThreadInfo,
-    ThreadRow, UsagePeriod, UsageReport,
+    AccessMode, Approval, Connection, GitStatus, Keybinding, LocalDashboard, LocalEngine, LocalSnapshot, ModelKey,
+    ModelOption, Project, ProjectScript, ProjectSettings, ProviderStatus, QueuedMessage, Settings, SetupStage,
+    Subagent, ThreadInfo, ThreadRow, UsagePeriod, UsageReport,
 };
 
 #[derive(Clone, Default)]
@@ -68,6 +68,12 @@ pub struct State {
     pub search: String,
     pub page: Page,
     pub local: Option<LocalSnapshot>,
+    pub dashboard: Option<LocalDashboard>,
+    pub engines: Vec<LocalEngine>,
+    pub provider_errors: Vec<String>,
+    pub provider_pending: std::collections::HashSet<String>,
+    pub provider_error: Option<String>,
+    pub providers_loaded: bool,
     pub usage: Option<UsageReport>,
     pub usage_period: Option<UsagePeriod>,
 }

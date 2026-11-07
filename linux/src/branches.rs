@@ -6,8 +6,12 @@ use gtk::glib;
 use local_studio_core::{Branch, NewThreadWorkspace, WorktreeChoice};
 
 use crate::app::{App, Target};
-use crate::format;
+use crate::picker::{Picker, Row, Spec};
 use crate::state::{Page, State};
+
+const LOCAL: &str = "local";
+const WORKTREE: &str = "worktree";
+const FRESH: &str = "fresh";
 
 #[derive(Clone, PartialEq, Eq)]
 enum Pick {
@@ -18,12 +22,9 @@ enum Pick {
 
 pub struct BranchBar {
     pub root: adw::Clamp,
-    mode: gtk::DropDown,
-    branch: gtk::MenuButton,
-    branch_label: gtk::Label,
-    search: gtk::SearchEntry,
-    list: gtk::ListBox,
-    status: gtk::Label,
+    mode: Picker,
+    branch: Picker,
+    use_worktree: Cell<bool>,
     pick: RefCell<Pick>,
     touched: Cell<bool>,
     rows: RefCell<Vec<Pick>>,
@@ -31,90 +32,22 @@ pub struct BranchBar {
 
 impl BranchBar {
     pub fn new(app: Weak<App>) -> Self {
-        let mode = gtk::DropDown::from_strings(&["Local checkout", "New worktree"]);
-        mode.add_css_class("flat");
-        mode.set_tooltip_text(Some("Where the new thread works (Ctrl+Shift+X)"));
-        let branch_label = gtk::Label::new(None);
-        branch_label.add_css_class("ls-mono");
-        branch_label.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
-        branch_label.set_max_width_chars(36);
-        let branch_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        branch_box.append(&gtk::Image::from_icon_name("media-record-symbolic"));
-        branch_box.append(&branch_label);
-        let search = gtk::SearchEntry::builder().placeholder_text("Search or create a branch").build();
-        let list = gtk::ListBox::new();
-        list.add_css_class("navigation-sidebar");
-        list.set_selection_mode(gtk::SelectionMode::None);
-        let status = gtk::Label::new(None);
-        status.add_css_class("ls-meta");
-        status.set_xalign(0.0);
-        let scroller = gtk::ScrolledWindow::builder()
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .propagate_natural_height(true)
-            .max_content_height(320)
-            .min_content_width(320)
-            .child(&list)
-            .build();
-        let column = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        column.append(&search);
-        column.append(&scroller);
-        column.append(&status);
-        let popover = gtk::Popover::new();
-        popover.set_child(Some(&column));
-        let branch = gtk::MenuButton::builder().child(&branch_box).popover(&popover).build();
-        branch.add_css_class("flat");
+        let mode = mode_picker(&app);
+        let branch = branch_picker(app);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         row.add_css_class("ls-branchbar");
-        row.append(&mode);
-        row.append(&branch);
+        row.append(&mode.button);
+        row.append(&branch.button);
         let root = adw::Clamp::builder().maximum_size(820).tightening_threshold(640).child(&row).build();
         root.set_margin_start(26);
         root.set_margin_end(20);
         root.set_margin_bottom(10);
         root.set_visible(false);
-
-        let weak = app.clone();
-        mode.connect_selected_notify(move |_| {
-            let Some(app) = weak.upgrade() else { return };
-            if app.syncing.get() {
-                return;
-            }
-            app.branches.touched.set(true);
-            let state = app.state.borrow();
-            app.branches.render(&state);
-        });
-        let weak = app.clone();
-        popover.connect_show(move |_| {
-            if let Some(app) = weak.upgrade() {
-                app.branches.request(&app);
-            }
-        });
-        let weak = app.clone();
-        search.connect_search_changed(move |_| {
-            if let Some(app) = weak.upgrade() {
-                app.branches.request(&app);
-            }
-        });
-        let weak = app;
-        list.connect_row_activated(move |_, row| {
-            let Some(app) = weak.upgrade() else { return };
-            let pick =
-                usize::try_from(row.index()).ok().and_then(|index| app.branches.rows.borrow().get(index).cloned());
-            if let Some(pick) = pick {
-                app.branches.pick.replace(pick);
-                app.branches.branch.popdown();
-                let state = app.state.borrow();
-                app.branches.render(&state);
-            }
-        });
         Self {
             root,
             mode,
             branch,
-            branch_label,
-            search,
-            list,
-            status,
+            use_worktree: Cell::new(false),
             pick: RefCell::new(Pick::Fresh),
             touched: Cell::new(false),
             rows: RefCell::new(Vec::new()),
@@ -123,12 +56,12 @@ impl BranchBar {
 
     pub fn open_mode(&self) {
         if self.root.is_visible() {
-            self.mode.activate();
+            self.mode.popup();
         }
     }
 
     pub fn open_branch(&self) {
-        if self.root.is_visible() && self.branch.is_sensitive() {
+        if self.root.is_visible() {
             self.branch.popup();
         }
     }
@@ -136,56 +69,58 @@ impl BranchBar {
     pub fn reset(&self) {
         self.pick.replace(Pick::Fresh);
         self.touched.set(false);
-        self.search.set_text("");
+        self.branch.set_search_text("");
     }
 
     fn worktree(&self) -> bool {
-        self.mode.selected() == 1
+        self.use_worktree.get()
     }
 
     fn request(&self, app: &Rc<App>) {
         let project = app.state.borrow().current_project();
         let Some(project) = project else { return };
         let request = app.ask(Target::Branches);
-        let query = self.search.text().to_string();
-        self.status.set_label("Loading refs…");
+        let query = self.branch.search_text();
+        self.branch.set_note(Some("Loading refs…"));
         app.core.run(|studio| studio.list_branches(request, project, query, 50));
     }
 
     pub fn loaded(&self, branches: &[Branch], total: u32) {
-        let query = self.search.text().trim().to_string();
-        self.list.remove_all();
-        let mut rows = Vec::new();
-        if !query.is_empty() && !branches.iter().any(|branch| branch.name == query) {
-            let row = adw::ActionRow::builder()
-                .title(format::escape(&format!("Create branch “{query}”")))
-                .activatable(true)
-                .build();
-            row.add_prefix(&gtk::Image::from_icon_name("list-add-symbolic"));
-            self.list.append(&row);
-            rows.push(Pick::Create(query));
+        let query = self.branch.search_text().trim().to_string();
+        let pick = self.pick.borrow().clone();
+        let mut choices = Vec::new();
+        let mut items = Vec::new();
+        if query.is_empty() {
+            items.push(Row::new(FRESH, "New branch").subtitle("Named automatically").checked(pick == Pick::Fresh));
+        } else if !branches.iter().any(|branch| branch.name == query) {
+            let create = Pick::Create(query.clone());
+            items.push(
+                Row::new(choices.len().to_string(), format!("Create branch “{query}”"))
+                    .icon("list-add-symbolic")
+                    .checked(pick == create),
+            );
+            choices.push(create);
         }
         for branch in branches {
-            let row = adw::ActionRow::builder().title(format::escape(&branch.name)).activatable(true).build();
-            for (show, text) in
+            let chosen = matches!(&pick, Pick::Branch(current) if current.name == branch.name);
+            let mut row = Row::new(choices.len().to_string(), &branch.name).checked(chosen);
+            let badges: Vec<&str> =
                 [(branch.current, "current"), (branch.remote, "remote"), (branch.worktree.is_some(), "worktree")]
-            {
-                if show {
-                    let badge = gtk::Label::new(Some(text));
-                    badge.add_css_class("ls-pill");
-                    badge.set_valign(gtk::Align::Center);
-                    row.add_suffix(&badge);
-                }
+                    .into_iter()
+                    .filter_map(|(show, text)| show.then_some(text))
+                    .collect();
+            if !badges.is_empty() {
+                row = row.detail(badges.join(" · "));
             }
             if let Some(worktree) = &branch.worktree {
-                row.set_subtitle(&format::escape(worktree));
-                row.set_subtitle_lines(1);
+                row = row.subtitle(worktree);
             }
-            self.list.append(&row);
-            rows.push(Pick::Branch(branch.clone()));
+            items.push(row);
+            choices.push(Pick::Branch(branch.clone()));
         }
-        self.status.set_label(&format!("Showing {} of {total} refs", branches.len()));
-        self.rows.replace(rows);
+        self.branch.set_note(Some(&format!("Showing {} of {total} refs", branches.len())));
+        self.rows.replace(choices);
+        self.branch.set_rows(items);
     }
 
     pub fn render(&self, state: &State) {
@@ -194,15 +129,21 @@ impl BranchBar {
             project.as_deref().and_then(|project| state.project(project)).is_some_and(|project| project.is_git);
         self.root.set_visible(state.page == Page::Thread && state.selected.is_none() && is_git);
         if !self.touched.get() {
-            let worktree = state.settings.new_thread_workspace == NewThreadWorkspace::Worktree;
-            self.mode.set_selected(u32::from(worktree));
+            self.use_worktree.set(state.settings.new_thread_workspace == NewThreadWorkspace::Worktree);
         }
+        let worktree = self.worktree();
+        self.mode.set_rows(vec![
+            Row::new(LOCAL, "Local checkout").icon("folder-symbolic").checked(!worktree),
+            Row::new(WORKTREE, "New worktree").icon("folder-new-symbolic").checked(worktree),
+        ]);
+        self.mode.set_label(if worktree { "New worktree" } else { "Local checkout" });
+        self.mode.set_icon(Some(if worktree { "folder-new-symbolic" } else { "folder-symbolic" }));
         let current =
             project.as_deref().and_then(|project| state.git.get(project)).and_then(|status| status.branch.clone());
-        if self.worktree() {
-            self.branch.set_sensitive(true);
-            self.branch.set_tooltip_text(Some("Branch for the new worktree"));
-            self.branch_label.set_label(&match &*self.pick.borrow() {
+        if worktree {
+            self.branch.button.set_sensitive(true);
+            self.branch.button.set_tooltip_text(Some("Branch for the new worktree"));
+            self.branch.set_label(&match &*self.pick.borrow() {
                 Pick::Fresh => "New branch".to_string(),
                 Pick::Branch(branch) => branch
                     .worktree
@@ -211,9 +152,9 @@ impl BranchBar {
                 Pick::Create(name) => format!("{name} (new)"),
             });
         } else {
-            self.branch.set_sensitive(false);
-            self.branch.set_tooltip_text(Some("The local checkout stays on its current branch"));
-            self.branch_label.set_label(current.as_deref().unwrap_or("Current branch"));
+            self.branch.button.set_sensitive(false);
+            self.branch.button.set_tooltip_text(Some("The local checkout stays on its current branch"));
+            self.branch.set_label(current.as_deref().unwrap_or("Current branch"));
         }
     }
 
@@ -260,7 +201,65 @@ impl BranchBar {
 
     pub fn preset(&self, worktree: bool, branch: Option<Branch>) {
         self.touched.set(true);
-        self.mode.set_selected(u32::from(worktree));
+        self.use_worktree.set(worktree);
         self.pick.replace(branch.map_or(Pick::Fresh, Pick::Branch));
     }
+}
+
+fn mode_picker(app: &Weak<App>) -> Picker {
+    let weak = app.clone();
+    let spec = Spec {
+        tooltip: "Where the new thread works (Ctrl+Shift+X)",
+        title: Some("Workspace"),
+        width: 220,
+        ..Spec::default()
+    };
+    Picker::new(&spec, move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        if app.syncing.get() {
+            return;
+        }
+        app.branches.use_worktree.set(id == WORKTREE);
+        app.branches.touched.set(true);
+        let state = app.state.borrow();
+        app.branches.render(&state);
+    })
+}
+
+fn branch_picker(app: Weak<App>) -> Picker {
+    let weak = app.clone();
+    let spec = Spec {
+        tooltip: "Branch for the new worktree",
+        search: Some("Search or create a branch"),
+        empty: Some("Loading branches…"),
+        width: 320,
+        max_height: 320,
+        ..Spec::default()
+    };
+    let picker = Picker::new(&spec, move |id| {
+        let Some(app) = weak.upgrade() else { return };
+        let pick = if id == FRESH {
+            Some(Pick::Fresh)
+        } else {
+            id.parse::<usize>().ok().and_then(|index| app.branches.rows.borrow().get(index).cloned())
+        };
+        let Some(pick) = pick else { return };
+        app.branches.pick.replace(pick);
+        let state = app.state.borrow();
+        app.branches.render(&state);
+    });
+    picker.set_icon(Some("media-record-symbolic"));
+    picker.label.add_css_class("ls-mono");
+    let weak = app.clone();
+    picker.popover.connect_show(move |_| {
+        if let Some(app) = weak.upgrade() {
+            app.branches.request(&app);
+        }
+    });
+    picker.connect_search(move || {
+        if let Some(app) = app.upgrade() {
+            app.branches.request(&app);
+        }
+    });
+    picker
 }

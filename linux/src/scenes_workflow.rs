@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use local_studio_core::{
-    Goal, ModelKey, ProjectScript, ProjectSettings, ProviderStatus, Settings, SkillEntry, SkillSource, Subagent, Update,
+    Goal, ModelKey, ProjectScript, ProjectSettings, Settings, SkillEntry, SkillSource, Subagent, Update,
 };
 
 use crate::app::App;
@@ -76,13 +76,15 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             app.split.set_min_sidebar_width(360.0);
             app.split.set_max_sidebar_width(360.0);
             app.apply(vec![Update::Providers {
-                providers: vec![ProviderStatus {
-                    id: "anthropic".to_string(),
-                    name: "Anthropic".to_string(),
-                    configured: false,
-                    model_count: 4,
-                    auth: "missing".to_string(),
-                }],
+                providers: vec![crate::fixtures::provider(
+                    "anthropic",
+                    "Anthropic",
+                    local_studio_core::ProviderKind::BuiltIn,
+                    local_studio_core::ProviderCredential::Missing,
+                    4,
+                )],
+                engines: Vec::new(),
+                errors: Vec::new(),
             }]);
             app.show_notice("git push failed: the remote rejected the update (non-fast-forward).");
         }
@@ -133,7 +135,7 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             conversation(app, false);
             crate::palette::open(app);
         }
-        _ => {}
+        _ => crate::scenes_providers::stage(app, scene),
     }
 }
 

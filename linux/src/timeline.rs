@@ -23,9 +23,12 @@ pub struct Timeline {
     follow: Rc<Cell<bool>>,
     list: gtk::ListView,
     width: Rc<Cell<i32>>,
+    cursor: Rc<Cell<Option<u64>>>,
+    ring: Rc<Cell<bool>>,
 }
 
 impl Timeline {
+    #[allow(clippy::too_many_lines)]
     pub fn new(app: Weak<App>) -> Self {
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
         let hidden: Rc<RefCell<HashSet<u64>>> = Rc::default();
@@ -50,16 +53,26 @@ impl Timeline {
         let bind_expanded = Rc::clone(&expanded);
         let width = Rc::new(Cell::new(820));
         let bind_width = Rc::clone(&width);
+        let cursor: Rc<Cell<Option<u64>>> = Rc::default();
+        let ring: Rc<Cell<bool>> = Rc::default();
+        let (bind_cursor, bind_ring) = (Rc::clone(&cursor), Rc::clone(&ring));
+        let keyboard = app.clone();
         factory.connect_bind(move |_, object| {
             let Some(item) = object.downcast_ref::<gtk::ListItem>() else { return };
             let Some(clamp) = item.child().and_downcast::<adw::Clamp>() else { return };
             let Some(entry) = item.item().and_downcast::<glib::BoxedAnyObject>() else { return };
             let entry = entry.borrow::<Item>();
             clamp.set_maximum_size(bind_width.get());
-            clamp.set_child(Some(&item_widget(&app, &entry, &bind_expanded.borrow())));
+            let widget = item_widget(&app, &entry, &bind_expanded.borrow());
+            if bind_ring.get() && bind_cursor.get() == Some(entry.id) {
+                widget.add_css_class("ls-focus-ring");
+            }
+            clamp.set_child(Some(&widget));
         });
         let list = gtk::ListView::new(Some(gtk::NoSelection::new(Some(filtered))), Some(factory));
         list.add_css_class("ls-timeline");
+        list.set_focusable(true);
+        install_keys(&keyboard, &list);
         list.set_margin_top(12);
         list.set_margin_bottom(12);
         let scroller =
@@ -106,7 +119,20 @@ impl Timeline {
         root.add_overlay(&pill);
         root.add_overlay(&minimap.0);
         let minimap = minimap.1;
-        Self { root, minimap, store, items: RefCell::new(Vec::new()), hidden, expanded, filter, follow, list, width }
+        Self {
+            root,
+            minimap,
+            store,
+            items: RefCell::new(Vec::new()),
+            hidden,
+            expanded,
+            filter,
+            follow,
+            list,
+            width,
+            cursor,
+            ring,
+        }
     }
 
     pub fn refresh_minimap(&self) {
@@ -178,6 +204,99 @@ impl Timeline {
         self.hidden.borrow_mut().clear();
         self.expanded.borrow_mut().clear();
         self.follow.set(true);
+        self.cursor.set(None);
+    }
+
+    pub fn focus_list(&self, window: &adw::ApplicationWindow) {
+        let ids = self.visible_ids();
+        if !self.cursor.get().is_some_and(|cursor| ids.contains(&cursor)) {
+            let last = ids.last().copied();
+            let previous = self.cursor.replace(last);
+            self.refresh_item(previous);
+            self.refresh_item(last);
+        }
+        self.set_ring(true);
+        gtk::prelude::RootExt::set_focus(window, Some(&self.list));
+        self.scroll_to_cursor(&ids);
+    }
+
+    pub fn set_ring(&self, on: bool) {
+        if self.ring.replace(on) != on {
+            self.refresh_item(self.cursor.get());
+        }
+    }
+
+    pub fn move_cursor(&self, offset: isize) {
+        let ids = self.visible_ids();
+        let Some(last) = ids.len().checked_sub(1) else { return };
+        let next = match self.cursor.get().and_then(|cursor| ids.iter().position(|id| *id == cursor)) {
+            Some(index) => index.saturating_add_signed(offset).min(last),
+            None => last,
+        };
+        self.set_cursor(ids[next], &ids);
+    }
+
+    pub fn cursor_edge(&self, top: bool) {
+        let ids = self.visible_ids();
+        let target = if top { ids.first() } else { ids.last() };
+        if let Some(target) = target.copied() {
+            self.set_cursor(target, &ids);
+        }
+    }
+
+    pub fn activate_cursor(&self) {
+        let Some(cursor) = self.cursor.get() else { return };
+        let foldable =
+            self.items.borrow().iter().any(|item| {
+                item.id == cursor && matches!(item.kind, ItemKind::TurnSummary { .. } | ItemKind::Tool { .. })
+            });
+        if foldable {
+            self.toggle(cursor);
+        }
+    }
+
+    pub fn cursor_text(&self) -> String {
+        let Some(cursor) = self.cursor.get() else { return String::new() };
+        let items = self.items.borrow();
+        items.iter().find(|item| item.id == cursor).map(|item| copy_text(&item.kind)).unwrap_or_default()
+    }
+
+    fn visible_ids(&self) -> Vec<u64> {
+        let Some(model) = self.list.model() else { return Vec::new() };
+        (0..model.n_items())
+            .filter_map(|position| {
+                model.item(position).and_downcast::<glib::BoxedAnyObject>().map(|object| object.borrow::<Item>().id)
+            })
+            .collect()
+    }
+
+    fn set_cursor(&self, id: u64, ids: &[u64]) {
+        let previous = self.cursor.replace(Some(id));
+        if previous != Some(id) {
+            self.refresh_item(previous);
+            self.refresh_item(Some(id));
+        }
+        self.scroll_to_cursor(ids);
+    }
+
+    fn refresh_item(&self, id: Option<u64>) {
+        let Some(id) = id else { return };
+        let found = self.items.try_borrow().ok().and_then(|items| {
+            items.iter().position(|item| item.id == id).map(|position| (position, items[position].clone()))
+        });
+        if let Some((position, item)) = found {
+            if let Ok(position) = u32::try_from(position) {
+                self.store.splice(position, 1, &[glib::BoxedAnyObject::new(item)]);
+            }
+        }
+    }
+
+    fn scroll_to_cursor(&self, ids: &[u64]) {
+        let Some(cursor) = self.cursor.get() else { return };
+        let position = ids.iter().position(|id| *id == cursor).and_then(|position| u32::try_from(position).ok());
+        if let Some(position) = position {
+            self.list.scroll_to(position, gtk::ListScrollFlags::NONE, None);
+        }
     }
 
     pub fn apply(&self, op: TranscriptOp) {
@@ -768,4 +887,49 @@ fn small_icon(name: &str, class: &str) -> gtk::Image {
     image.set_pixel_size(14);
     image.add_css_class(class);
     image
+}
+
+fn install_keys(app: &Weak<App>, list: &gtk::ListView) {
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let (weak, watched) = (app.clone(), list.downgrade());
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let (Some(app), Some(list)) = (weak.upgrade(), watched.upgrade()) else { return glib::Propagation::Proceed };
+        if !list.is_focus() {
+            return glib::Propagation::Proceed;
+        }
+        crate::keyboard::timeline_key(&app, key, modifiers)
+    });
+    list.add_controller(keys);
+    let focus = gtk::EventControllerFocus::new();
+    let weak = app.clone();
+    focus.connect_leave(move |_| {
+        if let Some(app) = weak.upgrade() {
+            app.timeline.set_ring(false);
+        }
+    });
+    list.add_controller(focus);
+}
+
+fn copy_text(kind: &ItemKind) -> String {
+    match kind {
+        ItemKind::User { text, .. } | ItemKind::Notice { text, .. } => text.clone(),
+        ItemKind::Assistant { blocks, error, .. } => {
+            let mut text = blocks
+                .iter()
+                .filter_map(|block| match block {
+                    Block::Text { text } => Some(text.as_str()),
+                    Block::Thinking { .. } => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if let Some(error) = error {
+                text.push_str("\n\n");
+                text.push_str(error);
+            }
+            text
+        }
+        ItemKind::Tool { summary, .. } | ItemKind::Compaction { summary, .. } => summary.clone(),
+        ItemKind::TurnSummary { .. } => String::new(),
+    }
 }

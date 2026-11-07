@@ -12,12 +12,13 @@ use local_studio_core::{
 use crate::branches::BranchBar;
 use crate::composer::Composer;
 use crate::core::Core;
+use crate::dashboard::LocalPage;
 use crate::drawer::Drawer;
 use crate::editor::Editors;
 use crate::format;
 use crate::goto::GotoFile;
 use crate::header::Header;
-use crate::pages::{LocalPage, UsagePage};
+use crate::pages::UsagePage;
 use crate::panels::Panel;
 use crate::pulls::PullsPage;
 use crate::search::ProjectSearch;
@@ -52,6 +53,7 @@ pub enum Target {
     CommitFiles,
     TerminalCopy,
     TerminalChat,
+    Provider,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -109,6 +111,7 @@ pub struct App {
     pub on_tick: RefCell<Option<Hook>>,
     pub requests: RefCell<HashMap<String, Target>>,
     pub undo: RefCell<Option<Hook>>,
+    pub keys: crate::keyboard::Keys,
 }
 
 pub struct Hero {
@@ -116,6 +119,7 @@ pub struct Hero {
     title: gtk::Label,
     subtitle: gtk::Label,
     actions: gtk::Box,
+    pub project: crate::picker::Picker,
 }
 
 impl App {
@@ -263,6 +267,7 @@ impl App {
                 on_tick: RefCell::new(None),
                 requests: RefCell::new(HashMap::new()),
                 undo: RefCell::new(None),
+                keys: crate::keyboard::Keys::default(),
                 pulls,
                 branches,
                 search,
@@ -521,13 +526,22 @@ impl App {
                 self.state.borrow_mut().usage = Some(report);
                 dirty.usage = true;
             }
-            Update::Local { request: _, snapshot } => {
+            Update::Local { request, snapshot } => {
+                self.local.settled(&request, None);
                 self.state.borrow_mut().local = Some(snapshot);
                 dirty.local = true;
             }
-            Update::LocalDashboard { .. } => {}
-            Update::Providers { providers } => {
-                self.state.borrow_mut().providers = providers;
+            Update::LocalDashboard { dashboard } => {
+                self.state.borrow_mut().dashboard = Some(dashboard);
+                dirty.local = true;
+            }
+            Update::Providers { providers, engines, errors } => {
+                let mut state = self.state.borrow_mut();
+                state.providers = providers;
+                state.engines = engines;
+                state.provider_errors = errors;
+                state.providers_loaded = true;
+                drop(state);
                 dirty.settings = true;
                 dirty.header = true;
             }
@@ -579,15 +593,25 @@ impl App {
                 self.state.borrow_mut().daemon = Some(crate::state::DaemonInfo { socket, version, pid });
                 dirty.settings = true;
             }
-            Update::RequestDone { request: _, message } => self.toast(&message),
+            Update::ProviderModels { request, base_url, models } => {
+                if self.take_request(&request) == Some(Target::Provider) {
+                    crate::providers::discovered(&request, &base_url, &models);
+                }
+            }
+            Update::RequestDone { request, message } => match self.take_request(&request) {
+                Some(Target::Provider) => crate::providers::done(self, &request, &message),
+                _ => self.toast(&message),
+            },
             Update::RequestFailed { request, message } => {
-                self.local.request_failed();
+                self.local.settled(&request, Some(&message));
+                dirty.local = true;
                 match self.take_request(&request) {
                     Some(Target::Mentions | Target::Commands | Target::ThreadSearch) => {}
                     Some(Target::PanelPulls | Target::PanelPull) => self.panel.pulls.failed(&message),
                     Some(Target::PagePulls | Target::PagePull) => self.pulls.failed(&message),
                     Some(Target::Files | Target::Preview) => self.panel.files.failed(&message),
                     Some(Target::Devices) => self.panel.devices.failed(&message),
+                    Some(Target::Provider) => crate::providers::failed(self, &request, &message),
                     _ => self.toast(&message),
                 }
             }
@@ -620,6 +644,9 @@ impl App {
             }
             if dirty.local {
                 self.local.render(&state);
+                if let Some(dialog) = self.settings.borrow().as_ref() {
+                    dialog.render_local(&state);
+                }
             }
             if dirty.usage {
                 self.usage.render(&state);
@@ -666,6 +693,7 @@ impl App {
     }
 
     pub fn select_thread(self: &Rc<Self>, thread: Option<String>) {
+        self.keys.visited(thread.as_deref());
         if let (Some(id), false) = (&thread, self.navigating.get()) {
             let mut history = self.history.borrow_mut();
             let keep = (history.1 + 1).min(history.0.len());
@@ -856,7 +884,7 @@ impl App {
                     (action.to_string(), accels)
                 })
                 .filter(|(action, accels): &(String, Vec<String>)| {
-                    !accels.is_empty() && action != "win.toggle-terminal"
+                    !accels.is_empty() && !crate::keyboard::TERMINAL_ACCELS.contains(&action.as_str())
                 })
                 .collect();
             for (action, _) in &saved {
@@ -975,6 +1003,8 @@ impl Hero {
                 app.add_project();
             }
         });
+        let project = crate::picker::projects(&app);
+        project.button.set_halign(gtk::Align::Center);
         let without = gtk::Button::with_label("Start without a project");
         without.add_css_class("pill");
         without.connect_clicked(move |_| {
@@ -987,8 +1017,9 @@ impl Hero {
         actions.append(&without);
         root.append(&title);
         root.append(&subtitle);
+        root.append(&project.button);
         root.append(&actions);
-        Self { root, title, subtitle, actions }
+        Self { root, title, subtitle, actions, project }
     }
 
     fn render(&self, state: &State) {
@@ -1005,6 +1036,10 @@ impl Hero {
             ));
             self.subtitle.set_visible(false);
             self.actions.set_visible(false);
+        }
+        self.project.button.set_visible(!state.projects.is_empty());
+        if !state.projects.is_empty() {
+            crate::picker::render_projects(&self.project, state);
         }
     }
 }
