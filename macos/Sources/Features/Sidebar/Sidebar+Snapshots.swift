@@ -44,6 +44,30 @@ extension SnapshotCatalog {
             SnapshotEntry(name: "shell-publish-sheet", size: CGSize(width: 440, height: 260), updates: ShellFixtures.updates) { store in
                 AnyView(PublishRepositorySheet(store: store, project: "/Users/demo/local-studio").background(Theme.overlay))
             },
+            SnapshotEntry(name: "shell-onboarding-welcome", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready)]) { store in
+                AnyView(OnboardingView(store: store, step: .welcome))
+            },
+            SnapshotEntry(name: "shell-onboarding-daemon", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready)]) { store in
+                AnyView(OnboardingView(store: store, step: .daemon))
+            },
+            SnapshotEntry(name: "shell-onboarding-providers-none", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .providers(providers: ShellFixtures.unconfiguredProviders)]) { store in
+                AnyView(OnboardingView(store: store, step: .providers))
+            },
+            SnapshotEntry(name: "shell-onboarding-providers", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .providers(providers: ShellFixtures.providers)]) { store in
+                AnyView(OnboardingView(store: store, step: .providers))
+            },
+            SnapshotEntry(name: "shell-onboarding-project", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .projects(projects: Array(ShellFixtures.projects.prefix(1)))]) { store in
+                AnyView(OnboardingView(store: store, step: .project))
+            },
+            SnapshotEntry(name: "shell-onboarding-done", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready)]) { store in
+                AnyView(OnboardingView(store: store, step: .done))
+            },
+            SnapshotEntry(name: "shell-project-settings", size: CGSize(width: 640, height: 560), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused) { store in
+                AnyView(ProjectSettingsPane(store: store))
+            },
+            SnapshotEntry(name: "shell-project-settings-empty", size: CGSize(width: 640, height: 300), updates: [.connection(state: .ready), .projects(projects: [])]) { store in
+                AnyView(ProjectSettingsPane(store: store))
+            },
             SnapshotEntry(name: "shell-sidebar-filtered", size: CGSize(width: 288, height: 560), focus: "t-active-1", updates: ShellFixtures.updates) { store in
                 store.inbox.projectFilter = "/Users/demo/eukhe"
                 return AnyView(SidebarView(store: store))
@@ -185,4 +209,14 @@ enum ShellFixtures {
         ThreadSearchHit(thread: "t-active-2", title: "Approve the daemon socket migration", snippet: "We should move the sidebar socket path under the data root so the daemon and the app agree on it.", project: projects[1].id),
         ThreadSearchHit(thread: "t-settled-4", title: "Settled thread number 4", snippet: "Collapsed shelves keep their state; the sidebar remembers which ones you folded across launches.", project: projects[1].id),
     ]
+
+    static let providers = [
+        ProviderStatus(id: "anthropic", name: "Anthropic", configured: true, modelCount: 6, auth: "configured"),
+        ProviderStatus(id: "openai-codex", name: "OpenAI Codex", configured: true, modelCount: 4, auth: "configured"),
+        ProviderStatus(id: "google", name: "Google", configured: false, modelCount: 5, auth: "missing"),
+    ]
+
+    static let unconfiguredProviders = providers.map {
+        ProviderStatus(id: $0.id, name: $0.name, configured: false, modelCount: $0.modelCount, auth: "missing")
+    }
 }
