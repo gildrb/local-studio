@@ -5,16 +5,25 @@ import { exec } from "./core.ts";
 
 export type RawGpu = Omit<LocalGpu, "card"> & { uuid: string };
 
+const reading = (s: string): number | null => {
+  const n = Number.parseFloat(s);
+  return Number.isFinite(n) ? n : null;
+};
+
 export const readGpus: Effect.Effect<RawGpu[]> = Effect.gen(function* () {
-  const q = yield* exec(["nvidia-smi", "--query-gpu=index,uuid,name,memory.used,memory.total", "--format=csv,noheader,nounits"], 8_000);
+  const q = yield* exec(["nvidia-smi", "--query-gpu=index,uuid,name,memory.used,memory.total,power.draw,power.limit,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"], 8_000);
   if (q.code !== 0) return [];
   const apps = (yield* exec(["nvidia-smi", "--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader"], 8_000)).stdout.split("\n").map((l) => l.split(",")[0]?.trim());
   return q.stdout
     .split("\n")
     .filter((l) => l.trim())
     .map((l) => {
-      const [index = "", uuid = "", name = "", used = "", total = ""] = l.split(",").map((s) => s.trim());
-      return { index: Number(index) || 0, uuid, name, memoryUsedMiB: Number(used) || 0, memoryTotalMiB: Number(total) || 0, busy: apps.includes(uuid) || Number(used) > 2048 };
+      const [index = "", uuid = "", name = "", used = "", total = "", power = "", limit = "", temp = "", util = ""] = l.split(",").map((s) => s.trim());
+      return {
+        index: Number(index) || 0, uuid, name, memoryUsedMiB: Number(used) || 0, memoryTotalMiB: Number(total) || 0,
+        powerW: reading(power), powerLimitW: reading(limit), temperatureC: reading(temp), utilization: reading(util),
+        busy: apps.includes(uuid) || Number(used) > 2048,
+      };
     });
 });
 

@@ -197,6 +197,7 @@ impl Harness {
             | Update::TerminalExited { .. }
             | Update::Usage { .. }
             | Update::Local { .. }
+            | Update::LocalDashboard { .. }
             | Update::Providers { .. }
             | Update::Keybindings { .. }
             | Update::RequestDone { .. }

@@ -46,6 +46,7 @@ use crate::oneshot::TextGen;
 use crate::studio::Mailbox;
 
 const PULL_REQUEST_TTL: Duration = Duration::from_secs(60);
+const DASHBOARD_EVERY: Duration = Duration::from_secs(3);
 
 type ProjectAdder = Arc<dyn Fn(String) + Send + Sync>;
 
@@ -64,6 +65,7 @@ struct Inner {
     terminals: Terminals,
     devices: Devices,
     local: Local,
+    dashboard: Mutex<Option<tokio::task::AbortHandle>>,
     watcher: GitWatcher,
     watch_lock: tokio::sync::Mutex<()>,
     pull_requests: Mutex<HashMap<(String, String), CachedPullRequest>>,
@@ -108,6 +110,7 @@ impl Workspace {
         let (notify, notifications) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner {
             local: Local::new(&data_dir, controller_main),
+            dashboard: Mutex::new(None),
             devices: Devices::default(),
             runtime,
             mailbox,
@@ -619,6 +622,24 @@ impl Workspace {
             let snapshot = workspace.inner.local.act(&workspace.current_settings(), action).await?;
             Ok(vec![Update::Local { request: reply, snapshot }])
         });
+    }
+
+    pub(crate) fn watch_local_dashboard(&self, controller: Option<String>) {
+        let mut slot = self.inner.dashboard.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(previous) = slot.take() {
+            previous.abort();
+        }
+        let Some(controller) = controller else { return };
+        let workspace = self.clone();
+        let task = self.inner.runtime.spawn(async move {
+            let mut watch = local::dashboard::DashboardWatch::new(controller);
+            while !workspace.inner.stopped.load(Ordering::SeqCst) {
+                let dashboard = workspace.inner.local.dashboard(&workspace.current_settings(), &mut watch).await;
+                workspace.push(Update::LocalDashboard { dashboard });
+                tokio::time::sleep(DASHBOARD_EVERY).await;
+            }
+        });
+        *slot = Some(task.abort_handle());
     }
 
     pub(crate) fn push_cached_providers(&self) {

@@ -23,7 +23,7 @@ Needs Xcode 26+, Rust 1.98, Nushell, and a sibling `eukhe` checkout. Linux: see 
 
 ## Local models
 
-- Settings → Local and the Local page manage machines, loaded models and the Local AI Registry through the controller.
+- Settings → Local manages machines, loaded models and the Local AI Registry through the controller. The Local page is a per-machine dashboard: decode speed, first-token time, requests in flight, KV cache, GPUs, memory and power, a 24-hour decode chart and a year of daily tokens, with Switch model… and Stop model….
 
 ## Native
 

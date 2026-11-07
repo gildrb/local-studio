@@ -1023,3 +1023,69 @@ pub enum TerminalSelect {
     Word { at: TerminalPoint },
     Line { at: TerminalPoint },
 }
+
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct LocalDashboard {
+    pub controller: String,
+    pub error: Option<String>,
+    pub engines: Vec<LocalEngineTelemetry>,
+    pub decode_tps: Option<f64>,
+    pub per_request_tps: Option<f64>,
+    pub running: Option<u32>,
+    pub running_peak: Option<u32>,
+    pub waiting: Option<u32>,
+    pub kv_percent: Option<f64>,
+    pub kv_peak_percent: Option<f64>,
+    pub first_token_ms: Option<f64>,
+    pub first_token_best_ms: Option<f64>,
+    pub power_watts: Option<f64>,
+    pub power_limit_watts: Option<f64>,
+    pub gpu_name: String,
+    pub gpus: Vec<LocalGpuTelemetry>,
+    pub memory_used_bytes: u64,
+    pub memory_total_bytes: u64,
+    pub decode_series: Vec<f64>,
+    pub decode_series_start_ms: i64,
+    pub decode_series_step_ms: i64,
+    pub tokens: LocalTokenHistory,
+    pub generated_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct LocalEngineTelemetry {
+    pub port: u16,
+    pub models: Vec<String>,
+    pub kind: Option<String>,
+    pub loaded_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct LocalGpuTelemetry {
+    pub index: u32,
+    pub name: String,
+    pub memory_used_mib: u64,
+    pub memory_total_mib: u64,
+    pub power_watts: Option<f64>,
+    pub power_limit_watts: Option<f64>,
+    pub temperature_c: Option<f64>,
+    pub utilization: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct LocalTokenHistory {
+    pub since_day: Option<String>,
+    pub total: u64,
+    pub read: u64,
+    pub written: u64,
+    pub last_week: u64,
+    pub busiest_day: Option<String>,
+    pub busiest_tokens: u64,
+    pub active_days: u32,
+    pub tracked_days: u32,
+    pub daily: Vec<u64>,
+    pub last_day: String,
+}

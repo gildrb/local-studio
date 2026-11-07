@@ -13,6 +13,7 @@ import { browse, detect, download, type Library, loadLibrary, matchHardware, rec
 import { type Catalog, loadCatalog, matchCard, toLocalRecipe } from "./registry.ts";
 import { createPr, previewShare, secretValues } from "./share.ts";
 import { deployController, scanTailnet } from "./tailnet.ts";
+import { makeTelemetry } from "./telemetry.ts";
 
 let config = loadConfig();
 let catalog: Catalog = { info: { commit: null, error: "loading" }, cards: {}, recipes: new Map(), archived: [] };
@@ -20,6 +21,7 @@ let rawGpus: RawGpu[] = [];
 let library: Library | null = null;
 const shares = new Map<number, { preview: LocalSharePreview; at: number }>();
 const usage = makeUsage();
+const telemetry = makeTelemetry();
 
 const gpus = (): LocalGpu[] => {
   const reserved = jobs.reserved();
@@ -57,6 +59,11 @@ const excluded = (): Set<number> => {
 const tick = Effect.gen(function* () {
   rawGpus = yield* readGpus;
   yield* scanner.scan(excluded(), config.engineKeys);
+});
+
+const sample = Effect.gen(function* () {
+  rawGpus = yield* readGpus;
+  yield* telemetry.sample(scanner.current(), config.engineKeys);
 });
 
 const snapshot = async (): Promise<LocalSnapshot> => {
@@ -180,6 +187,7 @@ const handle = async (req: Request): Promise<Response> => {
   if (req.headers.get(HOP_HEADER)) return json({ error: { code: "NOT_FOUND", message: p } }, 404);
   if (req.method === "GET" && p === "/api/node") return json(selfNode());
   if (req.method === "GET" && p === "/api/snapshot") return json(await snapshot());
+  if (req.method === "GET" && p === "/api/telemetry") return json(await Effect.runPromise(telemetry.view(rawGpus, jobs.list(), url.searchParams.get("history") === "1")));
   if (req.method === "GET" && p === "/api/recipes") return json(recipes(url.searchParams.get("archived") === "1"));
   if (req.method === "GET" && p === "/api/tailnet") return json(await Effect.runPromise(scanTailnet(new Set((await graph.get()).links.map((l) => normUrl(l.url))))));
   if (req.method === "GET" && p === "/api/registry") return json(await run(Effect.gen(function* () {
@@ -246,4 +254,5 @@ void loop(30 * 60_000, async () => {
   console.log(`registry ${catalog.info.commit ?? "-"} ${catalog.recipes.size} recipes, ${catalog.archived.length} archived records, ${library?.rows.length ?? 0} indexed${catalog.info.error ? ` (${catalog.info.error})` : ""}`);
 });
 void Effect.runPromise(jobs.reconcile);
-void loop(10_000, () => Effect.runPromise(tick));
+void loop(10_000, () => Effect.runPromise(scanner.scan(excluded(), config.engineKeys)));
+void loop(5_000, () => Effect.runPromise(sample));
