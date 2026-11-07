@@ -295,6 +295,38 @@ extension SnapshotCatalog {
                 }
             ),
             SnapshotEntry(
+                name: "conversation-worktree-setup",
+                size: CGSize(width: 980, height: 560),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: [fixtures.user(1, turn: 1, "Prototype the onboarding flow in a worktree.")])),
+                    .worktreeSetup(thread: "t1", stages: [
+                        SetupStage(name: "Create worktree", state: .done, outputTail: "Preparing worktree (new branch 'local-studio/3f9a2c1d')"),
+                        SetupStage(name: "Run setup script", state: .running, outputTail: "bun install\nResolving dependencies\nInstalled 412 packages"),
+                        SetupStage(name: "Start agent", state: .pending, outputTail: ""),
+                    ], done: false, error: nil),
+                ],
+                view: thread
+            ),
+            SnapshotEntry(
+                name: "conversation-worktree-setup-failed",
+                size: CGSize(width: 980, height: 560),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: [fixtures.user(1, turn: 1, "Prototype the onboarding flow in a worktree.")])),
+                    .worktreeSetup(thread: "t1", stages: [
+                        SetupStage(name: "Create worktree", state: .done, outputTail: ""),
+                        SetupStage(name: "Run setup script", state: .failed, outputTail: "error: lockfile had changes, but lockfile is frozen"),
+                        SetupStage(name: "Start agent", state: .skipped, outputTail: ""),
+                    ], done: true, error: "The setup script exited with status 1."),
+                ],
+                view: thread
+            ),
+            SnapshotEntry(
                 name: "conversation-streaming-paragraph",
                 size: CGSize(width: 980, height: 560),
                 focus: "t1",

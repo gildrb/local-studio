@@ -675,13 +675,14 @@ private struct CompactionDivider: View {
 struct WorkingRow: View {
     let info: ThreadInfo
     let waitingForApproval: Bool
+    var settingUpWorktree = false
 
     var body: some View {
         HStack(spacing: 8) {
             Circle()
                 .fill(waitingForApproval ? Color.orange : Theme.primary)
                 .frame(width: 6, height: 6)
-            if let started = info.runStartedAt, !waitingForApproval, !info.compacting, info.retryAttempt == 0 {
+            if let started = info.runStartedAt, !waitingForApproval, !settingUpWorktree, !info.compacting, info.retryAttempt == 0 {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text("Working for \(elapsed(since: started, now: context.date))")
                         .monospacedDigit()
@@ -696,6 +697,9 @@ struct WorkingRow: View {
     }
 
     private var label: String {
+        if settingUpWorktree {
+            return "Setting up worktree…"
+        }
         if waitingForApproval {
             return "Waiting for approval"
         }

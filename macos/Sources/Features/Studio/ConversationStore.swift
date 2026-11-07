@@ -30,6 +30,8 @@ final class ConversationStore {
     let newThread = NewThreadOptions()
     let stash = ComposerStash()
     private(set) var pullsRequest: String?
+    @ObservationIgnored private(set) var pullsProject: String?
+    private(set) var pullsError: String?
     @ObservationIgnored var draftProject: String?
 
     @ObservationIgnored private let core: CoreHandle
@@ -168,8 +170,15 @@ final class ConversationStore {
     }
 
     func loadPullRequests(project: String) {
-        let request = requests.issue()
+        pullsError = nil
+        let request = requests.issue { [weak self] outcome in
+            if case .failed(let message) = outcome {
+                self?.pullsError = message
+                self?.pullsProject = nil
+            }
+        }
         pullsRequest = request
+        pullsProject = project
         core.run { $0.listPullRequests(request: request, project: project) }
     }
 

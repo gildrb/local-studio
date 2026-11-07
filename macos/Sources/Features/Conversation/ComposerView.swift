@@ -77,6 +77,7 @@ struct ComposerView: View {
             guard !Task.isCancelled else { return }
             conversation.searchMentions(trigger.query, project: project)
         }
+        .modifier(ComposerCommands(store: store, project: project, draftEmpty: draft.isEmpty))
     }
 
     private var project: String? {
@@ -144,7 +145,7 @@ struct ComposerView: View {
                 conversation.loadCommands(project: project)
             }
         case .pullRequest?:
-            if trigger?.kind != .pullRequest, let project {
+            if let project, conversation.pullsProject != project {
                 conversation.loadPullRequests(project: project)
             }
         case .mention?, nil:
