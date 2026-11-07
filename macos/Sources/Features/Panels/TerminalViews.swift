@@ -8,6 +8,8 @@ struct TerminalActions {
     let splitSideBySide: () -> Void
     let splitStacked: () -> Void
     let close: () -> Void
+    let attach: (TerminalSession) -> Void
+    let commands: CommandRouter?
 }
 
 struct TerminalDrawerView: View {
@@ -57,7 +59,9 @@ private struct TerminalDeckView: View {
             new: { panels.deck(for: project).newTerminal() },
             splitSideBySide: { panels.deck(for: project).split(.sideBySide) },
             splitStacked: { panels.deck(for: project).split(.stacked) },
-            close: { panels.deck(for: project).closeFocused() }
+            close: { panels.deck(for: project).closeFocused() },
+            attach: { panels.addToChat($0.chatContext, source: $0.label) },
+            commands: panels.commands
         )
         VStack(spacing: 0) {
             HStack(spacing: 4) {
@@ -74,7 +78,7 @@ private struct TerminalDeckView: View {
                     .padding(.horizontal, 6)
                 }
                 .scrollIndicators(.never)
-                TerminalToolbarButtons(actions: actions, hasTerminal: deck?.activeGroup != nil)
+                TerminalToolbarButtons(actions: actions, focused: deck?.activeGroup?.focusedSession)
             }
             .padding(.trailing, 8)
             .frame(height: 34)
@@ -133,9 +137,14 @@ private struct TerminalGroupTab: View {
 
 private struct TerminalToolbarButtons: View {
     let actions: TerminalActions
-    let hasTerminal: Bool
+    let focused: TerminalSession?
 
     var body: some View {
+        PanelIconButton("Add to Chat", symbol: "text.bubble", enabled: focused != nil) {
+            if let focused {
+                actions.attach(focused)
+            }
+        }
         PanelIconButton("New Terminal (⌘N)", symbol: "plus", action: actions.new)
         PanelIconButton("Split Horizontally (⌘D)", symbol: "rectangle.split.2x1", action: actions.splitSideBySide)
         PanelIconButton("Split Vertically (⇧⌘D)", symbol: "rectangle.split.1x2", action: actions.splitStacked)
@@ -144,8 +153,15 @@ private struct TerminalToolbarButtons: View {
             Button("Split Horizontally", action: actions.splitSideBySide)
             Button("Split Vertically", action: actions.splitStacked)
             Divider()
+            Button("Add Selection or Recent Output to Chat") {
+                if let focused {
+                    actions.attach(focused)
+                }
+            }
+            .disabled(focused == nil)
+            Divider()
             Button("Close Terminal", action: actions.close)
-                .disabled(!hasTerminal)
+                .disabled(focused == nil)
         }
     }
 }
@@ -167,7 +183,9 @@ struct TerminalGroupSurfaceView: View {
                 if group.sessions.isEmpty {
                     panels.close(surface)
                 }
-            }
+            },
+            attach: { panels.addToChat($0.chatContext, source: $0.label) },
+            commands: panels.commands
         )
         VStack(spacing: 0) {
             PanelToolbar {
@@ -179,7 +197,7 @@ struct TerminalGroupSurfaceView: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
                 Spacer()
-                TerminalToolbarButtons(actions: actions, hasTerminal: !group.sessions.isEmpty)
+                TerminalToolbarButtons(actions: actions, focused: group.focusedSession)
             }
             if group.sessions.isEmpty {
                 PanelMessage(symbol: "terminal", title: "No terminal sessions for this thread yet.", actionTitle: "New Terminal") { group.add(axis: nil) }
@@ -297,6 +315,7 @@ private struct TerminalPane: NSViewRepresentable {
         context.coordinator.scheme = colorScheme
         context.coordinator.actions = actions
         context.coordinator.attach(view)
+        view.menu = context.coordinator.contextMenu(for: view)
         return view
     }
 
@@ -342,15 +361,44 @@ private struct TerminalPane: NSViewRepresentable {
 }
 
 @MainActor
-final class TerminalPaneCoordinator: TerminalViewDelegate {
+final class TerminalPaneCoordinator: NSObject, TerminalViewDelegate {
     let session: TerminalSession
     var actions: TerminalActions?
     var scheme: SwiftUI.ColorScheme?
     private weak var view: PaneTerminalView?
-    private var monitor: Any?
 
     init(session: TerminalSession) {
         self.session = session
+    }
+
+    func contextMenu(for view: PaneTerminalView) -> NSMenu {
+        let menu = NSMenu()
+        let copy = NSMenuItem(title: "Copy", action: #selector(TerminalView.copy(_:)), keyEquivalent: "")
+        copy.target = view
+        menu.addItem(copy)
+        let paste = NSMenuItem(title: "Paste", action: #selector(TerminalView.paste(_:)), keyEquivalent: "")
+        paste.target = view
+        menu.addItem(paste)
+        menu.addItem(.separator())
+        let recent = NSMenuItem(title: "Copy Recent Output", action: #selector(copyRecentOutput), keyEquivalent: "")
+        recent.target = self
+        menu.addItem(recent)
+        menu.addItem(.separator())
+        let chat = NSMenuItem(title: "Add to Chat", action: #selector(addToChat), keyEquivalent: "")
+        chat.target = self
+        menu.addItem(chat)
+        return menu
+    }
+
+    @objc private func addToChat() {
+        actions?.attach(session)
+    }
+
+    @objc private func copyRecentOutput() {
+        let text = session.recentOutput()
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     func attach(_ view: PaneTerminalView) {
@@ -361,12 +409,8 @@ final class TerminalPaneCoordinator: TerminalViewDelegate {
         session.attach(self) { [weak view] data in
             view?.feed(byteArray: ArraySlice(data))
         }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let key = event.charactersIgnoringModifiers?.lowercased()
-            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            let handled = MainActor.assumeIsolated { self?.handle(key: key, flags: flags) ?? false }
-            return handled ? nil : event
-        }
+        session.selection = { [weak view] in view?.getSelection() }
+        registerCommands()
         if session.status == .starting {
             Task { @MainActor [weak view] in
                 guard let view else { return }
@@ -377,24 +421,20 @@ final class TerminalPaneCoordinator: TerminalViewDelegate {
 
     func detach() {
         session.detach(self)
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-        }
-        monitor = nil
+        session.selection = nil
+        actions?.commands?.unregister(owner: self)
     }
 
-    private func handle(key: String?, flags: NSEvent.ModifierFlags) -> Bool {
-        guard let view, let actions, view.window?.firstResponder === view else { return false }
-        guard flags.contains(.command), !flags.contains(.option), !flags.contains(.control), let key else { return false }
-        let shift = flags.contains(.shift)
-        switch (key, shift) {
-        case ("n", false): actions.new()
-        case ("d", false): actions.splitSideBySide()
-        case ("d", true): actions.splitStacked()
-        case ("w", false): actions.close()
-        default: return false
+    func registerCommands() {
+        guard let commands = actions?.commands else { return }
+        let focused: @MainActor () -> Bool = { [weak self] in
+            guard let view = self?.view else { return false }
+            return view.window?.firstResponder === view
         }
-        return true
+        commands.register("terminal.new", owner: self, enabled: focused) { [weak self] in self?.actions?.new() }
+        commands.register("terminal.split", owner: self, enabled: focused) { [weak self] in self?.actions?.splitSideBySide() }
+        commands.register("terminal.splitVertical", owner: self, enabled: focused) { [weak self] in self?.actions?.splitStacked() }
+        commands.register("terminal.close", owner: self, enabled: focused) { [weak self] in self?.actions?.close() }
     }
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {

@@ -37,6 +37,7 @@ final class TerminalSession: Identifiable {
     private(set) var status = TerminalStatus.starting
 
     @ObservationIgnored var request: String?
+    @ObservationIgnored var selection: (() -> String?)?
     @ObservationIgnored private(set) var buffer = Data()
     @ObservationIgnored private(set) var columns: UInt16 = 100
     @ObservationIgnored private(set) var rows: UInt16 = 24
@@ -55,6 +56,34 @@ final class TerminalSession: Identifiable {
     var label: String {
         if let title, !title.isEmpty { return title }
         return "Terminal \(ordinal)"
+    }
+
+    func recentOutput(lines limit: Int = 80) -> String {
+        let tail = buffer.suffix(64 * 1024)
+        let raw = String(bytes: tail, encoding: .utf8) ?? String(bytes: tail, encoding: .isoLatin1) ?? ""
+        let plain = raw
+            .replacingOccurrences(of: #"\x{1B}\[[0-?]*[ -/]*[@-~]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\x{1B}\][^\x{07}\x{1B}]*(\x{07}|\x{1B}\\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\x{1B}[@-_]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\r\n", with: "\n")
+        let rows = plain.split(separator: "\n", omittingEmptySubsequences: false).map { row in
+            String(row.split(separator: "\r", omittingEmptySubsequences: false).last ?? "")
+        }
+        var kept = Array(rows.suffix(limit))
+        while kept.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            kept.removeLast()
+        }
+        while kept.first?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            kept.removeFirst()
+        }
+        return kept.joined(separator: "\n")
+    }
+
+    var chatContext: String {
+        if let selected = selection?(), !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return selected
+        }
+        return recentOutput()
     }
 
     var text: String {

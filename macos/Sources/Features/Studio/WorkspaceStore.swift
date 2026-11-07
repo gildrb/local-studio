@@ -196,6 +196,7 @@ struct PanelMemory {
     var width: CGFloat = PanelState.defaultWidth
     var surfaces: [PanelSurface] = []
     var active: String?
+    var miniPlayer: BrowserModel?
 }
 
 struct AgentRun: Identifiable {
@@ -220,6 +221,7 @@ final class PanelState {
     static let minimumTerminalHeight: CGFloat = 180
     static let maximumTerminalRatio: CGFloat = 0.75
     static let trailingChromeInset: CGFloat = 76
+    static let miniPlayerMinimumWidth: CGFloat = 240
 
     func updateSettings(_ change: (inout Settings) -> Void) {
         guard var settings = pages?.settings else { return }
@@ -242,17 +244,44 @@ final class PanelState {
     var activeSurface: String?
     private(set) var thread: String?
     private(set) var decks: [String: TerminalDeck] = [:]
+    private(set) var miniPlayer: BrowserModel?
+    var miniPlayerOffset = CGSize.zero
+    var miniPlayerWidth: CGFloat = 340
 
     @ObservationIgnored weak var workspace: WorkspaceStore?
     @ObservationIgnored private weak var conversation: ConversationStore?
     @ObservationIgnored private weak var inbox: InboxStore?
     @ObservationIgnored private weak var pages: PagesStore?
     @ObservationIgnored private var memory: [String: PanelMemory] = [:]
+    @ObservationIgnored private var userRevision = 0
+    @ObservationIgnored private var turnRevision: Int?
+    @ObservationIgnored private var wasBusy = false
+    @ObservationIgnored private var observedPulls: [String: UInt64?] = [:]
 
     func bind(conversation: ConversationStore, inbox: InboxStore, pages: PagesStore) {
         self.conversation = conversation
         self.inbox = inbox
         self.pages = pages
+        observeProactive()
+        registerCommands(inbox.commands)
+    }
+
+    private func registerCommands(_ commands: CommandRouter) {
+        commands.register("preview.toggle", owner: self) { [weak self] in self?.togglePreview() }
+        let browser: @MainActor () -> Bool = { [weak self] in self?.activeBrowser != nil }
+        commands.register("preview.refresh", owner: self, enabled: browser) { [weak self] in self?.refreshPreview() }
+        commands.register("preview.focusUrl", owner: self, enabled: browser) { [weak self] in self?.focusPreviewAddress() }
+        commands.register("preview.zoomIn", owner: self, enabled: browser) { [weak self] in self?.zoomPreview(by: 0.1) }
+        commands.register("preview.zoomOut", owner: self, enabled: browser) { [weak self] in self?.zoomPreview(by: -0.1) }
+        commands.register("preview.resetZoom", owner: self, enabled: browser) { [weak self] in self?.resetPreviewZoom() }
+    }
+
+    var commands: CommandRouter? {
+        inbox?.commands
+    }
+
+    func addToChat(_ text: String, source: String) {
+        conversation?.attachContext(text: text, source: source)
     }
 
     var project: String? {
@@ -313,7 +342,8 @@ final class PanelState {
             maximized: rightPanelMaximized,
             width: rightPanelWidth,
             surfaces: surfaces,
-            active: activeSurface
+            active: activeSurface,
+            miniPlayer: miniPlayer
         )
         let carried = previous == nil && memory[Self.key(thread)] == nil
         let restored = carried ? memory.removeValue(forKey: Self.key(nil)) ?? PanelMemory() : memory[Self.key(thread)] ?? PanelMemory()
@@ -324,13 +354,90 @@ final class PanelState {
         rightPanelMaximized = restored.maximized
         rightPanelOpen = restored.rightPanelOpen
         terminalOpen = restored.terminalOpen
+        miniPlayer = restored.miniPlayer
+        wasBusy = false
+        turnRevision = nil
     }
 
     func toggleRightPanel() {
-        rightPanelOpen.toggle()
-        if !rightPanelOpen {
+        userRevision += 1
+        if rightPanelOpen {
+            closePanel()
+        } else {
+            rightPanelOpen = true
+        }
+    }
+
+    private func closePanel() {
+        if case .browser(let model) = activeContent?.content, model.current != nil {
+            miniPlayer = model
+        }
+        rightPanelOpen = false
+        rightPanelMaximized = false
+    }
+
+    var visibleMiniPlayer: BrowserModel? {
+        guard let miniPlayer else { return nil }
+        if rightPanelOpen, case .browser(let model) = activeContent?.content, model === miniPlayer { return nil }
+        return miniPlayer
+    }
+
+    func float(_ model: BrowserModel) {
+        userRevision += 1
+        miniPlayer = model
+        if case .browser(let active) = activeContent?.content, active === model {
+            rightPanelOpen = false
             rightPanelMaximized = false
         }
+    }
+
+    func dock(_ model: BrowserModel) {
+        guard let surface = surfaces.first(where: { if case .browser(let other) = $0.content { other === model } else { false } }) else { return }
+        show(surface.id)
+    }
+
+    func closeMiniPlayer() {
+        userRevision += 1
+        miniPlayer = nil
+    }
+
+    var activeBrowser: BrowserModel? {
+        if rightPanelOpen, case .browser(let model) = activeContent?.content { return model }
+        return visibleMiniPlayer
+    }
+
+    func togglePreview() {
+        if rightPanelOpen, activeContent?.kind == .browser {
+            userRevision += 1
+            closePanel()
+        } else if let existing = surfaces.first(where: { $0.kind == .browser }) {
+            show(existing.id)
+        } else {
+            openSurface(.browser)
+        }
+    }
+
+    func refreshPreview() {
+        activeBrowser?.reload()
+    }
+
+    func focusPreviewAddress() {
+        guard let browser = activeBrowser else { return }
+        if browser !== visibleMiniPlayer {
+            browser.focusAddress()
+        } else {
+            dock(browser)
+            browser.focusAddress()
+        }
+    }
+
+    func zoomPreview(by step: CGFloat) {
+        guard let browser = activeBrowser else { return }
+        browser.setZoom(browser.zoom + step)
+    }
+
+    func resetPreviewZoom() {
+        activeBrowser?.setZoom(1)
     }
 
     func toggleTerminal() {
@@ -338,6 +445,7 @@ final class PanelState {
     }
 
     func toggleDiff() {
+        userRevision += 1
         if rightPanelOpen, activeContent?.kind == .diff {
             rightPanelOpen = false
             rightPanelMaximized = false
@@ -347,6 +455,7 @@ final class PanelState {
     }
 
     func openDiff(path: String) {
+        userRevision += 1
         if !(rightPanelOpen && activeContent?.kind == .diff) {
             openSurface(.diff)
         }
@@ -376,6 +485,11 @@ final class PanelState {
     }
 
     func openSurface(_ kind: PanelSurfaceKind) {
+        userRevision += 1
+        present(kind)
+    }
+
+    private func present(_ kind: PanelSurfaceKind) {
         guard let action = launcherActions().first(where: { $0.kind == kind }), action.available else { return }
         if kind != .terminal, let existing = surfaces.first(where: { $0.kind == kind }) {
             show(existing.id)
@@ -386,6 +500,7 @@ final class PanelState {
     }
 
     func openFile(project: String, relative: String, line: UInt32?) {
+        userRevision += 1
         if let existing = surfaces.first(where: {
             if case .file(let model) = $0.content { model.project == project && model.relative == relative } else { false }
         }) {
@@ -402,13 +517,18 @@ final class PanelState {
     }
 
     func show(_ surface: String) {
+        userRevision += 1
         activeSurface = surface
         rightPanelOpen = true
     }
 
     func close(_ surface: String) {
         guard let index = surfaces.firstIndex(where: { $0.id == surface }) else { return }
+        userRevision += 1
         let removed = surfaces.remove(at: index)
+        if case .browser(let model) = removed.content, model === miniPlayer {
+            miniPlayer = nil
+        }
         removed.dispose()
         if activeSurface == surface {
             activeSurface = surfaces.indices.contains(index) ? surfaces[index].id : surfaces.last?.id
@@ -458,6 +578,73 @@ final class PanelState {
     private func append(_ surface: PanelSurface) {
         surfaces.append(surface)
         show(surface.id)
+    }
+
+    private func observeProactive() {
+        withObservationTracking {
+            _ = conversation?.thread
+            _ = conversation?.info?.busy
+            _ = settings?.proactivePanels
+            _ = project.flatMap { workspace?.gitStatus[$0]?.pullRequest?.number }
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.evaluateProactive()
+                self?.observeProactive()
+            }
+        }
+    }
+
+    func evaluateProactive() {
+        guard let conversation, conversation.thread == thread else {
+            wasBusy = false
+            return
+        }
+        let busy = conversation.info?.thread == thread ? conversation.info?.busy ?? false : false
+        if busy, !wasBusy {
+            turnRevision = userRevision
+        }
+        let completed = wasBusy && !busy
+        wasBusy = busy
+        let pull = project.flatMap { gitStatus($0)?.pullRequest?.number }
+        let previousPull = observedPulls[Self.key(thread)]
+        observedPulls[Self.key(thread)] = pull
+        guard settings?.proactivePanels == true else { return }
+        if let pull, previousPull != .some(pull) {
+            reveal(.pullRequest)
+            return
+        }
+        guard completed, turnRevision == userRevision, isGit(project),
+              activeContent?.kind != .pullRequest, activeContent?.kind != .pullRequests,
+              Self.turnWarrantsDiff(conversation.items) else { return }
+        reveal(.diff)
+        if case .diff(let model) = activeContent?.content, model.thread != nil {
+            if model.scope == .latestTurn {
+                model.load()
+            } else {
+                model.scope = .latestTurn
+            }
+        }
+    }
+
+    private func reveal(_ kind: PanelSurfaceKind) {
+        let revision = userRevision
+        present(kind)
+        userRevision = revision
+    }
+
+    static func turnWarrantsDiff(_ items: [Item]) -> Bool {
+        guard let turn = items.last?.turn,
+              items.contains(where: { if case .turnSummary(let settled, _, _) = $0.kind { settled == turn } else { false } }) else { return false }
+        var changes: [String: UInt32] = [:]
+        for item in items.reversed() {
+            guard item.turn == turn else { break }
+            if case .assistant(_, _, _, let changed) = item.kind {
+                for file in changed {
+                    changes[file.path] = file.additions + file.deletions
+                }
+            }
+        }
+        return changes.count >= 3 || changes.values.reduce(0, +) >= 50
     }
 
     private func makeContent(_ kind: PanelSurfaceKind) -> PanelSurfaceContent? {

@@ -327,7 +327,7 @@ private struct PanelSurfaceView: View {
         let panels = store.workspace.panels
         switch surface.content {
         case .browser(let model):
-            BrowserSurfaceView(model: model)
+            BrowserSurfaceView(model: model, panels: panels)
         case .terminal(let group):
             TerminalGroupSurfaceView(group: group, panels: panels, surface: surface.id)
         case .files(let model):

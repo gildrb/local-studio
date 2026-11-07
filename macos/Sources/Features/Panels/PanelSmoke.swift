@@ -120,6 +120,13 @@ final class PanelSmoke {
         }
         if !passed.contains("terminal"), let session, session.text.contains("\r\nhi-from-panels\r\n") || session.text.contains("\nhi-from-panels\r\n") {
             passed.insert("terminal")
+            store.workspace.panels.addToChat(session.chatContext, source: session.label)
+            let draftProject = store.conversation.draftProject
+            guard let context = store.conversation.composer(project: draftProject).contexts.last,
+                  context.text.contains("hi-from-panels") else {
+                return finish(passed: false, "Add to chat did not reach the composer")
+            }
+            print("ok add to chat: \(context.title)")
             print("ok terminal \(session.terminal ?? "?"): \(session.buffer.count) bytes, echo output seen")
         }
         if !passed.contains("devices"), let devices {
@@ -135,6 +142,12 @@ final class PanelSmoke {
             }
         }
         guard passed.count == 5, let diff else { return }
+        let commands = store.commands
+        guard commands.perform("preview.toggle"), store.workspace.panels.activeContent?.kind == .browser,
+              commands.canPerform("preview.refresh"), commands.canPerform("preview.focusUrl") else {
+            return finish(passed: false, "preview commands are not routed to the browser surface")
+        }
+        print("ok preview.toggle opened the browser; preview.* commands live")
         diff.setAllCollapsed(false)
         if let problem = render(diff) {
             return finish(passed: false, problem)
