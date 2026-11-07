@@ -23,9 +23,25 @@ pub(crate) fn root(project: &str) -> Result<PathBuf, String> {
     }
 }
 
+fn escapes_lexically(relative: &Path) -> bool {
+    let mut depth: usize = 0;
+    for component in relative.components() {
+        match component {
+            Component::RootDir | Component::Prefix(_) => return true,
+            Component::CurDir => {}
+            Component::ParentDir => match depth.checked_sub(1) {
+                Some(parent) => depth = parent,
+                None => return true,
+            },
+            Component::Normal(_) => depth += 1,
+        }
+    }
+    false
+}
+
 pub(crate) fn resolve(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let relative = Path::new(relative);
-    if relative.components().any(|component| matches!(component, Component::RootDir | Component::Prefix(_))) {
+    if escapes_lexically(relative) {
         return Err("Path is outside the project.".to_string());
     }
     let joined = root.join(relative);
