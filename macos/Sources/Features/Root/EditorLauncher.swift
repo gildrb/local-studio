@@ -5,11 +5,14 @@ struct EditorApp: Identifiable, Equatable {
     let id: String
     let name: String
     let url: URL
+    let icon: NSImage
 
-    var icon: NSImage {
-        let image = NSWorkspace.shared.icon(forFile: url.path)
-        image.size = NSSize(width: 16, height: 16)
-        return image
+    init(id: String, name: String, url: URL) {
+        self.id = id
+        self.name = name
+        self.url = url
+        icon = NSWorkspace.shared.icon(forFile: url.path)
+        icon.size = NSSize(width: 16, height: 16)
     }
 }
 

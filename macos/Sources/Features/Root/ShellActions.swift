@@ -16,11 +16,11 @@ extension StudioStore {
     }
 
     func shortcut(_ command: String) -> KeyboardShortcut? {
-        CoreShortcut.parse(pages.keybindings.first { $0.command == command }?.shortcut)
+        CoreShortcut.parse(binding(command)?.shortcut)
     }
 
     func shortcutText(_ command: String) -> String? {
-        CoreShortcut.display(pages.keybindings.first { $0.command == command }?.shortcut)
+        CoreShortcut.display(binding(command)?.shortcut)
     }
 
     func open(_ thread: String) {
