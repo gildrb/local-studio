@@ -40,6 +40,7 @@ struct LocalPage: View {
         }
         .pageHeader {
             PageHeader("Local", subtitle: subtitle, leadingInset: leadingInset) {
+                ChromeIconButton("Manage Machines", symbol: "server.rack") { store.openSettings(.local) }
                 ChromeIconButton("Refresh", symbol: "arrow.clockwise") { pages.refreshLocal() }
             }
         }
