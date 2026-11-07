@@ -27,6 +27,7 @@ Needs Xcode 26+, Rust 1.98, Nushell, and a sibling `eukhe` checkout. Linux: see 
 ## Native
 
 - AppKit/SwiftUI on macOS, GTK4 + libadwaita on Linux, one Rust core.
+- Terminals and syntax highlighting live in the core: [libghostty-vt](https://lib.ghostty.org) emulation and grammar-based highlighting, drawn natively by each app.
 
 ## Components
 
