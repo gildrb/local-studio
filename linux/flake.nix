@@ -75,6 +75,9 @@
               pkgs.vte-gtk4
               pkgs.webkitgtk_6_0
               pkgs.glib-networking
+              pkgs.gst_all_1.gstreamer
+              pkgs.gst_all_1.gst-plugins-base
+              pkgs.gst_all_1.gst-plugins-good
               pkgs.adwaita-icon-theme
               pkgs.hicolor-icon-theme
               pkgs.gsettings-desktop-schemas

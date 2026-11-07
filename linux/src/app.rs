@@ -12,7 +12,10 @@ use local_studio_core::{
 use crate::branches::BranchBar;
 use crate::composer::Composer;
 use crate::core::Core;
+use crate::drawer::Drawer;
+use crate::editor::Editors;
 use crate::format;
+use crate::goto::GotoFile;
 use crate::header::Header;
 use crate::pages::{LocalPage, UsagePage};
 use crate::panels::Panel;
@@ -25,6 +28,7 @@ use crate::theme;
 use crate::timeline::Timeline;
 
 pub type Hook = Rc<dyn Fn(&Rc<App>)>;
+pub type SavedAccels = Vec<(String, Vec<String>)>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -40,6 +44,9 @@ pub enum Target {
     Devices,
     ThreadSearch,
     ProjectSearch,
+    DiffBases,
+    GotoFile,
+    HashPulls,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -76,6 +83,16 @@ pub struct App {
     pub timeline: Timeline,
     pub composer: Composer,
     pub panel: Panel,
+    pub drawer: Drawer,
+    pub columns: gtk::Paned,
+    pub goto: GotoFile,
+    pub editors: Editors,
+    pub saved_accels: RefCell<Option<SavedAccels>>,
+    pub history: RefCell<(Vec<String>, usize)>,
+    pub navigating: Cell<bool>,
+    pub interactive: Cell<bool>,
+    pub force_steer: Cell<bool>,
+    pub wizard_shown: Cell<bool>,
     pub local: LocalPage,
     pub usage: UsagePage,
     pub pulls: PullsPage,
@@ -96,6 +113,7 @@ pub struct Hero {
 }
 
 impl App {
+    #[allow(clippy::too_many_lines)]
     pub fn build(application: &adw::Application) -> Rc<Self> {
         theme::install();
         let app = Rc::new_cyclic(|weak: &Weak<App>| {
@@ -111,10 +129,13 @@ impl App {
                 .sidebar_width_fraction(0.24)
                 .build();
             let sidebar = Sidebar::new(weak.clone());
-            let header = Header::build();
+            let editors = Editors::detect();
+            let header = Header::build(&editors.menu());
             let timeline = Timeline::new(weak.clone());
             let composer = Composer::new(weak.clone());
             let panel = Panel::new(weak.clone());
+            let drawer = Drawer::new(weak.clone());
+            let goto = GotoFile::new(weak.clone());
             let local = LocalPage::new(weak.clone());
             let usage = UsagePage::new(weak.clone());
             let hero = Hero::new(weak.clone());
@@ -126,11 +147,32 @@ impl App {
             conversation.add_named(&hero.root, Some("hero"));
             conversation.add_named(&timeline.root, Some("timeline"));
             conversation.set_vexpand(true);
-            let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
-            column.append(&conversation);
-            column.append(&composer.root);
-            column.append(&branches.root);
-            column.add_controller(crate::extras::drop_target(weak));
+            let chat = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            chat.append(&conversation);
+            chat.append(&composer.root);
+            chat.append(&branches.root);
+            chat.add_controller(crate::extras::drop_target(weak));
+            let column = gtk::Paned::new(gtk::Orientation::Vertical);
+            column.set_start_child(Some(&chat));
+            column.set_end_child(Some(&drawer.root));
+            column.set_resize_end_child(false);
+            column.set_shrink_end_child(false);
+            column.set_shrink_start_child(false);
+            column.set_position(520);
+            column.connect_position_notify(|paned| {
+                let height = paned.height();
+                if height <= 0 {
+                    return;
+                }
+                let minimum = height / 4;
+                let maximum = height - 180;
+                if maximum > minimum {
+                    let position = paned.position().clamp(minimum, maximum);
+                    if position != paned.position() {
+                        paned.set_position(position);
+                    }
+                }
+            });
             let columns = gtk::Paned::new(gtk::Orientation::Horizontal);
             columns.set_start_child(Some(&column));
             columns.set_end_child(Some(&panel.root));
@@ -179,6 +221,16 @@ impl App {
                 timeline,
                 composer,
                 panel,
+                drawer,
+                columns,
+                goto,
+                editors,
+                saved_accels: RefCell::new(None),
+                history: RefCell::new((Vec::new(), 0)),
+                navigating: Cell::new(false),
+                interactive: Cell::new(false),
+                force_steer: Cell::new(false),
+                wizard_shown: Cell::new(false),
                 local,
                 usage,
                 hero,
@@ -302,6 +354,24 @@ impl App {
                     if self.panel.showing("agents") {
                         self.panel.agents.render(self);
                     }
+                    self.timeline.refresh_minimap();
+                    let running = self
+                        .timeline
+                        .items()
+                        .iter()
+                        .filter(|item| {
+                            matches!(
+                                item.kind,
+                                local_studio_core::ItemKind::Tool {
+                                    kind: local_studio_core::ToolKind::Agent,
+                                    state: local_studio_core::ToolState::Running
+                                        | local_studio_core::ToolState::Pending,
+                                    ..
+                                }
+                            )
+                        })
+                        .count();
+                    self.header.set_agents(running);
                 }
             }
             Update::Approvals { thread, approvals } => {
@@ -336,11 +406,13 @@ impl App {
                     self.composer.extras.commands_loaded(commands);
                 }
             }
-            Update::Branches { request, branches, total } => {
-                if self.take_request(&request) == Some(Target::Branches) {
-                    self.branches.loaded(&branches, total);
+            Update::Branches { request, branches, total } => match self.take_request(&request) {
+                Some(Target::Branches) => self.branches.loaded(&branches, total),
+                Some(Target::DiffBases) => {
+                    self.panel.diff.bases_loaded(branches.into_iter().map(|branch| branch.name).collect());
                 }
-            }
+                _ => {}
+            },
             Update::Files { request, entries } => {
                 if self.take_request(&request) == Some(Target::Files) {
                     self.panel.files.loaded(&entries);
@@ -354,11 +426,13 @@ impl App {
             Update::SearchResults { request, results } => match self.take_request(&request) {
                 Some(Target::Mentions) => self.composer.extras.mentions_loaded(&request, &results),
                 Some(Target::ProjectSearch) => self.search.loaded(&request, &results),
+                Some(Target::GotoFile) => self.goto.loaded(&request, &results),
                 _ => {}
             },
             Update::PullRequests { request, pulls } => match self.take_request(&request) {
                 Some(Target::PanelPulls) => self.panel.pulls.loaded(&pulls),
                 Some(Target::PagePulls) => self.pulls.loaded(&pulls),
+                Some(Target::HashPulls) => self.composer.extras.pulls_loaded(&pulls),
                 _ => {}
             },
             Update::PullRequestDetail { request, detail } => match self.take_request(&request) {
@@ -382,10 +456,12 @@ impl App {
                 self.state.borrow_mut().git.insert(project, status);
                 dirty.header = true;
             }
-            Update::Diff { request, files } => self.panel.set_diff(&request, &files),
-            Update::TerminalOpened { request, terminal } => self.panel.terminal_opened(&request, &terminal),
-            Update::TerminalOutput { terminal, data } => self.panel.terminal_output(&terminal, &data),
-            Update::TerminalExited { terminal, code } => self.panel.terminal_exited(&terminal, code),
+            Update::Diff { request, files } => self.panel.diff.loaded(&request, &files),
+            Update::TerminalOpened { request, terminal } => {
+                self.drawer.opened(&request, &terminal);
+            }
+            Update::TerminalOutput { terminal, data } => self.drawer.output(&terminal, &data),
+            Update::TerminalExited { terminal, code } => self.drawer.exited(&terminal, code),
             Update::Usage { request: _, report } => {
                 self.state.borrow_mut().usage = Some(report);
                 dirty.usage = true;
@@ -399,22 +475,25 @@ impl App {
                 dirty.settings = true;
             }
             Update::Settings { settings } => {
-                theme::color_scheme(settings.color_scheme);
-                let width = match settings.chat_width {
-                    ChatWidth::Normal => 820,
-                    ChatWidth::Wide => 1150,
-                    ChatWidth::Full => 4000,
-                };
-                self.timeline.set_width(width);
-                self.composer.root.set_maximum_size(width);
+                self.apply_settings(&settings);
+                let onboard =
+                    self.interactive.get() && !settings.onboarding_completed && !self.wizard_shown.replace(true);
                 self.state.borrow_mut().settings = settings;
+                if onboard {
+                    let weak = Rc::downgrade(self);
+                    gtk::glib::idle_add_local_once(move || {
+                        if let Some(app) = weak.upgrade() {
+                            crate::wizard::present(&app);
+                        }
+                    });
+                }
                 dirty.composer = true;
                 dirty.sidebar = true;
                 dirty.settings = true;
             }
             Update::Keybindings { bindings } => {
                 self.state.borrow_mut().keybindings = bindings;
-                crate::commands::apply_keybindings(self);
+                crate::bindings::apply(self);
                 dirty.settings = true;
             }
             Update::RequestDone { request: _, message } => self.toast(&message),
@@ -481,7 +560,32 @@ impl App {
         }
     }
 
+    pub fn navigate(self: &Rc<Self>, delta: isize) {
+        let target = {
+            let mut history = self.history.borrow_mut();
+            let Some(next) = history.1.checked_add_signed(delta).filter(|next| *next < history.0.len()) else {
+                return;
+            };
+            history.1 = next;
+            history.0.get(next).cloned()
+        };
+        if let Some(thread) = target {
+            self.navigating.set(true);
+            self.select_thread(Some(thread));
+            self.navigating.set(false);
+        }
+    }
+
     pub fn select_thread(self: &Rc<Self>, thread: Option<String>) {
+        if let (Some(id), false) = (&thread, self.navigating.get()) {
+            let mut history = self.history.borrow_mut();
+            let keep = (history.1 + 1).min(history.0.len());
+            history.0.truncate(keep);
+            if history.0.last() != Some(id) {
+                history.0.push(id.clone());
+            }
+            history.1 = history.0.len() - 1;
+        }
         {
             let mut state = self.state.borrow_mut();
             if state.selected == thread && state.page == Page::Thread {
@@ -549,7 +653,8 @@ impl App {
         let mut state = self.state.borrow_mut();
         if let Some(thread) = state.selected.clone() {
             let busy = state.info.as_ref().is_some_and(|info| info.busy);
-            let steer = busy && state.settings.follow_up_behavior == FollowUpBehavior::Steer;
+            let forced = self.force_steer.take();
+            let steer = busy && (forced || state.settings.follow_up_behavior == FollowUpBehavior::Steer);
             drop(state);
             self.core.run(|studio| studio.send(thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue }));
             return;
@@ -602,6 +707,65 @@ impl App {
         self.core.run(|studio| studio.list_archived(request));
     }
 
+    pub fn apply_settings(&self, settings: &local_studio_core::Settings) {
+        theme::color_scheme(settings.color_scheme);
+        theme::apply(settings);
+        let width = match settings.chat_width {
+            ChatWidth::Normal => 820,
+            ChatWidth::Wide => 1150,
+            ChatWidth::Full => 4000,
+        };
+        self.timeline.set_width(width);
+        self.composer.root.set_maximum_size(width);
+        self.branches.root.set_maximum_size(width);
+        self.panel.diff.apply_settings(settings);
+        self.drawer.set_font(&settings.terminal_font, settings.terminal_font_size);
+    }
+
+    pub fn open_surface(self: &Rc<Self>, kind: &str) {
+        if kind == "terminal" {
+            self.drawer.show(self);
+        } else {
+            self.panel.show(kind);
+        }
+    }
+
+    pub fn set_panel_maximized(&self, maximized: bool) {
+        if let Some(start) = self.columns.start_child() {
+            start.set_visible(!maximized);
+        }
+        self.panel.set_maximized(maximized);
+    }
+
+    pub fn terminal_focus(&self, focused: bool) {
+        if focused == self.saved_accels.borrow().is_some() {
+            return;
+        }
+        if focused {
+            let saved: Vec<(String, Vec<String>)> = self
+                .application
+                .list_action_descriptions()
+                .iter()
+                .map(|action| {
+                    let accels = self.application.accels_for_action(action).iter().map(ToString::to_string).collect();
+                    (action.to_string(), accels)
+                })
+                .filter(|(action, accels): &(String, Vec<String>)| {
+                    !accels.is_empty() && action != "win.toggle-terminal"
+                })
+                .collect();
+            for (action, _) in &saved {
+                self.application.set_accels_for_action(action, &[]);
+            }
+            self.saved_accels.replace(Some(saved));
+        } else if let Some(saved) = self.saved_accels.take() {
+            for (action, accels) in saved {
+                let accels: Vec<&str> = accels.iter().map(String::as_str).collect();
+                self.application.set_accels_for_action(&action, &accels);
+            }
+        }
+    }
+
     pub fn toast(&self, text: &str) {
         let toast = adw::Toast::new(&format::escape(text));
         toast.set_timeout(4);
@@ -636,7 +800,10 @@ impl App {
             self.application.send_notification(Some(thread), &notification);
         }
         if matches!(mode, NotificationMode::Sound | NotificationMode::NotificationsAndSound) {
-            WidgetExt::display(&self.window).beep();
+            crate::sound::play(match kind {
+                NotificationKind::TurnDone => crate::sound::Sound::Completion,
+                NotificationKind::NeedsApproval | NotificationKind::Failed => crate::sound::Sound::Input,
+            });
         }
     }
 

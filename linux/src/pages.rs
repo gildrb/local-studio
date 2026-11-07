@@ -713,6 +713,20 @@ impl UsagePage {
         Self { root, periods, body }
     }
 
+    pub fn set_period(&self, app: &Rc<App>, period: UsagePeriod) {
+        let name = match period {
+            UsagePeriod::Day => "day",
+            UsagePeriod::Week => "week",
+            UsagePeriod::Month => "month",
+            UsagePeriod::Quarter => "quarter",
+        };
+        if self.periods.active_name().as_deref() == Some(name) {
+            self.refresh(app);
+        } else {
+            self.periods.set_active_name(Some(name));
+        }
+    }
+
     fn period(&self) -> UsagePeriod {
         match self.periods.active_name().as_deref() {
             Some("day") => UsagePeriod::Day,

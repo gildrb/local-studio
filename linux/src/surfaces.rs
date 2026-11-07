@@ -121,6 +121,13 @@ impl FilesSurface {
         }
     }
 
+    pub fn current_path(&self) -> Option<String> {
+        if self.root.visible_child_name().is_some_and(|name| name == "file") {
+            return Some(self.file_title.text().to_string());
+        }
+        self.dir.borrow().clone()
+    }
+
     pub fn names(&self) -> Vec<String> {
         self.entries.borrow().iter().map(|entry| entry.name.clone()).collect()
     }

@@ -23,6 +23,12 @@ pub fn install(app: &Rc<App>) {
     install_threads(app);
     install_global(app);
     crate::commands::install(app);
+    crate::workbench::install(app);
+    crate::bindings::install(app);
+    add_string_action(app, "copy-text", |app, text| {
+        app.window.clipboard().set_text(&text);
+        app.toast("Copied");
+    });
 }
 
 fn install_window(app: &Rc<App>) {
@@ -39,7 +45,7 @@ fn install_window(app: &Rc<App>) {
         ("settings", |app| app.open_settings(None)),
         ("usage", |app| app.open_page(Page::Usage)),
         ("local", |app| app.open_page(Page::Local)),
-        ("toggle-terminal", |app| app.panel.toggle("terminal")),
+        ("toggle-terminal", |app| app.drawer.toggle(app)),
         ("toggle-diff", |app| app.panel.toggle("diff")),
     ];
     for (name, activate) in plain {
@@ -300,7 +306,24 @@ pub fn thread_menu(state: &State, id: &str) -> gio::Menu {
             "thread-filter",
         );
     }
-    item(&second, "Copy Thread ID", "thread-copy-id");
+    let copy = gio::Menu::new();
+    item(&copy, "Thread ID", "thread-copy-id");
+    if let Some(row) = row {
+        let path = row.worktree.clone().or_else(|| row.project.clone());
+        for (label, value) in [("Path", path), ("Branch", row.branch.clone())] {
+            if let Some(value) = value {
+                let entry = gio::MenuItem::new(Some(label), None);
+                entry.set_action_and_target_value(Some("win.copy-text"), Some(&value.to_variant()));
+                copy.append_item(&entry);
+            }
+        }
+    }
+    second.append_submenu(Some("Copy"), &copy);
+    if let Some(project) = &project {
+        let entry = gio::MenuItem::new(Some("Project Settings…"), None);
+        entry.set_action_and_target_value(Some("win.project-settings"), Some(&project.to_variant()));
+        second.append_item(&entry);
+    }
     menu.append_section(None, &second);
     let third = gio::Menu::new();
     if archived {

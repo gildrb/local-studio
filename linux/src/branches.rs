@@ -121,6 +121,18 @@ impl BranchBar {
         }
     }
 
+    pub fn open_mode(&self) {
+        if self.root.is_visible() {
+            self.mode.activate();
+        }
+    }
+
+    pub fn open_branch(&self) {
+        if self.root.is_visible() && self.branch.is_sensitive() {
+            self.branch.popup();
+        }
+    }
+
     pub fn reset(&self) {
         self.pick.replace(Pick::Fresh);
         self.touched.set(false);

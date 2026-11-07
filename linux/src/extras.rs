@@ -4,7 +4,7 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use local_studio_core::{ImageAttachment, ItemKind, SearchHit, SlashCommand};
+use local_studio_core::{ImageAttachment, ItemKind, PullRequest, SearchHit, SlashCommand};
 
 use crate::app::{App, Target};
 use crate::format;
@@ -15,6 +15,8 @@ const MENU_LIMIT: usize = 8;
 enum Kind {
     Command,
     Mention,
+    Pull,
+    Skill,
 }
 
 #[derive(Clone)]
@@ -31,6 +33,7 @@ struct Suggestion {
     badge: String,
     insert: String,
     file: Option<String>,
+    context: Option<(String, String)>,
 }
 
 pub struct Extras {
@@ -43,9 +46,12 @@ pub struct Extras {
     trigger: RefCell<Option<Trigger>>,
     commands: RefCell<Vec<SlashCommand>>,
     commands_key: RefCell<Option<String>>,
+    pulls: RefCell<Vec<PullRequest>>,
+    pulls_key: RefCell<Option<String>>,
     pending: RefCell<String>,
     images: RefCell<Vec<ImageAttachment>>,
     files: RefCell<Vec<String>>,
+    contexts: RefCell<Vec<(String, String)>>,
     history: RefCell<Vec<String>>,
     history_index: Cell<Option<usize>>,
     app: Weak<App>,
@@ -95,9 +101,12 @@ impl Extras {
             trigger: RefCell::new(None),
             commands: RefCell::new(Vec::new()),
             commands_key: RefCell::new(None),
+            pulls: RefCell::new(Vec::new()),
+            pulls_key: RefCell::new(None),
             pending: RefCell::new(String::new()),
             images: RefCell::new(Vec::new()),
             files: RefCell::new(Vec::new()),
+            contexts: RefCell::new(Vec::new()),
             history: RefCell::new(Vec::new()),
             history_index: Cell::new(None),
             app,
@@ -109,11 +118,16 @@ impl Extras {
     }
 
     pub fn has_attachments(&self) -> bool {
-        !self.images.borrow().is_empty() || !self.files.borrow().is_empty()
+        !self.images.borrow().is_empty() || !self.files.borrow().is_empty() || !self.contexts.borrow().is_empty()
     }
 
-    pub fn take(&self) -> (Vec<ImageAttachment>, Vec<String>) {
-        let taken = (self.images.take(), self.files.take());
+    pub fn add_context(&self, label: &str, text: &str) {
+        self.contexts.borrow_mut().push((label.to_string(), text.to_string()));
+        self.render_chips();
+    }
+
+    pub fn take(&self) -> (Vec<ImageAttachment>, Vec<String>, Vec<(String, String)>) {
+        let taken = (self.images.take(), self.files.take(), self.contexts.take());
         self.render_chips();
         taken
     }
@@ -128,6 +142,7 @@ impl Extras {
     pub fn reset(&self) {
         self.images.borrow_mut().clear();
         self.files.borrow_mut().clear();
+        self.contexts.borrow_mut().clear();
         self.history_index.set(None);
         self.close();
         self.render_chips();
@@ -147,14 +162,30 @@ impl Extras {
             (state.current_project(), state.workspace_dir())
         };
         match trigger.kind {
-            Kind::Command => {
+            Kind::Command | Kind::Skill => {
                 let key = project.clone().unwrap_or_default();
                 if self.commands_key.borrow().as_ref() != Some(&key) {
                     self.commands_key.replace(Some(key));
                     let request = app.ask(Target::Commands);
                     app.core.run(|studio| studio.list_commands(request, project));
                 }
-                self.show_commands(&trigger.query);
+                if trigger.kind == Kind::Command {
+                    self.show_commands(&trigger.query);
+                } else {
+                    self.show_skills(&trigger.query);
+                }
+            }
+            Kind::Pull => {
+                let Some(root) = root else {
+                    self.show(vec![], "Add a project to reference its pull requests.");
+                    return;
+                };
+                if self.pulls_key.borrow().as_deref() != Some(root.as_str()) {
+                    self.pulls_key.replace(Some(root.clone()));
+                    let request = app.ask(Target::HashPulls);
+                    app.core.run(|studio| studio.list_pull_requests(request, root));
+                }
+                self.show_pulls(&trigger.query);
             }
             Kind::Mention => {
                 let Some(root) = root else {
@@ -173,6 +204,59 @@ impl Extras {
                 app.core.run(|studio| studio.search_files(request, root, query, 20));
             }
         }
+    }
+
+    pub fn pulls_loaded(&self, pulls: &[PullRequest]) {
+        self.pulls.replace(pulls.to_vec());
+        let query =
+            self.trigger.borrow().as_ref().filter(|trigger| trigger.kind == Kind::Pull).map(|t| t.query.clone());
+        if let Some(query) = query {
+            self.show_pulls(&query);
+        }
+    }
+
+    fn show_pulls(&self, query: &str) {
+        let query = query.to_lowercase();
+        let items: Vec<Suggestion> = self
+            .pulls
+            .borrow()
+            .iter()
+            .filter(|pull| pull.number.to_string().starts_with(&query) || pull.title.to_lowercase().contains(&query))
+            .take(MENU_LIMIT)
+            .map(|pull| Suggestion {
+                title: format!("#{} {}", pull.number, pull.title),
+                detail: format!("{} → {} · {}", pull.head, pull.base, pull.url),
+                badge: format::capitalize(&pull.state.to_lowercase()),
+                insert: format!("#{} ", pull.number),
+                file: None,
+                context: Some((
+                    format!("PR #{}", pull.number),
+                    format!("{}\n{}\n{} → {} ({})", pull.title, pull.url, pull.head, pull.base, pull.state),
+                )),
+            })
+            .collect();
+        self.show(items, "No matching pull requests.");
+    }
+
+    fn show_skills(&self, query: &str) {
+        let query = query.to_lowercase();
+        let items: Vec<Suggestion> = self
+            .commands
+            .borrow()
+            .iter()
+            .filter(|command| command.source.to_lowercase().contains("skill"))
+            .filter(|command| command.name.to_lowercase().contains(&query))
+            .take(MENU_LIMIT)
+            .map(|command| Suggestion {
+                title: format!("${}", command.name.trim_start_matches("skill:")),
+                detail: command.description.clone(),
+                badge: command.source.clone(),
+                insert: format!("${} ", command.name.trim_start_matches("skill:")),
+                file: None,
+                context: None,
+            })
+            .collect();
+        self.show(items, "No matching skill.");
     }
 
     pub fn commands_loaded(&self, commands: Vec<SlashCommand>) {
@@ -201,6 +285,7 @@ impl Extras {
                 badge: String::new(),
                 insert: format!("@{} ", hit.relative),
                 file: Some(hit.relative.clone()),
+                context: None,
             })
             .collect();
         self.show(items, "No matching files or folders.");
@@ -214,6 +299,7 @@ impl Extras {
             badge: "App".to_string(),
             insert: "/model ".to_string(),
             file: None,
+            context: None,
         }];
         items.extend(self.commands.borrow().iter().map(|command| Suggestion {
             title: format!("/{}", command.name),
@@ -221,6 +307,7 @@ impl Extras {
             badge: command.source.clone(),
             insert: format!("/{} ", command.name),
             file: None,
+            context: None,
         }));
         items.retain(|item| item.title[1..].to_lowercase().contains(&query));
         items.truncate(MENU_LIMIT);
@@ -337,6 +424,9 @@ impl Extras {
         let mut end = buffer.iter_at_offset(buffer.cursor_position());
         buffer.delete(&mut start, &mut end);
         buffer.insert(&mut start, &item.insert);
+        if let Some((label, text)) = item.context {
+            self.contexts.borrow_mut().push((label, text));
+        }
         if let Some(file) = item.file {
             let mut files = self.files.borrow_mut();
             if !files.contains(&file) {
@@ -400,7 +490,7 @@ impl Extras {
             picture.set_size_request(56, 56);
             picture.add_css_class("ls-thumb");
             chip.set_child(Some(&picture));
-            chip.add_overlay(&self.remove_button(true, index));
+            chip.add_overlay(&self.remove_button(Chip::Image, index));
             self.chip_row.append(&chip);
         }
         for (index, file) in self.files.borrow().iter().enumerate() {
@@ -412,13 +502,23 @@ impl Extras {
             label.set_ellipsize(gtk::pango::EllipsizeMode::Start);
             label.set_max_width_chars(36);
             chip.append(&label);
-            chip.append(&self.remove_button(false, index));
+            chip.append(&self.remove_button(Chip::File, index));
+            self.chip_row.append(&chip);
+        }
+        for (index, (label, text)) in self.contexts.borrow().iter().enumerate() {
+            let chip = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+            chip.add_css_class("ls-chip");
+            chip.set_valign(gtk::Align::Center);
+            chip.set_tooltip_text(Some(text));
+            chip.append(&gtk::Image::from_icon_name("utilities-terminal-symbolic"));
+            chip.append(&gtk::Label::new(Some(&format!("{label} · {} lines", text.lines().count()))));
+            chip.append(&self.remove_button(Chip::Context, index));
             self.chip_row.append(&chip);
         }
         self.chips.set_visible(self.has_attachments());
     }
 
-    fn remove_button(&self, image: bool, index: usize) -> gtk::Button {
+    fn remove_button(&self, kind: Chip, index: usize) -> gtk::Button {
         let button = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Remove").build();
         button.add_css_class("flat");
         button.add_css_class("circular");
@@ -429,16 +529,10 @@ impl Extras {
         button.connect_clicked(move |_| {
             let Some(app) = weak.upgrade() else { return };
             let extras = &app.composer.extras;
-            if image {
-                let mut images = extras.images.borrow_mut();
-                if index < images.len() {
-                    images.remove(index);
-                }
-            } else {
-                let mut files = extras.files.borrow_mut();
-                if index < files.len() {
-                    files.remove(index);
-                }
+            match kind {
+                Chip::Image => remove_at(&mut extras.images.borrow_mut(), index),
+                Chip::File => remove_at(&mut extras.files.borrow_mut(), index),
+                Chip::Context => remove_at(&mut extras.contexts.borrow_mut(), index),
             }
             extras.render_chips();
         });
@@ -464,6 +558,19 @@ impl Extras {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Chip {
+    Image,
+    File,
+    Context,
+}
+
+fn remove_at<T>(items: &mut Vec<T>, index: usize) {
+    if index < items.len() {
+        items.remove(index);
+    }
+}
+
 fn trigger_at(before: &str) -> Option<Trigger> {
     let token_start = before
         .rfind(char::is_whitespace)
@@ -473,6 +580,12 @@ fn trigger_at(before: &str) -> Option<Trigger> {
     if let Some(query) = token.strip_prefix('/') {
         let line_start = token_start == 0 || before[..token_start].ends_with('\n');
         return line_start.then(|| Trigger { kind: Kind::Command, start, query: query.to_string() });
+    }
+    if let Some(query) = token.strip_prefix('#') {
+        return Some(Trigger { kind: Kind::Pull, start, query: query.to_string() });
+    }
+    if let Some(query) = token.strip_prefix('$') {
+        return Some(Trigger { kind: Kind::Skill, start, query: query.to_string() });
     }
     token.strip_prefix('@').map(|query| Trigger { kind: Kind::Mention, start, query: query.to_string() })
 }

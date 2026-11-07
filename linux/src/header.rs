@@ -14,13 +14,15 @@ pub struct Header {
     chevron: gtk::Image,
     page_title: gtk::Label,
     branch: gtk::Label,
-    diff: gtk::Button,
+    panel: gtk::Overlay,
+    badge: gtk::Label,
     terminal: gtk::Button,
     git: adw::SplitButton,
+    open: adw::SplitButton,
 }
 
 impl Header {
-    pub fn build() -> Self {
+    pub fn build(editors: &gtk::gio::Menu) -> Self {
         let bar = adw::HeaderBar::new();
         let toggle = gtk::ToggleButton::builder()
             .icon_name("sidebar-show-symbolic")
@@ -62,10 +64,25 @@ impl Header {
             .tooltip_text("Terminal (Ctrl+J)")
             .action_name("win.toggle-terminal")
             .build();
-        let diff = gtk::Button::builder()
+        let panel_button = gtk::Button::builder()
             .icon_name("sidebar-show-right-symbolic")
-            .tooltip_text("Diff (Ctrl+D)")
-            .action_name("win.toggle-diff")
+            .tooltip_text("Right Panel (Ctrl+Alt+B)")
+            .action_name("win.toggle-panel")
+            .build();
+        let badge = gtk::Label::new(None);
+        badge.add_css_class("ls-badge");
+        badge.set_halign(gtk::Align::End);
+        badge.set_valign(gtk::Align::Start);
+        badge.set_can_target(false);
+        badge.set_visible(false);
+        let panel = gtk::Overlay::new();
+        panel.set_child(Some(&panel_button));
+        panel.add_overlay(&badge);
+        let open = adw::SplitButton::builder()
+            .label("Open")
+            .tooltip_text("Open in Editor (Ctrl+O)")
+            .action_name("win.open-editor")
+            .menu_model(editors)
             .build();
         let branch = gtk::Label::new(None);
         branch.add_css_class("ls-pill");
@@ -79,11 +96,33 @@ impl Header {
         menu.append(Some("Publish Repository…"), Some("win.git-publish"));
         let git = adw::SplitButton::builder().label("Commit").menu_model(&menu).build();
         git.set_visible(false);
-        bar.pack_end(&diff);
+        bar.pack_end(&panel);
         bar.pack_end(&terminal);
         bar.pack_end(&git);
+        bar.pack_end(&open);
         bar.pack_end(&branch);
-        Self { bar, toggle, new_thread, crumb, project, slash, title, chevron, page_title, branch, diff, terminal, git }
+        Self {
+            bar,
+            toggle,
+            new_thread,
+            crumb,
+            project,
+            slash,
+            title,
+            chevron,
+            page_title,
+            branch,
+            panel,
+            badge,
+            terminal,
+            git,
+            open,
+        }
+    }
+
+    pub fn set_agents(&self, running: usize) {
+        self.badge.set_visible(running > 0);
+        self.badge.set_label(&running.to_string());
     }
 
     pub fn bind_split(&self, split: &adw::OverlaySplitView) {
@@ -98,8 +137,9 @@ impl Header {
         self.crumb.set_visible(on_thread);
         self.page_title.set_visible(!on_thread);
         let workspace = on_thread && state.workspace_dir().is_some();
-        self.diff.set_visible(workspace);
+        self.panel.set_visible(on_thread);
         self.terminal.set_visible(workspace);
+        self.open.set_visible(workspace);
         self.page_title.set_label(match state.page {
             Page::Thread => "",
             Page::Local => "Local",

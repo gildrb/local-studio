@@ -13,7 +13,8 @@ const THINKING_KEY: u64 = 1 << 63;
 const DETAIL_LIMIT: usize = 6_000;
 
 pub struct Timeline {
-    pub root: gtk::ScrolledWindow,
+    pub root: gtk::Overlay,
+    minimap: gtk::DrawingArea,
     store: gio::ListStore,
     items: RefCell<Vec<Item>>,
     hidden: Rc<RefCell<HashSet<u64>>>,
@@ -61,13 +62,28 @@ impl Timeline {
         list.add_css_class("ls-timeline");
         list.set_margin_top(12);
         list.set_margin_bottom(12);
-        let root =
+        let scroller =
             gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&list).build();
         let follow = Rc::new(Cell::new(true));
-        let adjustment = root.vadjustment();
+        let pill = gtk::Button::builder().tooltip_text("Scroll to End").build();
+        let pill_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        pill_box.append(&gtk::Image::from_icon_name("go-down-symbolic"));
+        pill_box.append(&gtk::Label::new(Some("Scroll to end")));
+        pill.set_child(Some(&pill_box));
+        pill.add_css_class("osd");
+        pill.add_css_class("pill");
+        pill.add_css_class("ls-scroll-pill");
+        pill.set_halign(gtk::Align::Center);
+        pill.set_valign(gtk::Align::End);
+        pill.set_margin_bottom(14);
+        pill.set_visible(false);
+        let adjustment = scroller.vadjustment();
         let watch = Rc::clone(&follow);
+        let shown = pill.clone();
         adjustment.connect_value_changed(move |adjustment| {
-            watch.set(adjustment.value() + adjustment.page_size() >= adjustment.upper() - 48.0);
+            let at_end = adjustment.value() + adjustment.page_size() >= adjustment.upper() - 48.0;
+            watch.set(at_end);
+            shown.set_visible(!at_end && adjustment.upper() > adjustment.page_size() * 1.2);
         });
         let stick = Rc::clone(&follow);
         adjustment.connect_upper_notify(move |adjustment| {
@@ -75,7 +91,26 @@ impl Timeline {
                 adjustment.set_value(adjustment.upper() - adjustment.page_size());
             }
         });
-        Self { root, store, items: RefCell::new(Vec::new()), hidden, expanded, filter, follow, list, width }
+        let (jump, resume) = (list.clone(), Rc::clone(&follow));
+        pill.connect_clicked(move |pill| {
+            resume.set(true);
+            pill.set_visible(false);
+            let count = jump.model().map_or(0, |model| model.n_items());
+            if count > 0 {
+                jump.scroll_to(count - 1, gtk::ListScrollFlags::NONE, None);
+            }
+        });
+        let minimap = minimap(&list, &scroller);
+        let root = gtk::Overlay::new();
+        root.set_child(Some(&scroller));
+        root.add_overlay(&pill);
+        root.add_overlay(&minimap.0);
+        let minimap = minimap.1;
+        Self { root, minimap, store, items: RefCell::new(Vec::new()), hidden, expanded, filter, follow, list, width }
+    }
+
+    pub fn refresh_minimap(&self) {
+        self.minimap.queue_draw();
     }
 
     pub fn set_width(&self, width: i32) {
@@ -83,6 +118,14 @@ impl Timeline {
             let count = self.store.n_items();
             self.store.items_changed(0, count, count);
         }
+    }
+
+    pub fn scroll_to_start(&self) {
+        self.follow.set(false);
+        let list = self.list.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(250), move || {
+            list.scroll_to(0, gtk::ListScrollFlags::NONE, None);
+        });
     }
 
     fn scroll_to_end(&self) {
@@ -93,6 +136,30 @@ impl Timeline {
                 list.scroll_to(count - 1, gtk::ListScrollFlags::NONE, None);
             }
         });
+    }
+
+    pub fn visible_text(&self) -> String {
+        let items = self.items.borrow();
+        let texts: Vec<String> = items
+            .iter()
+            .rev()
+            .filter_map(|item| match &item.kind {
+                ItemKind::User { text, .. } => Some(format!("User: {text}")),
+                ItemKind::Assistant { blocks, .. } => {
+                    let text: Vec<&str> = blocks
+                        .iter()
+                        .filter_map(|block| match block {
+                            Block::Text { text } => Some(text.as_str()),
+                            Block::Thinking { .. } => None,
+                        })
+                        .collect();
+                    (!text.is_empty()).then(|| format!("Assistant: {}", text.join("\n")))
+                }
+                _ => None,
+            })
+            .take(6)
+            .collect();
+        texts.into_iter().rev().collect::<Vec<_>>().join("\n\n")
     }
 
     pub fn items(&self) -> Ref<'_, Vec<Item>> {
@@ -550,6 +617,102 @@ fn wrapped_label(markup: &str) -> gtk::Label {
     label.set_selectable(true);
     label.set_hexpand(true);
     label
+}
+
+fn user_positions(list: &gtk::ListView) -> (Vec<u32>, u32) {
+    let Some(model) = list.model() else { return (Vec::new(), 0) };
+    let count = model.n_items();
+    let users = (0..count)
+        .filter(|index| {
+            model
+                .item(*index)
+                .and_downcast::<glib::BoxedAnyObject>()
+                .is_some_and(|object| matches!(object.borrow::<Item>().kind, ItemKind::User { .. }))
+        })
+        .collect();
+    (users, count)
+}
+
+fn current_position(scroller: &gtk::ScrolledWindow, count: u32) -> f64 {
+    let adjustment = scroller.vadjustment();
+    let span = (adjustment.upper() - adjustment.page_size()).max(1.0);
+    (adjustment.value() / span).clamp(0.0, 1.0) * f64::from(count.saturating_sub(1))
+}
+
+fn minimap(list: &gtk::ListView, scroller: &gtk::ScrolledWindow) -> (gtk::Box, gtk::DrawingArea) {
+    let area = gtk::DrawingArea::new();
+    area.set_content_width(10);
+    area.set_vexpand(true);
+    area.set_tooltip_text(Some("Timeline: click to jump to a message"));
+    let drawn = list.clone();
+    let viewport = scroller.vadjustment();
+    area.set_draw_func(move |area, cairo, width, height| {
+        let (users, count) = user_positions(&drawn);
+        if users.len() < 2 || count == 0 {
+            return;
+        }
+        let color = area.color();
+        let (width, height) = (f64::from(width), f64::from(height));
+        let upper = viewport.upper().max(1.0);
+        cairo.set_source_rgba(f64::from(color.red()), f64::from(color.green()), f64::from(color.blue()), 0.08);
+        let top = viewport.value() / upper * height;
+        let span = (viewport.page_size() / upper * height).max(6.0);
+        cairo.rectangle(0.0, top, width, span);
+        cairo.fill().ok();
+        cairo.set_source_rgba(0.204, 0.420, 0.945, 0.9);
+        for index in users {
+            let y = f64::from(index) / f64::from(count.max(1)) * (height - 3.0);
+            cairo.rectangle(2.0, y, width - 4.0, 3.0);
+        }
+        cairo.fill().ok();
+    });
+    let redraw = area.clone();
+    scroller.vadjustment().connect_value_changed(move |_| redraw.queue_draw());
+    let click = gtk::GestureClick::new();
+    let (target, surface) = (list.clone(), area.clone());
+    click.connect_released(move |_, _, _, y| {
+        let (users, count) = user_positions(&target);
+        let height = f64::from(surface.height().max(1));
+        let wanted = (y / height * f64::from(count)).max(0.0);
+        let nearest = users
+            .iter()
+            .min_by(|left, right| (f64::from(**left) - wanted).abs().total_cmp(&(f64::from(**right) - wanted).abs()));
+        if let Some(index) = nearest {
+            target.scroll_to(*index, gtk::ListScrollFlags::NONE, None);
+        }
+    });
+    area.add_controller(click);
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    column.add_css_class("ls-minimap");
+    column.set_halign(gtk::Align::End);
+    column.set_margin_top(8);
+    column.set_margin_bottom(70);
+    column.set_margin_end(4);
+    for (icon, tooltip, forward) in
+        [("go-up-symbolic", "Previous Message", false), ("go-down-symbolic", "Next Message", true)]
+    {
+        let button = gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).build();
+        button.add_css_class("flat");
+        button.add_css_class("ls-minimap-button");
+        let (target, scroll) = (list.clone(), scroller.clone());
+        button.connect_clicked(move |_| {
+            let (users, count) = user_positions(&target);
+            let current = current_position(&scroll, count);
+            let next = if forward {
+                users.iter().find(|index| f64::from(**index) > current + 0.5)
+            } else {
+                users.iter().rev().find(|index| f64::from(**index) < current - 0.5)
+            };
+            if let Some(index) = next {
+                target.scroll_to(*index, gtk::ListScrollFlags::NONE, None);
+            }
+        });
+        if forward {
+            column.append(&area);
+        }
+        column.append(&button);
+    }
+    (column, area)
 }
 
 fn small_icon(name: &str, class: &str) -> gtk::Image {

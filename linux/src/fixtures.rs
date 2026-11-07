@@ -14,7 +14,7 @@ use crate::app::{App, Dirty};
 use crate::format;
 use crate::state::{Page, State};
 
-pub const SCENES: [&str; 27] = [
+pub const SCENES: [&str; 37] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -23,7 +23,7 @@ pub const SCENES: [&str; 27] = [
     "06-approval",
     "07-sidebar-hidden",
     "08-diff-panel",
-    "09-terminal-panel",
+    "09-terminal-drawer",
     "10-settings-general",
     "11-settings-keybindings",
     "12-local",
@@ -42,6 +42,16 @@ pub const SCENES: [&str; 27] = [
     "25-browser-panel",
     "26-pull-requests-page",
     "27-project-search",
+    "28-panel-launcher",
+    "29-diff-split",
+    "30-go-to-file",
+    "31-composer-meter-stash",
+    "32-pull-request-trigger",
+    "33-onboarding",
+    "34-project-settings",
+    "35-theme-editor",
+    "36-theme-midnight",
+    "37-scroll-pill-minimap",
 ];
 
 pub const FOCUSED: &str = "t-sidebar";
@@ -118,13 +128,16 @@ pub fn stage(app: &Rc<App>, scene: &str) {
         "08-diff-panel" => {
             conversation(app, false);
             app.panel.show("diff");
-            app.panel.set_fixture_diff(&diff_files_public());
+            app.panel.diff.set_fixture(&diff_files_public(), false);
         }
-        "09-terminal-panel" => {
+        "09-terminal-drawer" => {
             conversation(app, false);
-            app.panel.show("terminal");
-            app.panel.feed_fixture(
-                "\x1b[1;34m~/code/local-studio\x1b[0m on \x1b[1;35m linux/gtk\x1b[0m\r\n❯ cargo clippy --all-targets -- -D warnings\r\n\x1b[1;32m    Checking\x1b[0m local-studio-core v0.1.0\r\n\x1b[1;32m    Checking\x1b[0m local-studio-gtk v0.1.0\r\n\x1b[1;32m    Finished\x1b[0m `dev` profile [unoptimized + debuginfo] target(s) in 14.82s\r\n\x1b[1;34m~/code/local-studio\x1b[0m on \x1b[1;35m linux/gtk\x1b[0m\r\n❯ ",
+            app.drawer.fixture(
+                &[
+                    "\x1b[1;34m~/code/local-studio\x1b[0m on \x1b[1;35m linux/gtk\x1b[0m\r\n❯ cargo clippy --all-targets -- -D warnings\r\n\x1b[1;32m    Checking\x1b[0m local-studio-core v0.1.0\r\n\x1b[1;32m    Checking\x1b[0m local-studio-gtk v0.1.0\r\n\x1b[1;32m    Finished\x1b[0m `dev` profile [unoptimized + debuginfo] target(s) in 14.82s\r\n\x1b[1;34m~/code/local-studio\x1b[0m on \x1b[1;35m linux/gtk\x1b[0m\r\n❯ ",
+                    "\x1b[1;34m~/code/local-studio/linux\x1b[0m\r\n❯ git status --short\r\n\x1b[32m M\x1b[0m src/drawer.rs\r\n\x1b[32m M\x1b[0m src/panels.rs\r\n\x1b[31m??\x1b[0m src/diffview.rs\r\n❯ ",
+                ],
+                crate::drawer::Layout::SideBySide,
             );
         }
         "10-settings-general" => {
@@ -166,10 +179,14 @@ pub fn teardown(app: &Rc<App>) {
     if let Some(dialog) = app.window.visible_dialog() {
         dialog.force_close();
     }
-    app.panel.root.set_visible(false);
+    app.set_panel_maximized(false);
+    app.panel.close_where(|_, _| false);
+    app.panel.hide();
+    app.drawer.reset();
     app.split.set_show_sidebar(true);
     app.sidebar.reset();
     app.composer.reset();
+    app.composer.tools.set_fixture(&[]);
     app.branches.reset();
     app.timeline.clear();
     *app.state.borrow_mut() = State::default();
