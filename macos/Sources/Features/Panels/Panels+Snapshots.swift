@@ -514,11 +514,16 @@ enum PanelFixtures {
         store.receive([.fileContent(request: request, path: relative, content: content)])
     }
 
-    static func feedTerminal(_ store: StudioStore, session: TerminalSession, terminal: String, output: String) {
-        guard let request = session.request else { return }
+    static func feedTerminal(_ store: StudioStore, session: TerminalSession, terminal: String, output: String, selectedRow: UInt16? = nil) {
+        guard let request = session.request, var frame = terminalPreview(cols: 120, rows: 24, data: Data(output.utf8)) else { return }
+        if let selectedRow, let index = frame.dirty.firstIndex(where: { $0.index == selectedRow }) {
+            let end = frame.dirty[index].runs.last.map { $0.column + $0.cells - 1 } ?? 0
+            frame.dirty[index].selection = TerminalSpan(start: 1, end: end)
+            frame.hasSelection = true
+        }
         store.receive([
             .terminalOpened(request: request, terminal: terminal),
-            .terminalOutput(terminal: terminal, data: Data(output.utf8)),
+            .terminalFrame(terminal: terminal, frame: frame),
         ])
     }
 
@@ -528,7 +533,8 @@ enum PanelFixtures {
         for group in deck.groups {
             for session in group.sessions where session.terminal == nil {
                 index += 1
-                feedTerminal(store, session: session, terminal: "pty-\(index)", output: index == 1 ? terminalOutput : secondOutput)
+                let first = index == 1
+                feedTerminal(store, session: session, terminal: "pty-\(index)", output: first ? terminalOutput : secondOutput, selectedRow: first ? 3 : nil)
             }
         }
     }
@@ -549,6 +555,8 @@ enum PanelFixtures {
         "test workspace::terminal::coalesces_output ... \u{1b}[32mok\u{1b}[0m",
         "",
         "test result: \u{1b}[32mok\u{1b}[0m. 2 passed; 0 failed; 0 ignored",
+        "\u{1b}[7m inverse \u{1b}[0m \u{1b}[4munderline\u{1b}[0m \u{1b}[9mstrike\u{1b}[0m \u{1b}[3mitalic\u{1b}[0m \u{1b}[2mfaint\u{1b}[0m "
+            + "\u{1b}[48;5;24m\u{1b}[38;5;231m 256 \u{1b}[0m \u{1b}[38;2;255;140;0mtruecolor\u{1b}[0m 日本語 ✓ λ→",
         "",
         "\u{1b}[1;34m~/Repos/local-studio\u{1b}[0m on \u{1b}[35m feat/panels\u{1b}[0m \u{1b}[33m!2\u{1b}[0m",
         "\u{1b}[32m❯\u{1b}[0m ",

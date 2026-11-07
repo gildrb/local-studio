@@ -1,6 +1,5 @@
 import AppKit
 import LocalStudioKit
-import SwiftTerm
 import SwiftUI
 
 struct TerminalActions {
@@ -60,7 +59,7 @@ private struct TerminalDeckView: View {
             splitSideBySide: { panels.deck(for: project).split(.sideBySide) },
             splitStacked: { panels.deck(for: project).split(.stacked) },
             close: { panels.deck(for: project).closeFocused() },
-            attach: { panels.addToChat($0.chatContext, source: $0.label) },
+            attach: { $0.addToChat(panels) },
             commands: panels.commands
         )
         VStack(spacing: 0) {
@@ -184,7 +183,7 @@ struct TerminalGroupSurfaceView: View {
                     panels.close(surface)
                 }
             },
-            attach: { panels.addToChat($0.chatContext, source: $0.label) },
+            attach: { $0.addToChat(panels) },
             commands: panels.commands
         )
         VStack(spacing: 0) {
@@ -236,7 +235,7 @@ struct TerminalGroupView: View {
     }
 }
 
-private struct TerminalPaneView: View {
+struct TerminalPaneView: View {
     let session: TerminalSession
     let settings: LocalStudioKit.Settings?
     let focused: Bool
@@ -247,8 +246,9 @@ private struct TerminalPaneView: View {
         VStack(spacing: 0) {
             TerminalPane(
                 session: session,
-                fontName: settings?.terminalFont ?? "",
+                fontName: fontName,
                 fontSize: CGFloat(settings?.terminalFontSize ?? 12),
+                blink: settings?.terminalCursorBlink ?? true,
                 actions: actions,
                 onFocus: onFocus,
                 revision: ThemeTokens.shared.revision
@@ -278,6 +278,11 @@ private struct TerminalPaneView: View {
         }
     }
 
+    private var fontName: String {
+        if let font = settings?.terminalFont, !font.isEmpty { return font }
+        return settings?.codeFont ?? ""
+    }
+
     private func statusText(_ message: String) -> String {
         if case .exited(let code?) = session.status, code != 0 {
             return "\(message) with code \(code)"
@@ -286,19 +291,11 @@ private struct TerminalPaneView: View {
     }
 }
 
-final class PaneTerminalView: TerminalView {
-    var onFocus: (() -> Void)?
-
-    override func mouseDown(with event: NSEvent) {
-        onFocus?()
-        super.mouseDown(with: event)
-    }
-}
-
 private struct TerminalPane: NSViewRepresentable {
     let session: TerminalSession
     let fontName: String
     let fontSize: CGFloat
+    let blink: Bool
     let actions: TerminalActions
     let onFocus: () -> Void
     let revision: Int
@@ -308,12 +305,10 @@ private struct TerminalPane: NSViewRepresentable {
         TerminalPaneCoordinator(session: session)
     }
 
-    func makeNSView(context: Context) -> PaneTerminalView {
-        let view = PaneTerminalView(frame: CGRect(x: 0, y: 0, width: 480, height: 240), font: font)
-        view.terminalDelegate = context.coordinator
-        view.optionAsMetaKey = true
+    func makeNSView(context: Context) -> TerminalSurfaceView {
+        let view = TerminalSurfaceView(palette: palette, fontName: fontName, fontSize: fontSize)
         view.onFocus = onFocus
-        paint(view)
+        view.blinkEnabled = blink
         context.coordinator.scheme = colorScheme
         context.coordinator.revision = revision
         context.coordinator.actions = actions
@@ -322,70 +317,56 @@ private struct TerminalPane: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: PaneTerminalView, context: Context) {
+    func updateNSView(_ view: TerminalSurfaceView, context: Context) {
         context.coordinator.actions = actions
         view.onFocus = onFocus
-        let font = font
-        if view.font != font {
-            view.font = font
+        view.setFont(name: fontName, size: fontSize)
+        if view.blinkEnabled != blink {
+            view.blinkEnabled = blink
         }
         if context.coordinator.scheme != colorScheme || context.coordinator.revision != revision {
-            paint(view)
+            view.setPalette(palette)
         }
         context.coordinator.scheme = colorScheme
         context.coordinator.revision = revision
     }
 
-    static func dismantleNSView(_ view: PaneTerminalView, coordinator: TerminalPaneCoordinator) {
+    static func dismantleNSView(_ view: TerminalSurfaceView, coordinator: TerminalPaneCoordinator) {
         coordinator.detach()
     }
 
-    private var font: NSFont {
-        if !fontName.isEmpty, let font = NSFont(name: fontName, size: fontSize) {
-            return font
-        }
-        return NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-    }
-
-    private func paint(_ view: PaneTerminalView) {
+    private var palette: ThemePalette {
         let appearance: ThemeAppearance = colorScheme == .dark ? .dark : .light
-        let palette = ThemeStore.shared.palettes[appearance] ?? LegacyPalette.palette(appearance)
-        view.translucentCellBackgrounds = true
-        view.nativeBackgroundColor = palette[.terminal].nsColor.withAlphaComponent(0.995)
-        view.nativeForegroundColor = palette[.terminalText].nsColor
-        view.caretColor = palette[.terminalCursor].nsColor
-        view.selectedTextBackgroundColor = palette[.terminalSelection].nsColor
-        view.installColors(ThemeToken.ansi.map { token in
-            let color = palette[token]
-            func channel(_ value: Double) -> UInt16 { UInt16((min(max(value, 0), 1) * 65535).rounded()) }
-            return SwiftTerm.Color(red: channel(color.red), green: channel(color.green), blue: channel(color.blue))
-        })
+        return ThemeStore.shared.palettes[appearance] ?? LegacyPalette.palette(appearance)
     }
 }
 
 @MainActor
-final class TerminalPaneCoordinator: NSObject, TerminalViewDelegate {
+final class TerminalPaneCoordinator: NSObject {
     let session: TerminalSession
     var actions: TerminalActions?
     var scheme: SwiftUI.ColorScheme?
     var revision: Int?
-    private weak var view: PaneTerminalView?
+    private weak var view: TerminalSurfaceView?
 
     init(session: TerminalSession) {
         self.session = session
     }
 
-    func contextMenu(for view: PaneTerminalView) -> NSMenu {
+    func contextMenu(for view: TerminalSurfaceView) -> NSMenu {
         let menu = NSMenu()
-        let copy = NSMenuItem(title: "Copy", action: #selector(TerminalView.copy(_:)), keyEquivalent: "")
+        let copy = NSMenuItem(title: "Copy", action: #selector(TerminalSurfaceView.copy(_:)), keyEquivalent: "")
         copy.target = view
         menu.addItem(copy)
-        let paste = NSMenuItem(title: "Paste", action: #selector(TerminalView.paste(_:)), keyEquivalent: "")
+        let paste = NSMenuItem(title: "Paste", action: #selector(TerminalSurfaceView.paste(_:)), keyEquivalent: "")
         paste.target = view
         menu.addItem(paste)
+        let all = NSMenuItem(title: "Select All", action: #selector(TerminalSurfaceView.selectAll(_:)), keyEquivalent: "")
+        all.target = view
+        menu.addItem(all)
         menu.addItem(.separator())
-        let recent = NSMenuItem(title: "Copy Recent Output", action: #selector(copyRecentOutput), keyEquivalent: "")
-        recent.target = self
+        let recent = NSMenuItem(title: "Copy Recent Output", action: #selector(TerminalSurfaceView.copyRecentOutput(_:)), keyEquivalent: "")
+        recent.target = view
         menu.addItem(recent)
         menu.addItem(.separator())
         let chat = NSMenuItem(title: "Add to Chat", action: #selector(addToChat), keyEquivalent: "")
@@ -398,22 +379,9 @@ final class TerminalPaneCoordinator: NSObject, TerminalViewDelegate {
         actions?.attach(session)
     }
 
-    @objc private func copyRecentOutput() {
-        let text = session.recentOutput()
-        guard !text.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-
-    func attach(_ view: PaneTerminalView) {
+    func attach(_ view: TerminalSurfaceView) {
         self.view = view
-        if !session.buffer.isEmpty {
-            view.feed(byteArray: ArraySlice(session.buffer))
-        }
-        session.attach(self) { [weak view] data in
-            view?.feed(byteArray: ArraySlice(data))
-        }
-        session.selection = { [weak view] in view?.getSelection() }
+        view.attach(session)
         registerCommands()
         if session.status == .starting {
             Task { @MainActor [weak view] in
@@ -424,8 +392,7 @@ final class TerminalPaneCoordinator: NSObject, TerminalViewDelegate {
     }
 
     func detach() {
-        session.detach(self)
-        session.selection = nil
+        view?.detach()
         actions?.commands?.unregister(owner: self)
     }
 
@@ -439,29 +406,5 @@ final class TerminalPaneCoordinator: NSObject, TerminalViewDelegate {
         commands.register("terminal.split", owner: self, enabled: focused) { [weak self] in self?.actions?.splitSideBySide() }
         commands.register("terminal.splitVertical", owner: self, enabled: focused) { [weak self] in self?.actions?.splitStacked() }
         commands.register("terminal.close", owner: self, enabled: focused) { [weak self] in self?.actions?.close() }
-    }
-
-    func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        session.resize(columns: newCols, rows: newRows)
-    }
-
-    func setTerminalTitle(source: TerminalView, title: String) {
-        session.title = title
-    }
-
-    func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-
-    func send(source: TerminalView, data: ArraySlice<UInt8>) {
-        session.write(Data(data))
-    }
-
-    func scrolled(source: TerminalView, position: Double) {}
-
-    func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
-
-    func clipboardCopy(source: TerminalView, content: Data) {
-        guard let text = String(data: content, encoding: .utf8) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 }

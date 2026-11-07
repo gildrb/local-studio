@@ -31,7 +31,7 @@ use crate::skills::Resources;
 use crate::store::{self, Store, StoredProject};
 use crate::threads::{self, ChildRow, Facts, GitHead, InboxPrefs, RosterRow, SavedRow, SearchDoc};
 use crate::transcript::Transcript;
-use crate::workspace::model::{FollowUpBehavior, NewThreadWorkspace, ResponseStreaming, Settings};
+use crate::workspace::model::{FollowUpBehavior, NewThreadWorkspace, ResponseStreaming, Settings, TerminalFrame};
 use crate::workspace::{PreparedWorktree, Workspace};
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(1);
@@ -121,9 +121,50 @@ impl Mailbox {
         }
     }
 
+    pub(crate) fn push_frame(&self, terminal: &str, frame: TerminalFrame) {
+        let was_empty = {
+            let mut updates = self.updates.lock().unwrap_or_else(PoisonError::into_inner);
+            let was_empty = updates.is_empty();
+            let pending = updates.iter_mut().rev().find_map(|update| match update {
+                Update::TerminalFrame { terminal: id, frame } if id == terminal => Some(frame),
+                _ => None,
+            });
+            match pending {
+                Some(pending) => merge_frame(pending, frame),
+                None => updates.push(Update::TerminalFrame { terminal: terminal.to_owned(), frame }),
+            }
+            was_empty
+        };
+        if was_empty {
+            self.waker.wake();
+        }
+    }
+
     fn drain(&self) -> Vec<Update> {
         std::mem::take(&mut *self.updates.lock().unwrap_or_else(PoisonError::into_inner))
     }
+}
+
+fn merge_frame(pending: &mut TerminalFrame, mut next: TerminalFrame) {
+    let title = next.title.take().or_else(|| pending.title.take());
+    let bell = pending.bell || next.bell;
+    if next.full || next.cols != pending.cols || next.rows != pending.rows {
+        *pending = next;
+    } else {
+        for row in next.dirty {
+            match pending.dirty.iter_mut().find(|existing| existing.index == row.index) {
+                Some(existing) => *existing = row,
+                None => pending.dirty.push(row),
+            }
+        }
+        pending.cursor = next.cursor;
+        pending.scrollback_len = next.scrollback_len;
+        pending.viewport_offset = next.viewport_offset;
+        pending.has_selection = next.has_selection;
+        pending.mouse_tracking = next.mouse_tracking;
+    }
+    pending.title = title;
+    pending.bell = bell;
 }
 
 enum Command {

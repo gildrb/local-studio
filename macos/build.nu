@@ -1,5 +1,7 @@
 #!/usr/bin/env nu
 
+use zig.nu toolchain
+
 def developer-dir []: nothing -> string {
     if ($env.DEVELOPER_DIR? | is-not-empty) {
         return $env.DEVELOPER_DIR
@@ -14,24 +16,20 @@ def developer-dir []: nothing -> string {
     "/Library/Developer/CommandLineTools"
 }
 
-def make-icon [source: path, target: path] {
-    let iconset = (mktemp -d | path join "AppIcon.iconset")
-    mkdir $iconset
-    for size in [16 32 128 256 512] {
-        for scale in [1 2] {
-            let pixels = ($size * $scale | into string)
-            let name = if $scale == 1 { $"icon_($size)x($size).png" } else { $"icon_($size)x($size)@2x.png" }
-            ^/usr/bin/sips -z $pixels $pixels $source --out ($iconset | path join $name) | ignore
-        }
+def compile-icon [package: path, resources: path] {
+    let partial = (mktemp -t "local-studio-icon.XXXXXX")
+    let result = (do { ^xcrun actool ($package | path join "AppIcon.icon") --compile $resources --platform macosx --minimum-deployment-target 26.0 --app-icon AppIcon --output-partial-info-plist $partial --output-format human-readable-text } | complete)
+    rm -f $partial
+    if $result.exit_code != 0 or not ($resources | path join "Assets.car" | path exists) {
+        error make { msg: $"actool could not compile AppIcon.icon \(needs Xcode 26+; run `sudo xcodebuild -runFirstLaunch` once\):\n($result.stdout)($result.stderr)" }
     }
-    ^/usr/bin/iconutil -c icns $iconset -o $target
-    rm -r -f ($iconset | path dirname)
 }
 
 def build-kit [repo: path, package: path, profile: string] {
     let cargo_profile = if $profile == "release" { ["--release"] } else { [] }
-    ^cargo build --manifest-path ($repo | path join "Cargo.toml") -p local-studio-kit ...$cargo_profile
     let target_root = if ($env.CARGO_TARGET_DIR? | is-not-empty) { $env.CARGO_TARGET_DIR | path expand } else { $repo | path join "target" }
+    $env.PATH = ($env.PATH | prepend (toolchain $target_root))
+    ^cargo build --manifest-path ($repo | path join "Cargo.toml") -p local-studio-kit ...$cargo_profile
     let target = ($target_root | path join $profile)
     let generated = ($package | path join "Generated")
     let bindings = (mktemp -d)
@@ -80,10 +78,6 @@ def main [
         "Release" => "release"
         _ => { error make { msg: $"unknown configuration ($configuration); expected Debug or Release" } }
     }
-    let icon_source = match $configuration {
-        "Debug" => "assets/dev/blueprint-macos-1024.png"
-        _ => "assets/prod/black-macos-1024.png"
-    }
     let developer = (developer-dir)
     let sdk = (with-env { DEVELOPER_DIR: $developer } { ^xcrun --sdk macosx --show-sdk-path | str trim })
     let sdk_version = (with-env { DEVELOPER_DIR: $developer } { ^xcrun --sdk macosx --show-sdk-version | str trim })
@@ -100,7 +94,7 @@ def main [
         mkdir ($contents | path join "MacOS") ($contents | path join "Resources")
         cp ($products | path join "LocalStudio") $executable
         cp ($package | path join "LocalStudio-Info.plist") ($contents | path join "Info.plist")
-        make-icon ($repo | path join $icon_source) ($contents | path join "Resources" "AppIcon.icns")
+        compile-icon $package ($contents | path join "Resources")
         bundle-controller $repo ($contents | path join "Resources" "controller")
         for resource in (glob ($package | path join "Resources" "*")) {
             cp $resource ($contents | path join "Resources")

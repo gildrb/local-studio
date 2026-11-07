@@ -657,7 +657,7 @@ extension AccessMode {
         switch self {
         case .supervised: "Ask before commands and file changes."
         case .autoAcceptEdits: "Apply file edits without asking; ask before commands."
-        case .auto: "Approve routine actions automatically; ask for the rest."
+        case .auto: "Approve routine actions; ask before the rest."
         case .fullAccess: "Allow commands and edits without prompts."
         }
     }
@@ -734,14 +734,15 @@ struct ThreadContextStrip: View {
 
     var body: some View {
         let conversation = store.conversation
-        if conversation.thread != nil {
-            if let info = conversation.info, let branch = info.branch {
+        if let thread = conversation.thread {
+            let row = store.inbox.thread(thread)
+            if let branch = conversation.info?.branch ?? row?.branch {
                 strip {
                     Label(branch, systemImage: "arrow.triangle.branch")
                         .padding(.horizontal, 8)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Branch: \(branch)")
-                    if info.worktree != nil {
+                    if (conversation.info?.worktree ?? row?.worktree) != nil {
                         Text("Worktree")
                             .padding(.horizontal, 4)
                     }

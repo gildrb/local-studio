@@ -11,8 +11,10 @@ use local_studio_core::{
     AccessMode, Branch, ColorScheme, Connection, DaemonLaunch, Device, DiffLineKind, DiffScope, FileContent, FileDiff,
     FileEntry, GitStatus, Keybinding, LocalSnapshot, MergeMethod, NewThreadWorkspace, ProjectScript, ProjectSettings,
     PromptDraft, ProviderStatus, PullRequestDetail, SearchHit, SendShortcut, Settings, SetupStage, SetupStageState,
-    Shelf, SnapshotSound, Studio, StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, Update, UsagePeriod,
-    UsageReport, Waker, WorktreeChoice,
+    Shelf, SnapshotSound, Studio, StudioConfig, TerminalColor, TerminalFrame, TerminalKey, TerminalKeyAction,
+    TerminalMods, TerminalMouse, TerminalMouseAction, TerminalMouseButton, TerminalPoint, TerminalRow, TerminalScroll,
+    TerminalSelect, TerminalSize, ThreadRow, ThreadSettings, ThreadStatus, Update, UsagePeriod, UsageReport, Waker,
+    WorktreeChoice,
 };
 use serde_json::Map;
 
@@ -61,7 +63,8 @@ struct View {
     contents: Vec<(String, String, FileContent)>,
     hits: Vec<(String, Vec<SearchHit>)>,
     terminals: Vec<(String, String)>,
-    output: Vec<(String, Vec<u8>)>,
+    screens: Vec<(String, Screen)>,
+    texts: Vec<(String, String)>,
     exited: Vec<(String, Option<i32>)>,
     usage: Vec<(String, UsageReport)>,
     local: Vec<(String, LocalSnapshot)>,
@@ -97,17 +100,89 @@ impl View {
             || self.details.iter().any(|(id, _)| id == request)
             || self.devices.iter().any(|(id, _)| id == request)
             || self.pulls.iter().any(|id| id == request)
+            || self.texts.iter().any(|(id, _)| id == request)
+    }
+
+    fn screen(&self, terminal: &str) -> Option<&Screen> {
+        self.screens.iter().find(|(id, _)| id == terminal).map(|(_, screen)| screen)
     }
 
     fn terminal_text(&self, terminal: &str) -> String {
-        let bytes: Vec<u8> =
-            self.output.iter().filter(|(id, _)| id == terminal).flat_map(|(_, data)| data.iter().copied()).collect();
-        String::from_utf8_lossy(&bytes).into_owned()
+        self.screen(terminal).map(|screen| screen.lines.join("\n")).unwrap_or_default()
+    }
+
+    fn text(&self, request: &str) -> Option<&str> {
+        self.texts.iter().find(|(id, _)| id == request).map(|(_, text)| text.as_str())
+    }
+
+    fn frame(&mut self, terminal: String, frame: &TerminalFrame) {
+        let index = if let Some(index) = self.screens.iter().position(|(id, _)| *id == terminal) {
+            index
+        } else {
+            self.screens.push((terminal, Screen::default()));
+            self.screens.len() - 1
+        };
+        self.screens[index].1.apply(frame);
     }
 
     fn status(&self, project: &str) -> Option<&GitStatus> {
         self.statuses.iter().rev().find(|(id, _)| id == project).map(|(_, status)| status)
     }
+}
+
+#[derive(Default)]
+struct Screen {
+    cols: u16,
+    rows: u16,
+    lines: Vec<String>,
+    reds: usize,
+    frames: usize,
+    has_selection: bool,
+    scrollback_len: u64,
+    viewport_offset: u64,
+}
+
+impl Screen {
+    fn apply(&mut self, frame: &TerminalFrame) {
+        if frame.full || self.cols != frame.cols || self.rows != frame.rows {
+            self.lines = vec![String::new(); usize::from(frame.rows)];
+            self.reds = 0;
+        }
+        self.cols = frame.cols;
+        self.rows = frame.rows;
+        for row in &frame.dirty {
+            if let Some(line) = self.lines.get_mut(usize::from(row.index)) {
+                *line = row_text(row);
+            }
+            self.reds += row
+                .runs
+                .iter()
+                .filter(|run| run.text.contains("red") && run.style.foreground == TerminalColor::Palette { index: 1 })
+                .count();
+        }
+        self.frames += 1;
+        self.has_selection = frame.has_selection;
+        self.scrollback_len = frame.scrollback_len;
+        self.viewport_offset = frame.viewport_offset;
+    }
+
+    fn row_of(&self, text: &str) -> Option<u16> {
+        self.lines.iter().position(|line| line.trim_end() == text).and_then(|index| u16::try_from(index).ok())
+    }
+}
+
+fn row_text(row: &TerminalRow) -> String {
+    let mut line = String::new();
+    let mut column = 0;
+    for run in &row.runs {
+        while column < run.column {
+            line.push(' ');
+            column += 1;
+        }
+        line.push_str(&run.text);
+        column = run.column + run.cells;
+    }
+    line
 }
 
 struct Harness {
@@ -169,7 +244,8 @@ impl Harness {
             Update::FileContent { request, path, content } => view.contents.push((request, path, content)),
             Update::SearchResults { request, results } => view.hits.push((request, results)),
             Update::TerminalOpened { request, terminal } => view.terminals.push((request, terminal)),
-            Update::TerminalOutput { terminal, data } => view.output.push((terminal, data)),
+            Update::TerminalFrame { terminal, frame } => view.frame(terminal, &frame),
+            Update::TerminalText { request, text, .. } => view.texts.push((request, text)),
             Update::TerminalExited { terminal, code } => view.exited.push((terminal, code)),
             Update::Usage { request, report } => view.usage.push((request, report)),
             Update::Local { request, snapshot } => view.local.push((request, snapshot)),
@@ -872,20 +948,167 @@ fn files(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn terminal_and_commit(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
-    let project = project.to_string();
+const ENTER: u32 = 36;
+const KEY_C: u32 = if cfg!(target_os = "macos") { 0x08 } else { 54 };
+
+fn cell_size(cols: u16, rows: u16) -> TerminalSize {
+    TerminalSize { cols, rows, cell_width: 16, cell_height: 32 }
+}
+
+fn click(harness: &Harness, terminal: &str, action: TerminalMouseAction, column: u16, row: u16) {
+    let mouse = TerminalMouse {
+        action,
+        button: Some(TerminalMouseButton::Left),
+        x: f64::from(column) * 16.0 + 4.0,
+        y: f64::from(row) * 32.0 + 8.0,
+        mods: TerminalMods::default(),
+    };
+    harness.studio.terminal_mouse(terminal.to_string(), mouse);
+}
+
+fn terminal(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
     let request = harness.request();
-    harness.studio.open_terminal(request.clone(), project.clone(), 100, 30);
+    harness.studio.open_terminal(request.clone(), project.to_string(), 100, 30);
     harness.answer("terminal opened", &request)?;
     let terminal = harness.view.terminals.last().map(|(_, terminal)| terminal.clone()).context("terminal id")?;
-    harness.studio.resize_terminal(terminal.clone(), 120, 40);
-    harness.studio.write_terminal(terminal.clone(), b"echo hi-from-$((40+2))\n".to_vec());
     let id = terminal.clone();
-    harness.pump_until("terminal echoed", move |view| view.terminal_text(&id).contains("hi-from-42"))?;
+    harness.pump_until("first terminal frame is a full screen", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.cols == 100 && screen.rows == 30)
+    })?;
+    harness.studio.resize_terminal(terminal.clone(), cell_size(120, 40));
+    let id = terminal.clone();
+    harness.pump_until("resize yields a 120x40 frame", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.cols == 120 && screen.rows == 40)
+    })?;
+    harness
+        .studio
+        .write_terminal(terminal.clone(), b"echo hi-from-$((40+2)); printf '\\033[31mred\\033[0m\\n'".to_vec());
+    let enter = TerminalKey {
+        action: TerminalKeyAction::Press,
+        code: ENTER,
+        mods: TerminalMods::default(),
+        text: None,
+        unshifted: 0,
+        composing: false,
+    };
+    harness.studio.terminal_key(terminal.clone(), enter);
+    let id = terminal.clone();
+    harness.pump_until("echo through the PTY shows in a frame", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.row_of("hi-from-42").is_some())
+    })?;
+    let id = terminal.clone();
+    harness.pump_until("SGR colour arrives as a palette run", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.reds > 0 && screen.row_of("red").is_some())
+    })?;
+    let screen = harness.view.screen(&terminal).context("screen")?;
+    let row = screen.row_of("hi-from-42").context("echo row")?;
+    println!("     {} frames, echo on row {row}", screen.frames);
+
+    harness.studio.terminal_select(terminal.clone(), TerminalSelect::Line { at: TerminalPoint { column: 0, row } });
+    let id = terminal.clone();
+    harness.pump_until("line selection marks the frame", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.has_selection)
+    })?;
+    let request = harness.request();
+    harness.studio.terminal_selection_text(request.clone(), terminal.clone());
+    harness.answer("selection text", &request)?;
+    let selected = harness.view.text(&request).unwrap_or_default().to_string();
+    ensure!(selected == "hi-from-42", "line selection text was {selected:?}");
+
+    harness.studio.terminal_select(terminal.clone(), TerminalSelect::Clear);
+    for action in [
+        TerminalMouseAction::Press,
+        TerminalMouseAction::Release,
+        TerminalMouseAction::Press,
+        TerminalMouseAction::Release,
+    ] {
+        click(harness, &terminal, action, 1, row);
+    }
+    let id = terminal.clone();
+    harness.pump_until("double click selects a word", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.has_selection)
+    })?;
+    let request = harness.request();
+    harness.studio.terminal_selection_text(request.clone(), terminal.clone());
+    harness.answer("word text", &request)?;
+    let word = harness.view.text(&request).unwrap_or_default().to_string();
+    ensure!(!word.is_empty() && "hi-from-42".contains(word.as_str()), "double click selected {word:?}");
+    println!("     double click selected {word:?}");
+
+    let request = harness.request();
+    harness.studio.terminal_recent_output(request.clone(), terminal.clone(), 20);
+    harness.answer("recent output", &request)?;
+    let recent = harness.view.text(&request).unwrap_or_default().to_string();
+    ensure!(recent.contains("hi-from-42") && recent.contains("red"), "recent output was {recent:?}");
+    reflow_and_scroll(harness, &terminal)?;
     harness.studio.close_terminal(terminal.clone());
     let id = terminal.clone();
     harness
         .pump_until("terminal exited after close", move |view| view.exited.iter().any(|(exited, _)| *exited == id))?;
+    Ok(())
+}
+
+fn reflow_and_scroll(harness: &mut Harness, terminal: &str) -> anyhow::Result<()> {
+    let terminal = terminal.to_string();
+    harness.studio.write_terminal(terminal.clone(), b"printf 'cat-%s\\n' ready; cat\n".to_vec());
+    let id = terminal.clone();
+    harness.pump_until("cat holds the foreground so the shell cannot redraw", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.row_of("cat-ready").is_some())
+    })?;
+    harness.studio.resize_terminal(terminal.clone(), cell_size(6, 40));
+    let id = terminal.clone();
+    harness.pump_until("narrow resize reflows the echo", move |view| {
+        view.screen(&id).is_some_and(|screen| {
+            screen.cols == 6 && screen.lines.windows(2).any(|pair| pair[0] == "hi-fro" && pair[1].trim_end() == "m-42")
+        })
+    })?;
+    harness.studio.resize_terminal(terminal.clone(), cell_size(120, 40));
+    let id = terminal.clone();
+    harness.pump_until("widening restores the width", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.cols == 120)
+    })?;
+    let top = TerminalScroll { lines: -10_000, x: 0.0, y: 0.0, mods: TerminalMods::default() };
+    harness.studio.terminal_scroll(terminal.clone(), top);
+    let id = terminal.clone();
+    harness.pump_until("widening reflows the echo back onto one row", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.row_of("hi-from-42").is_some())
+    })?;
+    let bottom = TerminalScroll { lines: 10_000, x: 0.0, y: 0.0, mods: TerminalMods::default() };
+    harness.studio.terminal_scroll(terminal.clone(), bottom);
+    let interrupt = TerminalKey {
+        action: TerminalKeyAction::Press,
+        code: KEY_C,
+        mods: TerminalMods { control: true, ..TerminalMods::default() },
+        text: Some("c".to_string()),
+        unshifted: u32::from('c'),
+        composing: false,
+    };
+    harness.studio.terminal_key(terminal.clone(), interrupt);
+    let id = terminal.clone();
+    harness.pump_until("ctrl+c through the key encoder ends cat", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.lines.iter().any(|line| line.trim_end() == "^C"))
+    })?;
+
+    harness.studio.write_terminal(terminal.clone(), b"seq 1 300\n".to_vec());
+    let id = terminal.clone();
+    harness.pump_until("long output fills the scrollback", move |view| {
+        view.screen(&id).is_some_and(|screen| screen.row_of("300").is_some() && screen.scrollback_len > 200)
+    })?;
+    let scroll = TerminalScroll { lines: -10, x: 0.0, y: 0.0, mods: TerminalMods::default() };
+    harness.studio.terminal_scroll(terminal.clone(), scroll);
+    let id = terminal.clone();
+    harness.pump_until("scrolling moves the viewport into history", move |view| {
+        view.screen(&id).is_some_and(|screen| {
+            screen.viewport_offset + 10 == screen.scrollback_len && screen.row_of("300").is_none()
+        })
+    })?;
+
+    Ok(())
+}
+
+fn terminal_and_commit(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
+    terminal(harness, project)?;
+    let project = project.to_string();
 
     let request = harness.request();
     harness.studio.commit(request.clone(), project.clone(), None);

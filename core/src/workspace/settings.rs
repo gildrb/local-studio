@@ -216,6 +216,7 @@ pub(crate) fn sanitize(mut settings: Settings) -> Settings {
     settings.prompt_font_size = settings.prompt_font_size.clamp(9, 24);
     settings.code_font_size = settings.code_font_size.clamp(8, 24);
     settings.terminal_font_size = settings.terminal_font_size.clamp(8, 24);
+    settings.terminal_scrollback = settings.terminal_scrollback.min(1_000_000);
     settings.worktree_cleanup_after_days = settings.worktree_cleanup_after_days.map(|days| days.max(1));
     settings.local_controller_url = settings.local_controller_url.trim().trim_end_matches('/').to_string();
     settings.fleet_key = settings.fleet_key.trim().to_string();

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import LocalStudioKit
 import Observation
@@ -24,10 +25,71 @@ enum TerminalAxis {
     case stacked
 }
 
+enum TerminalTextRequest {
+    case selection
+    case recent(UInt32)
+}
+
+struct TerminalDamage {
+    let full: Bool
+    let rows: IndexSet
+    let previousCursor: TerminalCursor
+}
+
+@MainActor
+final class TerminalGrid {
+    static let hiddenCursor = TerminalCursor(column: 0, row: 0, visible: false, shape: .block, blinking: false, wide: false)
+
+    private(set) var columns = 0
+    private(set) var rows: [TerminalRow] = []
+    private(set) var cursor = TerminalGrid.hiddenCursor
+    private(set) var hasSelection = false
+    private(set) var mouseTracking = false
+    private(set) var scrollbackLength: UInt64 = 0
+    private(set) var viewportOffset: UInt64 = 0
+
+    func apply(_ frame: TerminalFrame) -> TerminalDamage {
+        let full = frame.full || Int(frame.cols) != columns || Int(frame.rows) != rows.count
+        if full {
+            rows = (0..<Int(frame.rows)).map { TerminalRow(index: UInt16($0), runs: [], selection: nil) }
+        }
+        columns = Int(frame.cols)
+        var changed = IndexSet()
+        for row in frame.dirty where Int(row.index) < rows.count {
+            rows[Int(row.index)] = row
+            changed.insert(Int(row.index))
+        }
+        let previous = cursor
+        cursor = frame.cursor
+        hasSelection = frame.hasSelection
+        mouseTracking = frame.mouseTracking
+        scrollbackLength = frame.scrollbackLen
+        viewportOffset = frame.viewportOffset
+        return TerminalDamage(full: full, rows: changed, previousCursor: previous)
+    }
+
+    var lines: [String] {
+        rows.map(Self.text)
+    }
+
+    static func text(_ row: TerminalRow) -> String {
+        var line = ""
+        var column = 0
+        for run in row.runs {
+            if Int(run.column) > column {
+                line += String(repeating: " ", count: Int(run.column) - column)
+            }
+            line += run.text
+            column = Int(run.column) + Int(run.cells)
+        }
+        return line
+    }
+}
+
 @MainActor
 @Observable
 final class TerminalSession: Identifiable {
-    static let scrollbackLimit = 2 * 1024 * 1024
+    static let recentLines: UInt32 = 80
 
     let id = UUID().uuidString
     let project: String
@@ -37,11 +99,9 @@ final class TerminalSession: Identifiable {
     private(set) var status = TerminalStatus.starting
 
     @ObservationIgnored var request: String?
-    @ObservationIgnored var selection: (() -> String?)?
-    @ObservationIgnored private(set) var buffer = Data()
-    @ObservationIgnored private(set) var columns: UInt16 = 100
-    @ObservationIgnored private(set) var rows: UInt16 = 24
-    @ObservationIgnored private var sink: ((Data) -> Void)?
+    @ObservationIgnored let grid = TerminalGrid()
+    @ObservationIgnored private(set) var size = TerminalSize(cols: 100, rows: 24, cellWidth: 16, cellHeight: 32)
+    @ObservationIgnored private var sink: ((TerminalDamage) -> Void)?
     @ObservationIgnored private var sinkOwner: ObjectIdentifier?
     @ObservationIgnored private var pendingInput = Data()
     @ObservationIgnored private var sizeDirty = false
@@ -58,37 +118,8 @@ final class TerminalSession: Identifiable {
         return "Terminal \(ordinal)"
     }
 
-    func recentOutput(lines limit: Int = 80) -> String {
-        let tail = buffer.suffix(64 * 1024)
-        let raw = String(bytes: tail, encoding: .utf8) ?? String(bytes: tail, encoding: .isoLatin1) ?? ""
-        let plain = raw
-            .replacingOccurrences(of: #"\x{1B}\[[0-?]*[ -/]*[@-~]"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\x{1B}\][^\x{07}\x{1B}]*(\x{07}|\x{1B}\\)"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: #"\x{1B}[@-_]"#, with: "", options: .regularExpression)
-            .replacingOccurrences(of: "\r\n", with: "\n")
-        let rows = plain.split(separator: "\n", omittingEmptySubsequences: false).map { row in
-            String(row.split(separator: "\r", omittingEmptySubsequences: false).last ?? "")
-        }
-        var kept = Array(rows.suffix(limit))
-        while kept.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
-            kept.removeLast()
-        }
-        while kept.first?.trimmingCharacters(in: .whitespaces).isEmpty == true {
-            kept.removeFirst()
-        }
-        return kept.joined(separator: "\n")
-    }
-
-    var chatContext: String {
-        if let selected = selection?(), !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return selected
-        }
-        return recentOutput()
-    }
-
-    var text: String {
-        String(bytes: buffer, encoding: .utf8) ?? String(bytes: buffer, encoding: .isoLatin1) ?? ""
-    }
+    var columns: UInt16 { size.cols }
+    var rows: UInt16 { size.rows }
 
     func bind(_ terminal: String) {
         self.terminal = terminal
@@ -99,7 +130,8 @@ final class TerminalSession: Identifiable {
         status = .running
         if sizeDirty {
             sizeDirty = false
-            workspace?.command { $0.resizeTerminal(terminal: terminal, cols: columns, rows: rows) }
+            let size = size
+            workspace?.command { $0.resizeTerminal(terminal: terminal, size: size) }
         }
         if !pendingInput.isEmpty {
             let input = pendingInput
@@ -108,12 +140,15 @@ final class TerminalSession: Identifiable {
         }
     }
 
-    func receive(_ data: Data) {
-        buffer.append(data)
-        if buffer.count > Self.scrollbackLimit {
-            buffer.removeSubrange(0..<(buffer.count - Self.scrollbackLimit / 2))
+    func apply(_ frame: TerminalFrame) {
+        let damage = grid.apply(frame)
+        if let title = frame.title, !title.isEmpty, title != self.title {
+            self.title = title
         }
-        sink?(data)
+        if frame.bell {
+            NSSound.beep()
+        }
+        sink?(damage)
     }
 
     func write(_ data: Data) {
@@ -121,27 +156,76 @@ final class TerminalSession: Identifiable {
         case .starting:
             pendingInput.append(data)
         case .running:
-            guard let terminal else { return }
-            workspace?.command { $0.writeTerminal(terminal: terminal, data: data) }
+            send { $0.writeTerminal(terminal: $1, data: data) }
         case .exited, .closed, .failed:
             break
         }
     }
 
-    func resize(columns: Int, rows: Int) {
-        let columns = UInt16(clamping: max(columns, 2))
-        let rows = UInt16(clamping: max(rows, 1))
-        guard columns != self.columns || rows != self.rows else { return }
-        self.columns = columns
-        self.rows = rows
+    func key(_ key: TerminalKey) {
+        send { $0.terminalKey(terminal: $1, key: key) }
+    }
+
+    func paste(_ text: String) {
+        send { $0.terminalPaste(terminal: $1, text: text) }
+    }
+
+    func mouse(_ mouse: TerminalMouse) {
+        send { $0.terminalMouse(terminal: $1, mouse: mouse) }
+    }
+
+    func scroll(_ scroll: TerminalScroll) {
+        send { $0.terminalScroll(terminal: $1, scroll: scroll) }
+    }
+
+    func focus(_ focused: Bool) {
+        send { $0.terminalFocus(terminal: $1, focused: focused) }
+    }
+
+    func select(_ selection: TerminalSelect) {
+        send { $0.terminalSelect(terminal: $1, selection: selection) }
+    }
+
+    func resize(columns: Int, rows: Int, cellWidth: UInt32, cellHeight: UInt32) {
+        let next = TerminalSize(cols: UInt16(clamping: max(columns, 2)), rows: UInt16(clamping: max(rows, 1)), cellWidth: max(cellWidth, 1), cellHeight: max(cellHeight, 1))
+        guard next != size else { return }
+        size = next
         guard status == .running, let terminal else {
             sizeDirty = true
             return
         }
-        workspace?.command { $0.resizeTerminal(terminal: terminal, cols: columns, rows: rows) }
+        workspace?.command { $0.resizeTerminal(terminal: terminal, size: next) }
     }
 
-    func attach(_ owner: AnyObject, sink: @escaping (Data) -> Void) {
+    func requestText(_ kind: TerminalTextRequest, completion: @escaping @MainActor (String) -> Void) {
+        guard let terminal, let workspace else { return }
+        workspace.requestTerminalText(completion) { studio, request in
+            switch kind {
+            case .selection:
+                studio.terminalSelectionText(request: request, terminal: terminal)
+            case .recent(let lines):
+                studio.terminalRecentOutput(request: request, terminal: terminal, lines: lines)
+            }
+        }
+    }
+
+    func addToChat(_ panels: PanelState) {
+        let label = label
+        requestText(grid.hasSelection ? .selection : .recent(Self.recentLines)) { text in
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            panels.addToChat(text, source: label)
+        }
+    }
+
+    func copy(_ kind: TerminalTextRequest) {
+        requestText(kind) { text in
+            guard !text.isEmpty else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    func attach(_ owner: AnyObject, sink: @escaping (TerminalDamage) -> Void) {
         sinkOwner = ObjectIdentifier(owner)
         self.sink = sink
     }
@@ -164,18 +248,28 @@ final class TerminalSession: Identifiable {
 
     func close() {
         switch status {
-        case .running:
+        case .running, .exited:
             status = .closed
             if let terminal {
                 workspace?.command { $0.closeTerminal(terminal: terminal) }
             }
         case .starting:
             status = .closed
-        case .exited, .closed, .failed:
+        case .closed, .failed:
             break
         }
         workspace?.forget(self)
         sink = nil
+    }
+
+    private func send(_ call: @escaping (Studio, String) -> Void) {
+        guard status == .running || isExited, let terminal else { return }
+        workspace?.command { call($0, terminal) }
+    }
+
+    private var isExited: Bool {
+        if case .exited = status { return true }
+        return false
     }
 }
 

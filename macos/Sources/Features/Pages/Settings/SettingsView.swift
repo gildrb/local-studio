@@ -17,62 +17,59 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 8) {
-                SettingsSearchField(text: $query, prompt: "Search Settings")
-                    .frame(height: 28)
-                    .padding(.horizontal, 10)
-                ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(visiblePanes) { pane in
-                            SettingsSidebarRow(pane: pane, selected: pane == selection) {
-                                selection = pane
-                            }
-                        }
+        NavigationSplitView {
+            List(selection: $selection) {
+                ForEach(visiblePanes) { pane in
+                    Label {
+                        Text(pane.title)
+                    } icon: {
+                        SettingsPaneIcon(pane: pane)
                     }
-                    .padding(.horizontal, Theme.Metrics.sidebarInset)
-                    .padding(.bottom, 8)
+                    .tag(pane)
                 }
-                .focusable()
-                .focusEffectDisabled()
-                .onMoveCommand(perform: move)
             }
-            .padding(.top, Theme.Metrics.titlebarHeight)
-            .frame(width: 220)
-            .frame(maxHeight: .infinity, alignment: .top)
-            .background(Theme.sidebar)
-            .ignoresSafeArea(.container, edges: .top)
-            Rectangle()
-                .fill(Theme.hairline)
-                .frame(width: 1)
-                .ignoresSafeArea(.container, edges: .top)
+            .listStyle(.sidebar)
+            .searchable(text: $query, placement: .sidebar, prompt: "Search Settings")
+            .navigationSplitViewColumnWidth(min: 220, ideal: 230, max: 280)
+            .toolbar(removing: .sidebarToggle)
+        } detail: {
             detail
                 .environment(\.settingsQuery, detailQuery)
+                .scrollEdgeEffectHidden(true, for: .top)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(Theme.canvas)
-        .themeRoot()
-        .navigationTitle(selection?.title ?? "Settings")
-        .toolbar(removing: .title)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                ControlGroup {
-                    Button("Back", systemImage: "chevron.left", action: goBack)
-                        .disabled(backStack.isEmpty)
-                    Button("Forward", systemImage: "chevron.right", action: goForward)
-                        .disabled(forwardStack.isEmpty)
+                .background(Theme.canvas)
+                .overlay(alignment: .top) {
+                    Theme.canvas
+                        .frame(height: 52)
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(Theme.hairline).frame(height: 1)
+                        }
+                        .ignoresSafeArea(edges: .top)
+                        .allowsHitTesting(false)
                 }
-                .controlGroupStyle(.navigation)
-            }
-            ToolbarItem(placement: .navigation) {
-                Text(selection?.title ?? "Settings")
-                    .font(.system(size: 15, weight: .semibold))
-                    .fixedSize()
-                    .padding(.horizontal, 6)
-            }
-            .sharedBackgroundVisibility(.hidden)
+                .navigationTitle(selection?.title ?? "Settings")
+                .toolbar(removing: .title)
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        ControlGroup {
+                            Button("Back", systemImage: "chevron.left", action: goBack)
+                                .disabled(backStack.isEmpty)
+                            Button("Forward", systemImage: "chevron.right", action: goForward)
+                                .disabled(forwardStack.isEmpty)
+                        }
+                        .controlGroupStyle(.navigation)
+                    }
+                    ToolbarItem(placement: .navigation) {
+                        Text(selection?.title ?? "Settings")
+                            .font(.system(size: 15, weight: .semibold))
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                    }
+                    .sharedBackgroundVisibility(.hidden)
+                }
         }
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .navigationSplitViewStyle(.balanced)
+        .themeRoot()
         .background(SettingsWindowStyle())
         .frame(minWidth: 720, minHeight: 480)
         .transaction { $0.disablesAnimations = true }
@@ -152,43 +149,6 @@ struct SettingsView: View {
         travelling = true
         selection = target
     }
-
-    private func move(_ direction: MoveCommandDirection) {
-        let panes = visiblePanes
-        guard let selection, let index = panes.firstIndex(of: selection) else { return }
-        switch direction {
-        case .up where index > 0: self.selection = panes[index - 1]
-        case .down where index + 1 < panes.count: self.selection = panes[index + 1]
-        default: break
-        }
-    }
-}
-
-private struct SettingsSidebarRow: View {
-    let pane: SettingsPane
-    let selected: Bool
-    let select: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: select) {
-            HStack(spacing: 8) {
-                SettingsPaneIcon(pane: pane)
-                Text(pane.title)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.primary)
-                    .lineLimit(1)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 8)
-            .frame(height: Theme.Metrics.rowHeight)
-            .contentShape(Rectangle())
-            .rowSurface(selected: selected, hovering: hovering)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityAddTraits(selected ? .isSelected : [])
-    }
 }
 
 struct SettingsForm<Content: View>: View {
@@ -243,44 +203,6 @@ struct ModelChoicePicker: View {
             grouped[option.provider, default: []].append(option)
         }
         return order.map { ($0, grouped[$0] ?? []) }
-    }
-}
-
-struct SettingsSearchField: NSViewRepresentable {
-    @Binding var text: String
-    let prompt: String
-
-    func makeNSView(context: Context) -> NSSearchField {
-        let field = NSSearchField()
-        field.placeholderString = prompt
-        field.sendsSearchStringImmediately = true
-        field.delegate = context.coordinator
-        field.stringValue = text
-        field.controlSize = .regular
-        return field
-    }
-
-    func updateNSView(_ field: NSSearchField, context: Context) {
-        if field.stringValue != text {
-            field.stringValue = text
-        }
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text)
-    }
-
-    final class Coordinator: NSObject, NSSearchFieldDelegate {
-        let text: Binding<String>
-
-        init(text: Binding<String>) {
-            self.text = text
-        }
-
-        func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? NSSearchField else { return }
-            text.wrappedValue = field.stringValue
-        }
     }
 }
 

@@ -249,7 +249,6 @@ private struct HoverActions<Actions: View>: ViewModifier {
                         .frame(height: Self.height)
                 }
             }
-            .padding(.bottom, -Self.height)
     }
 }
 

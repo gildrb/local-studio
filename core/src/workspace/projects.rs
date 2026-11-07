@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use super::git::slug;
 use super::model::{ProjectScript, ProjectSettings, Settings};
+use super::terminal::Launch;
 use super::{files, settings, ProjectAdder, Workspace};
 use crate::model::{NoticeLevel, Update};
 
@@ -309,6 +310,7 @@ impl Workspace {
 
     pub(crate) fn run_project_script(&self, request: String, project: String, script: String) {
         let workspace = self.clone();
+        let scrollback = self.current_settings().terminal_scrollback;
         self.inner.runtime.spawn_blocking(move || {
             let inner = &workspace.inner;
             let found = workspace.project_entry(&project).scripts.into_iter().find(|candidate| candidate.id == script);
@@ -316,8 +318,10 @@ impl Workspace {
                 workspace.push(Update::RequestFailed { request, message: format!("Unknown project script {script}.") });
                 return;
             };
-            let opened = files::root(&project)
-                .and_then(|root| inner.terminals.open(&inner.runtime, &inner.mailbox, request.clone(), &root, 120, 32));
+            let opened = files::root(&project).and_then(|root| {
+                let launch = Launch { cwd: &root, cols: 120, rows: 32, scrollback };
+                inner.terminals.open(&inner.mailbox, request.clone(), &launch)
+            });
             match opened {
                 Ok(terminal) => {
                     let mut line = found.command.into_bytes();

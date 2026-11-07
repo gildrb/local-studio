@@ -192,7 +192,8 @@ impl Harness {
             | Update::PullRequestDetail { .. }
             | Update::Devices { .. }
             | Update::TerminalOpened { .. }
-            | Update::TerminalOutput { .. }
+            | Update::TerminalFrame { .. }
+            | Update::TerminalText { .. }
             | Update::TerminalExited { .. }
             | Update::Usage { .. }
             | Update::Local { .. }

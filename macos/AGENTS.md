@@ -5,6 +5,8 @@
   - Output: `macos/build/<configuration>/LocalStudio.app`; bundles `eukhe-daemon` (`EUKHE_DAEMON` or `../eukhe/target/{release,debug}`) and `controller/`.
   - Toolchain: Xcode when its license is accepted, else CommandLineTools; an explicit `DEVELOPER_DIR` wins. The script stamps the real SDK version (minimum macOS 26) so the window gets the current system chrome.
   - Honors `CARGO_TARGET_DIR`.
+  - The core embeds libghostty-vt (crate `libghostty-vt` 0.2.2), built from source by Zig 0.15.2. `build.nu` provides it through `macos/zig.nu` (a `zig` on PATH if 0.15.x, else `nix build nixpkgs#zig_0_15`), wrapped so Zig links against its bundled macOS libc instead of the macOS 27 SDK it cannot parse. For plain cargo runs: `PATH="$(nu macos/zig.nu):$PATH" cargo …`.
+  - App icon: `macos/AppIcon.icon` (Icon Composer document) compiled by `actool`; needs Xcode 26+ after `sudo xcodebuild -runFirstLaunch`. Edit it in Icon Composer, check renditions with its `ictool`.
 - Lint with SwiftLint (`macos/.swiftlint.yml`), zero violations:
   - `env TOOLCHAIN_DIR=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain nix run nixpkgs#swiftlint -- lint --strict` from `macos/`.
 - Verify end to end in an isolated environment (see root `AGENTS.md`):
