@@ -357,8 +357,9 @@ fn forge(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
     harness.studio.publish_repository(request.clone(), project.clone(), "smoke-repo".to_string(), true);
     harness.answer("publish repository through gh repo create", &request)?;
     ensure!(git(Path::new(&project), &["remote"])?.trim() == "origin", "origin added");
-    harness.pump_until("published branch tracks origin", |view| {
-        view.status(&project).is_some_and(|status| status.upstream.as_deref() == Some("origin/watched"))
+    harness.pump_until("published branch tracks origin and reports a remote", |view| {
+        view.status(&project)
+            .is_some_and(|status| status.upstream.as_deref() == Some("origin/watched") && status.has_remote)
     })?;
     let request = harness.request();
     harness.studio.publish_repository(request.clone(), project.clone(), "smoke-repo".to_string(), true);
@@ -467,6 +468,7 @@ fn git_basics(harness: &mut Harness, repo: &Path) -> anyhow::Result<String> {
     ensure!(status.is_repo && status.branch.as_deref() == Some("feature") && status.dirty, "unexpected status");
     ensure!(status.default_branch.as_deref() == Some("main"), "default branch should be main");
     ensure!(status.changed_files == 3, "README.md, notes.txt and the escape symlink should be changed");
+    ensure!(!status.has_remote, "a fresh repo has no remote");
 
     let request = harness.request();
     harness.studio.list_branches(request.clone(), project.clone(), String::new(), 10);

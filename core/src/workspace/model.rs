@@ -50,6 +50,7 @@ pub struct GitStatus {
     pub pull_request: Option<PullRequest>,
     pub is_repo: bool,
     pub changed_files: u32,
+    pub has_remote: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
