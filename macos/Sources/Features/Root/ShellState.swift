@@ -53,6 +53,7 @@ final class ShellState {
     var timelineCursor: UInt64?
     var searchFocusRequest = 0
     @ObservationIgnored let keys = KeyState()
+    @ObservationIgnored let probe = RenderProbe()
     @ObservationIgnored private(set) var recent: [String] = []
 
     func touchRecent(_ thread: String?) {

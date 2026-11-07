@@ -242,6 +242,8 @@ private struct TimelineScroll: View {
         } action: { _, distance in
             guard current else { return }
             tracker.distance = distance
+            let previous = store.shell.probe.scroll
+            store.shell.probe.scroll = ScrollProbe(thread: thread, distance: distance, top: previous?.thread == thread ? previous?.top : nil)
             if tracker.userDriven {
                 follow(distance < Self.followSlack)
             }
@@ -268,6 +270,15 @@ private struct TimelineScroll: View {
         .onScrollTargetVisibilityChange(idType: UInt64.self, threshold: 0.3) { ids in
             updateCurrentAnchor(visible: ids)
         }
+        .onChange(of: timelineProbe, initial: true) { _, probe in
+            store.shell.probe.timeline = probe
+        }
+        .onDisappear {
+            if store.shell.probe.timeline?.thread == thread {
+                store.shell.probe.timeline = nil
+                store.shell.probe.scroll = nil
+            }
+        }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.containerSize.width >= width + 80
         } action: { _, room in
@@ -291,6 +302,18 @@ private struct TimelineScroll: View {
         }
     }
 
+    private var timelineProbe: TimelineProbe {
+        let conversation = store.conversation
+        let firstUser = conversation.rows.lazy.compactMap { row -> String? in
+            guard case .entry(let entry, _) = row, case .user(let text, _, _, _) = entry.item.kind else { return nil }
+            return text
+        }.first
+        return TimelineProbe(
+            thread: conversation.thread, pending: nil, rows: conversation.rows.count, firstUser: firstUser,
+            placeholder: conversation.rows.isEmpty && conversation.info == nil
+        )
+    }
+
     private var current: Bool {
         store.conversation.thread == thread
     }
@@ -300,6 +323,11 @@ private struct TimelineScroll: View {
         let order = Dictionary(store.conversation.rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         let top = ids.min { (order[$0] ?? .max) < (order[$1] ?? .max) }
         store.conversation.scrollTop = top
+        if let scroll = store.shell.probe.scroll, scroll.thread == thread {
+            store.shell.probe.scroll?.top = top
+        } else {
+            store.shell.probe.scroll = ScrollProbe(thread: thread, distance: -1, top: top)
+        }
         let anchors = store.conversation.anchors
         guard !anchors.isEmpty else { return }
         guard let top = ids.compactMap({ order[$0] }).min() else { return }

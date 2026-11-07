@@ -34,6 +34,9 @@ struct ThreadHeaderBar: View {
         .frame(height: Theme.Metrics.titlebarHeight)
         .background(TitlebarDragArea())
         .background(Theme.canvas)
+        .onChange(of: probe, initial: true) { _, probe in
+            store.shell.probe.header = probe
+        }
         .sheet(item: sheetBinding(\.commitProject)) { item in
             CommitSheet(store: store, project: item.id)
         }
@@ -141,6 +144,11 @@ struct ThreadHeaderBar: View {
     private var titleText: String {
         let title = store.conversation.info?.title ?? store.focusedRow?.title ?? ""
         return title.isEmpty ? "Untitled thread" : title
+    }
+
+    private var probe: HeaderProbe? {
+        guard store.shell.route == .thread else { return nil }
+        return HeaderProbe(thread: store.focusedThread, pending: nil, title: store.focusedThread == nil ? "New thread" : titleText, project: projectName)
     }
 
     private var gitProject: String? {

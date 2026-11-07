@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitors: [Any] = []
     private var commandHold: DispatchWorkItem?
     private var panelSmoke: PanelSmoke?
+    private var stress: StressHarness?
 
     override init() {
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
@@ -26,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(Snapshots.run(into: URL(fileURLWithPath: directory, isDirectory: true), matching: filter))
         }
         SyntaxHighlighter.shared.warm()
+        let stressFlag = arguments.firstIndex(of: "+stress")
+        if stressFlag != nil {
+            StressHarness.prepare()
+        }
         configureNotifier()
         installKeyMonitors()
         do {
@@ -56,6 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             smoke.start()
             panelSmoke = smoke
         }
+        if let flag = stressFlag {
+            let seconds = arguments.indices.contains(flag + 1) ? TimeInterval(arguments[flag + 1]) : nil
+            let seed = arguments.indices.contains(flag + 2) ? UInt64(arguments[flag + 2]) : nil
+            let harness = StressHarness(store: store, duration: seconds ?? 60, seed: seed ?? 1)
+            harness.start()
+            stress = harness
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -81,7 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var automated: Bool {
-        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil
+        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || stress != nil
     }
 
     private static func quitShortcutPressed() -> Bool {
@@ -126,6 +138,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.keyDown(event) == true ? nil : event
         }
+        KeyDriver.keyMonitor = { [weak self] event in self?.keyDown(event) == true }
+        KeyDriver.flagsMonitor = { [weak self] event in self?.flagsChanged(event.modifierFlags) }
         let clicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             if let window = event.window {
                 self?.store.noteClick(at: event.locationInWindow, in: window)
