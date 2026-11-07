@@ -82,33 +82,45 @@ private struct DraftHero: View {
     }
 }
 
-private struct ProjectMenu: View {
+struct ProjectMenu: View {
     let store: StudioStore
-    @State private var hovering = false
 
     var body: some View {
         let inbox = store.inbox
         let current = inbox.project(inbox.currentProject)
-        Menu {
-            Picker("Project", selection: Binding(get: { inbox.currentProject }, set: { inbox.selectProject($0) })) {
-                ForEach(inbox.projects, id: \.id) { project in
-                    Label(project.name, systemImage: "folder").tag(Optional(project.id))
-                }
-                Label("No project", systemImage: "circle.slash").tag(String?.none)
+        PickerChipButton(
+            title: current?.name ?? "No project",
+            symbol: "folder",
+            help: "Project",
+            label: "Project: \(current?.name ?? "No project")",
+            width: 300,
+            rows: Self.rows(projects: inbox.projects, current: inbox.currentProject) {
+                inbox.selectProject($0)
+            } add: {
+                Task { addProject() }
             }
-            .pickerStyle(.inline)
-            Divider()
-            Button("Add Project…", action: addProject)
-        } label: {
-            ComposerChip(title: current?.name ?? "No project", symbol: "folder", hovering: hovering)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .onHover { hovering = $0 }
-        .help("Project")
-        .accessibilityLabel("Project: \(current?.name ?? "No project")")
+        )
+    }
+
+    static func rows(
+        projects: [Project],
+        current: String?,
+        select: @escaping @MainActor (String?) -> Void,
+        add: @escaping @MainActor () -> Void
+    ) -> [PickerRow] {
+        projects.map { project in
+            PickerRow(
+                id: project.id,
+                title: project.name,
+                symbol: "folder",
+                subtitle: (project.path as NSString).abbreviatingWithTildeInPath,
+                checked: project.id == current,
+                section: "Projects"
+            ) { select(project.id) }
+        } + [
+            PickerRow(id: "no-project", title: "No project", symbol: "circle.slash", checked: current == nil, section: "Projects") { select(nil) },
+            PickerRow(id: "add-project", title: "Add Project…", symbol: "plus", action: add),
+        ]
     }
 
     private func addProject() {

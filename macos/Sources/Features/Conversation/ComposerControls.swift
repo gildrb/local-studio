@@ -458,9 +458,8 @@ private struct ModelRow: View {
     }
 }
 
-private struct ThinkingMenu: View {
+struct ThinkingMenu: View {
     let store: StudioStore
-    @State private var hovering = false
 
     var body: some View {
         let conversation = store.conversation
@@ -468,23 +467,20 @@ private struct ThinkingMenu: View {
         let levels = conversation.thinkingLevels(settings: settings)
         if let fallback = levels.first {
             let current = conversation.thinkingLevel(settings: settings) ?? fallback
-            Menu {
-                Picker("Thinking", selection: Binding(get: { current }, set: { conversation.setThinkingLevel($0) })) {
-                    ForEach(levels, id: \.self) { level in
-                        Text(Self.title(level)).tag(level)
-                    }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                ComposerChip(title: Self.title(current), hovering: hovering)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .onHover { hovering = $0 }
-            .help("Thinking level")
-            .accessibilityLabel("Thinking level: \(Self.title(current))")
+            PickerChipButton(
+                title: Self.title(current),
+                help: "Thinking level",
+                label: "Thinking level: \(Self.title(current))",
+                panelTitle: "Thinking",
+                width: 220,
+                rows: Self.rows(levels: levels, current: current) { conversation.setThinkingLevel($0) }
+            )
+        }
+    }
+
+    static func rows(levels: [String], current: String, select: @escaping @MainActor (String) -> Void) -> [PickerRow] {
+        levels.map { level in
+            PickerRow(id: level, title: title(level), checked: level == current) { select(level) }
         }
     }
 
@@ -497,9 +493,8 @@ private struct ThinkingMenu: View {
     }
 }
 
-private struct ServiceTierMenu: View {
+struct ServiceTierMenu: View {
     let store: StudioStore
-    @State private var hovering = false
 
     var body: some View {
         let conversation = store.conversation
@@ -507,25 +502,23 @@ private struct ServiceTierMenu: View {
         let tiers = conversation.serviceTiers(settings: settings)
         if !tiers.isEmpty {
             let current = conversation.serviceTier(settings: settings)
-            Menu {
-                Picker("Speed", selection: Binding(get: { current }, set: { conversation.setServiceTier($0) })) {
-                    Text("Standard").tag(String?.none)
-                    ForEach(tiers, id: \.self) { tier in
-                        Text(Self.title(tier)).tag(Optional(tier))
-                    }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                ComposerChip(title: current.map(Self.title) ?? "Standard", symbol: current == nil ? nil : "bolt", hovering: hovering)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .onHover { hovering = $0 }
-            .help("Speed (service tier)")
-            .accessibilityLabel("Speed: \(current.map(Self.title) ?? "Standard")")
+            PickerChipButton(
+                title: current.map(Self.title) ?? "Standard",
+                symbol: current == nil ? nil : "bolt",
+                help: "Speed (service tier)",
+                label: "Speed: \(current.map(Self.title) ?? "Standard")",
+                panelTitle: "Speed",
+                width: 220,
+                rows: Self.rows(tiers: tiers, current: current) { conversation.setServiceTier($0) }
+            )
         }
+    }
+
+    static func rows(tiers: [String], current: String?, select: @escaping @MainActor (String?) -> Void) -> [PickerRow] {
+        [PickerRow(id: "standard", title: "Standard", checked: current == nil) { select(nil) }]
+            + tiers.map { tier in
+                PickerRow(id: "tier-" + tier, title: title(tier), symbol: "bolt", checked: tier == current) { select(tier) }
+            }
     }
 
     static func title(_ tier: String) -> String {
@@ -614,30 +607,27 @@ private struct GoalPopover: View {
     }
 }
 
-private struct AccessMenu: View {
+struct AccessMenu: View {
     let store: StudioStore
-    @State private var hovering = false
 
     var body: some View {
         let conversation = store.conversation
         let current = conversation.access(settings: store.pages.settings)
-        Menu {
-            ForEach(AccessMode.all, id: \.self) { mode in
-                Toggle(isOn: Binding(get: { current == mode }, set: { if $0 { conversation.setAccess(mode) } })) {
-                    Text(mode.title)
-                    Text(mode.detail)
-                }
-            }
-        } label: {
-            ComposerChip(title: current.title, symbol: current.symbol, hovering: hovering)
+        PickerChipButton(
+            title: current.title,
+            symbol: current.symbol,
+            help: "Access",
+            label: "Access: \(current.title)",
+            panelTitle: "Access",
+            width: 300,
+            rows: Self.rows(current: current) { conversation.setAccess($0) }
+        )
+    }
+
+    static func rows(current: AccessMode, select: @escaping @MainActor (AccessMode) -> Void) -> [PickerRow] {
+        AccessMode.all.map { mode in
+            PickerRow(id: mode.title, title: mode.title, symbol: mode.symbol, subtitle: mode.detail, checked: mode == current) { select(mode) }
         }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .onHover { hovering = $0 }
-        .help("Access")
-        .accessibilityLabel("Access: \(current.title)")
     }
 }
 
@@ -788,32 +778,27 @@ struct ThreadContextStrip: View {
     }
 }
 
-private struct WorkspaceMenu: View {
+struct WorkspaceMenu: View {
     let options: NewThreadOptions
     let worktree: Bool
-    @State private var hovering = false
 
     var body: some View {
-        Menu {
-            Picker("Workspace", selection: Binding(get: { worktree }, set: { options.chooseWorkspace(worktree: $0) })) {
-                Label("Local checkout", systemImage: "folder").tag(false)
-                Label("New worktree", systemImage: "arrow.triangle.branch").tag(true)
-            }
-            .pickerStyle(.inline)
-        } label: {
-            ComposerChip(
-                title: worktree ? "New worktree" : "Local checkout",
-                symbol: worktree ? "arrow.triangle.branch" : "folder",
-                hovering: hovering
-            )
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .onHover { hovering = $0 }
-        .help("Workspace")
-        .accessibilityLabel(worktree ? "Workspace: New worktree" : "Workspace: Local checkout")
+        PickerChipButton(
+            title: worktree ? "New worktree" : "Local checkout",
+            symbol: worktree ? "arrow.triangle.branch" : "folder",
+            help: "Workspace",
+            label: worktree ? "Workspace: New worktree" : "Workspace: Local checkout",
+            panelTitle: "Workspace",
+            width: 220,
+            rows: Self.rows(worktree: worktree) { options.chooseWorkspace(worktree: $0) }
+        )
+    }
+
+    static func rows(worktree: Bool, choose: @escaping @MainActor (Bool) -> Void) -> [PickerRow] {
+        [
+            PickerRow(id: "local", title: "Local checkout", symbol: "folder", checked: !worktree) { choose(false) },
+            PickerRow(id: "worktree", title: "New worktree", symbol: "arrow.triangle.branch", checked: worktree) { choose(true) },
+        ]
     }
 }
 
@@ -829,64 +814,35 @@ private struct BranchNameField: View {
     }
 }
 
-private struct BaseBranchButton: View {
+struct BaseBranchButton: View {
     let store: StudioStore
     let project: String
-    @State private var presented = false
-    @State private var hovering = false
     @State private var query = ""
 
     var body: some View {
         let options = store.conversation.newThread
-        Button {
-            presented.toggle()
-        } label: {
-            ComposerChip(title: "from " + (options.base ?? defaultBase), hovering: hovering || presented)
+        let base = options.base ?? defaultBase
+        let rows = Self.rows(branches, selected: base) { options.base = $0 }
+        let empty = store.conversation.branchRequest.flatMap { store.workspace.branches[$0] } == nil ? "Loading branches…" : "No matching branches."
+        PickerChipButton(title: "from " + base, help: "Base branch", label: "Base branch: \(base)") { dismiss in
+            PickerPanel(rows: rows, query: $query, prompt: "Search branches", emptyText: empty, width: 300, maxHeight: 300, dismiss: dismiss)
+                .task(id: query) {
+                    try? await Task.sleep(for: .milliseconds(query.isEmpty ? 0 : 150))
+                    guard !Task.isCancelled else { return }
+                    store.conversation.loadBranches(project: project, query: query)
+                }
         }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .help("Base branch")
-        .accessibilityLabel("Base branch: \(options.base ?? defaultBase)")
-        .popover(isPresented: $presented, arrowEdge: .bottom) {
-            VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Theme.secondaryText)
-                        .accessibilityHidden(true)
-                    TextField("Search branches", text: $query)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 13))
-                }
-                .padding(.horizontal, 12)
-                .frame(height: 36)
-                Rectangle().fill(Theme.hairline).frame(height: 1)
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(branches, id: \.name) { branch in
-                            BranchRow(branch: branch, selected: branch.name == (options.base ?? defaultBase)) {
-                                options.base = branch.name
-                                presented = false
-                            }
-                        }
-                        if branches.isEmpty {
-                            Text(store.conversation.branchRequest.flatMap { store.workspace.branches[$0] } == nil ? "Loading branches…" : "No matching branches.")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(Theme.secondaryText)
-                                .padding(14)
-                        }
-                    }
-                    .padding(6)
-                }
-                .frame(maxHeight: 300)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(width: 300)
-            .task(id: query) {
-                try? await Task.sleep(for: .milliseconds(query.isEmpty ? 0 : 150))
-                guard !Task.isCancelled else { return }
-                store.conversation.loadBranches(project: project, query: query)
-            }
+    }
+
+    static func rows(_ branches: [Branch], selected: String, choose: @escaping @MainActor (String) -> Void) -> [PickerRow] {
+        branches.map { branch in
+            PickerRow(
+                id: branch.name,
+                title: branch.name,
+                symbol: branch.remote ? "globe" : "arrow.triangle.branch",
+                detail: branch.current ? "current" : nil,
+                checked: branch.name == selected
+            ) { choose(branch.name) }
         }
     }
 
@@ -896,46 +852,5 @@ private struct BaseBranchButton: View {
 
     private var defaultBase: String {
         store.workspace.gitStatus[project]?.branch ?? "current branch"
-    }
-}
-
-private struct BranchRow: View {
-    let branch: Branch
-    let selected: Bool
-    let action: () -> Void
-    @State private var hovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: branch.remote ? "globe" : "arrow.triangle.branch")
-                    .font(.system(size: 11.5, weight: .light))
-                    .foregroundStyle(Theme.secondaryText)
-                    .frame(width: 16)
-                    .accessibilityHidden(true)
-                Text(branch.name)
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: 0)
-                if branch.current {
-                    Text("current")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(Theme.secondaryText)
-                }
-                if selected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.primary)
-                        .accessibilityHidden(true)
-                }
-            }
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .contentShape(Rectangle())
-            .rowSurface(selected: selected, hovering: hovering)
-        }
-        .buttonStyle(.plain)
-        .onHover { hovering = $0 }
     }
 }
