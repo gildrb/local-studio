@@ -272,7 +272,9 @@ enum Command {
         thread: String,
         mode: AccessMode,
     },
-    LoadModels,
+    LoadModels {
+        answer: Option<(String, String)>,
+    },
     SetFavoriteModel {
         provider: String,
         model: String,
@@ -372,6 +374,7 @@ impl Studio {
             runtime.handle().clone(),
             Arc::clone(&mailbox),
             data_dir,
+            daemon::agent_dir(config.launch.as_ref()),
             query,
             controller_main,
             text.clone(),
@@ -382,6 +385,10 @@ impl Studio {
         let adder = commands.clone();
         workspace.set_project_adder(Arc::new(move |path: String| {
             adder.send(Command::AddProject { path }).ok();
+        }));
+        let reloader = commands.clone();
+        workspace.set_models_reloader(Arc::new(move |answer| {
+            reloader.send(Command::LoadModels { answer }).ok();
         }));
         let actor = Actor {
             socket,
@@ -541,7 +548,7 @@ impl Studio {
     }
 
     pub fn load_models(&self) {
-        self.send_command(Command::LoadModels);
+        self.send_command(Command::LoadModels { answer: None });
     }
 
     pub fn set_favorite_model(&self, provider: String, model: String, favorite: bool) {
@@ -995,7 +1002,7 @@ impl Actor {
                 }
                 self.emit_info(&thread);
             }
-            Command::LoadModels => self.load_models().await,
+            Command::LoadModels { answer } => self.load_models(answer).await,
             Command::SetFavoriteModel { provider, model, favorite } => {
                 toggle_key(&mut self.store.favorites, ModelKey { provider, model }, favorite);
                 self.save();
@@ -1869,11 +1876,7 @@ impl Actor {
             self.mailbox.notice(NoticeLevel::Error, format!("Unknown thread {id}."));
             return;
         }
-        let thread = self.threads.get(id);
-        let running = thread
-            .is_some_and(|thread| thread.pending_run || thread.live.as_ref().is_some_and(|live| live.state.busy))
-            || self.roster_for(id).is_some_and(|row| row.running);
-        if running {
+        if self.running(id) {
             self.mailbox.notice(NoticeLevel::Warning, "Stop the thread before deleting it.");
             return;
         }
@@ -2003,16 +2006,26 @@ impl Actor {
         model: Option<String>,
         level: Option<String>,
     ) -> Result<(), String> {
-        let active = self.ensure_open(id).await?;
+        let mut active = self.ensure_open(id).await?;
         if let (Some(provider), Some(model)) = (provider, model) {
-            self.call(DaemonCommand::SetModel {
+            let command = |active: String| DaemonCommand::SetModel {
                 id: None,
-                active_session_id: active.clone(),
-                provider,
-                model_id: model,
+                active_session_id: active,
+                provider: provider.clone(),
+                model_id: model.clone(),
                 rest: Map::default(),
-            })
-            .await?;
+            };
+            if let Err(error) = self.call(command(active.clone())).await {
+                let listed = self
+                    .models
+                    .iter()
+                    .any(|option| option.configured && option.provider == provider && option.id == model);
+                if !listed || self.running(id) {
+                    return Err(error);
+                }
+                active = self.reopen_session(id).await?;
+                self.call(command(active.clone())).await?;
+            }
         }
         if let Some(level) = level {
             self.call(DaemonCommand::SetThinkingLevel {
@@ -2127,7 +2140,14 @@ impl Actor {
         Ok(active)
     }
 
-    async fn load_models(&mut self) {
+    async fn load_models(&mut self, answer: Option<(String, String)>) {
+        self.fetch_models().await;
+        if let Some((request, message)) = answer {
+            self.mailbox.push(Update::RequestDone { request, message });
+        }
+    }
+
+    async fn fetch_models(&mut self) {
         let active = match self.utility_session().await {
             Ok(active) => active,
             Err(error) => {
@@ -2140,9 +2160,9 @@ impl Actor {
             .await
         {
             Ok(data) => match session::model_options(&data) {
-                Ok(models) => {
+                Ok((models, errors)) => {
                     self.models = models;
-                    self.workspace.models_loaded(&self.models);
+                    self.workspace.models_loaded(&self.models, errors);
                     self.push_models();
                 }
                 Err(error) => self.mailbox.notice(NoticeLevel::Error, format!("Unreadable model catalog: {error:#}")),
@@ -2195,6 +2215,19 @@ impl Actor {
         if !self.known(id) {
             return Err(format!("Unknown thread {id}."));
         }
+        self.reopen_session(id).await?;
+        self.mailbox.notice(NoticeLevel::Info, "The agent session restarted.");
+        Ok(())
+    }
+
+    fn running(&self, id: &str) -> bool {
+        self.threads
+            .get(id)
+            .is_some_and(|thread| thread.pending_run || thread.live.as_ref().is_some_and(|live| live.state.busy))
+            || self.roster_for(id).is_some_and(|row| row.running)
+    }
+
+    async fn reopen_session(&mut self, id: &str) -> Result<String, String> {
         let active = self.live_active(id).or_else(|| self.roster_for(id).and_then(|row| row.active_session_id.clone()));
         if let Some(active) = active {
             self.by_active.remove(&active);
@@ -2205,10 +2238,9 @@ impl Actor {
             }
             self.call(DaemonCommand::Kill { id: None, active_session_id: active, rest: Map::default() }).await?;
         }
-        self.ensure_open(id).await?;
+        let active = self.ensure_open(id).await?;
         self.dirty = true;
-        self.mailbox.notice(NoticeLevel::Info, "The agent session restarted.");
-        Ok(())
+        Ok(active)
     }
 
     async fn refresh_subagents(&mut self, id: &str) {

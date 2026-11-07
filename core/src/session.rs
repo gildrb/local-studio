@@ -208,13 +208,15 @@ pub(crate) fn context_usage(value: &Value) -> Option<ContextUsage> {
     Some(ContextUsage { tokens: value.get("tokens")?.as_u64()?, window: value.get("contextWindow")?.as_u64()? })
 }
 
-pub(crate) fn model_options(data: &Value) -> anyhow::Result<Vec<ModelOption>> {
+pub(crate) fn model_options(data: &Value) -> anyhow::Result<(Vec<ModelOption>, Vec<String>)> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Catalog {
         models: Vec<CatalogModel>,
         #[serde(default)]
         configured_providers: Vec<String>,
+        #[serde(default)]
+        models_json_errors: Vec<String>,
     }
     let catalog = Catalog::deserialize(data)?;
     let mut options: Vec<ModelOption> = faux_option().into_iter().collect();
@@ -240,7 +242,7 @@ pub(crate) fn model_options(data: &Value) -> anyhow::Result<Vec<ModelOption>> {
                 .collect(),
         }
     }));
-    Ok(options)
+    Ok((options, catalog.models_json_errors))
 }
 
 fn faux_option() -> Option<ModelOption> {

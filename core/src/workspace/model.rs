@@ -279,14 +279,93 @@ pub struct UsageDay {
     pub cost_usd: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum ProviderApi {
+    OpenAiCompatible,
+    OpenAiResponses,
+    Anthropic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum ProviderKind {
+    BuiltIn,
+    Custom,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum ProviderCredential {
+    Missing,
+    StoredKey,
+    SignedIn,
+    Environment,
+    ModelsJson,
+    NotRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct ProviderModel {
+    pub id: String,
+    pub name: String,
+    pub context_window: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ProviderStatus {
     pub id: String,
     pub name: String,
+    pub kind: ProviderKind,
     pub configured: bool,
+    pub credential: ProviderCredential,
     pub model_count: u32,
-    pub auth: String,
+    pub env_var: Option<String>,
+    pub base_url: Option<String>,
+    pub api: Option<ProviderApi>,
+    pub models: Vec<ProviderModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum ProviderKey {
+    Keep,
+    Set { key: String },
+    Clear,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct CustomProvider {
+    pub name: String,
+    pub base_url: String,
+    pub api: ProviderApi,
+    pub key: ProviderKey,
+    pub models: Option<Vec<ProviderModel>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct EndpointPreset {
+    pub name: String,
+    pub base_url: String,
+    pub api: ProviderApi,
+    pub needs_key: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct LocalEngine {
+    pub id: String,
+    pub controller: String,
+    pub port: u16,
+    pub base_url: String,
+    pub models: Vec<String>,
+    pub provider: String,
+    pub added: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

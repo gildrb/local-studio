@@ -652,6 +652,33 @@ impl Local {
         self.assemble(&root).await
     }
 
+    pub(crate) async fn fleet(&self, settings: &Settings) -> Vec<LocalController> {
+        let Ok(base) = Self::base_url(settings) else { return Vec::new() };
+        if !self.healthy(&base).await {
+            return Vec::new();
+        }
+        let root = Endpoint { base, key: self.fleet_key(settings) };
+        let Ok(graph) = self.request(&root, Method::GET, "/api/snapshot", None, READ_TIMEOUT).await else {
+            return Vec::new();
+        };
+        let mut controllers = Vec::new();
+        for link in array(&graph, "controllers").iter().filter(|link| flag(link, "reachable")) {
+            let snapshot = if flag(link, "self") {
+                Some(graph.clone())
+            } else {
+                let Ok(base) = Url::parse(&text(link, "url")) else { continue };
+                let endpoint = Endpoint { base, key: root.key.clone() };
+                self.request(&endpoint, Method::GET, "/api/snapshot", None, HEALTH_TIMEOUT).await.ok()
+            };
+            controllers.push(controller(link, snapshot.as_ref(), None));
+        }
+        controllers
+    }
+
+    pub(crate) fn key(&self, settings: &Settings) -> Option<String> {
+        self.fleet_key(settings)
+    }
+
     async fn assemble(&self, root: &Endpoint) -> Result<LocalSnapshot, String> {
         let graph = self.request(root, Method::GET, "/api/snapshot", None, READ_TIMEOUT).await?;
         let mut tasks = JoinSet::new();
