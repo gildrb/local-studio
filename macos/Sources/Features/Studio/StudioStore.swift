@@ -25,6 +25,7 @@ final class StudioStore {
         conversation = ConversationStore(core: core, requests: requests)
         workspace = WorkspaceStore(core: core, requests: requests)
         pages = PagesStore(core: core, requests: requests)
+        workspace.panels.bind(conversation: conversation, inbox: inbox, pages: pages)
     }
 
     func start() throws {
