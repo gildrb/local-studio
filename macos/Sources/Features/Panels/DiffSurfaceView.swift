@@ -109,7 +109,7 @@ struct DiffSurfaceView: View {
     }
 }
 
-private struct DiffList: View {
+struct DiffList: View {
     let model: DiffModel
     let palette: PanelPalette.Diff
     let fontSize: CGFloat

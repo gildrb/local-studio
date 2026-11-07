@@ -4,7 +4,7 @@ import SwiftUI
 
 extension SnapshotCatalog {
     @MainActor static var pages: [SnapshotEntry] {
-        settingsEntries + liveEntries + [
+        settingsEntries + liveEntries + windowEntries + [
             SnapshotEntry(
                 name: "pages-settings-search",
                 size: settingsSize,
@@ -64,14 +64,26 @@ extension SnapshotCatalog {
                 view: { store in AnyView(UsagePage(store: store)) }
             ),
             SnapshotEntry(
-                name: "pages-pull-requests",
-                size: CGSize(width: 1100, height: 600),
-                updates: PagesFixtures.base + [.pullRequests(request: "fixture", pulls: PagesFixtures.pulls)],
+                name: "pages-usage-limits",
+                size: CGSize(width: 1100, height: 420),
+                updates: PagesFixtures.base,
                 view: { store in
-                    store.pages.showPullRequests(project: PagesFixtures.projects[0].id, request: "fixture")
-                    return AnyView(PullRequestsPage(store: store))
+                    store.pages.loadUsage(.month)
+                    store.receive([.usage(request: "fixture", report: PagesFixtures.usageWithLimits)])
+                    return AnyView(UsagePage(store: store, mode: .limits))
                 }
             ),
+            SnapshotEntry(
+                name: "pages-usage-limits-empty",
+                size: CGSize(width: 1100, height: 360),
+                updates: PagesFixtures.base,
+                view: { store in
+                    store.pages.loadUsage(.month)
+                    store.receive([.usage(request: "fixture", report: PagesFixtures.usage)])
+                    return AnyView(UsagePage(store: store, mode: .limits))
+                }
+            ),
+        ] + pullEntries + [
             SnapshotEntry(
                 name: "pages-pull-requests-empty",
                 size: CGSize(width: 1100, height: 420),
@@ -98,6 +110,25 @@ extension SnapshotCatalog {
 
     private static let settingsSize = CGSize(width: 860, height: 680)
 
+    @MainActor private static var pullEntries: [SnapshotEntry] {
+        let tabs: [(String, PullTab)] = [("summary", .summary), ("code", .code), ("timeline", .timeline), ("checks", .checks)]
+        return tabs.map { name, tab in
+            SnapshotEntry(
+                name: "pages-pull-requests-\(name)",
+                size: CGSize(width: 1180, height: 680),
+                updates: PagesFixtures.base + [
+                    .pullRequests(request: "fixture", pulls: PagesFixtures.pulls),
+                    .pullRequestDetail(request: "fixture-detail", detail: PagesFixtures.pullDetail),
+                ],
+                view: { store in
+                    store.pages.showPullRequests(project: PagesFixtures.projects[0].id, request: "fixture")
+                    store.pages.showPullRequest(number: PagesFixtures.pullDetail.pull.number, request: "fixture-detail")
+                    return AnyView(PullRequestsPage(store: store, tab: tab))
+                }
+            )
+        }
+    }
+
     @MainActor private static var settingsEntries: [SnapshotEntry] {
         SettingsPane.allCases.map { pane in
             var updates = PagesFixtures.base
@@ -115,6 +146,31 @@ extension SnapshotCatalog {
                 updates: updates,
                 view: { store in AnyView(SettingsView(store: store, pane: pane)) }
             )
+        }
+    }
+
+    @MainActor private static var windowEntries: [SnapshotEntry] {
+        let routes: [(String, MainRoute)] = [("local", .local), ("usage", .usage), ("pull-requests", .pullRequests), ("archive", .archive)]
+        return routes.flatMap { name, route in
+            [true, false].map { sidebar in
+                SnapshotEntry(
+                    name: "pages-window-\(name)\(sidebar ? "" : "-collapsed")",
+                    size: CGSize(width: 1280, height: 820),
+                    updates: PagesFixtures.base + [
+                        .local(request: "fixture", snapshot: PagesFixtures.localSnapshot),
+                        .archivedThreads(request: "fixture", threads: PagesFixtures.archived),
+                        .pullRequests(request: "fixture", pulls: PagesFixtures.pulls),
+                    ],
+                    view: { store in
+                        store.pages.showPullRequests(project: PagesFixtures.projects[0].id, request: "fixture")
+                        store.pages.loadUsage(.month)
+                        store.receive([.usage(request: "fixture", report: PagesFixtures.usage)])
+                        store.shell.route = route
+                        store.shell.sidebarVisible = sidebar
+                        return AnyView(RootView(store: store))
+                    }
+                )
+            }
         }
     }
 }

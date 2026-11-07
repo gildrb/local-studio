@@ -5,6 +5,7 @@ import SwiftUI
 struct PullRequestsPage: View {
     let store: StudioStore
     var leadingInset: CGFloat = 0
+    var tab: PullTab = .summary
     @State private var filter: PullFilter = .open
     @State private var query = ""
     @State private var selected: UInt64?
@@ -12,35 +13,40 @@ struct PullRequestsPage: View {
     private var pages: PagesStore { store.pages }
 
     var body: some View {
-        VStack(spacing: 0) {
-            PageHeader("Pull Requests", leadingInset: leadingInset) {
-                if !store.inbox.projects.isEmpty {
-                    Picker("Project", selection: Binding(get: { project ?? "" }, set: { pages.loadPullRequests(project: $0) })) {
-                        ForEach(store.inbox.projects, id: \.id) { project in
-                            Text(project.name).tag(project.id)
+        content
+            .pageHeader {
+                PageHeader("Pull Requests", leadingInset: leadingInset) {
+                    if !store.inbox.projects.isEmpty {
+                        Picker("Project", selection: Binding(get: { project ?? "" }, set: { pages.loadPullRequests(project: $0) })) {
+                            ForEach(store.inbox.projects, id: \.id) { project in
+                                Text(project.name).tag(project.id)
+                            }
                         }
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                    Picker("State", selection: $filter) {
-                        ForEach(PullFilter.allCases, id: \.self) { filter in
-                            Text(filter.title).tag(filter)
+                        .labelsHidden()
+                        .fixedSize()
+                        Picker("State", selection: $filter) {
+                            ForEach(PullFilter.allCases, id: \.self) { filter in
+                                Text(filter.title).tag(filter)
+                            }
                         }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
-                    ChromeIconButton("Refresh", symbol: "arrow.clockwise") {
-                        if let project { pages.loadPullRequests(project: project) }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .fixedSize()
+                        ChromeIconButton("Refresh", symbol: "arrow.clockwise") {
+                            guard let project else { return }
+                            pages.loadPullRequests(project: project)
+                            if let number = current?.number { pages.loadPullRequest(project: project, number: number) }
+                        }
                     }
                 }
             }
-            content
-        }
-        .background(Theme.canvas)
-        .onAppear {
-            if let project { pages.loadPullRequests(project: project) }
-        }
+            .onAppear {
+                if let project { pages.loadPullRequests(project: project) }
+            }
+            .onChange(of: current?.number, initial: true) { _, number in
+                guard let number, let project, pages.pullDetailNumber != number || pages.pullDetailRequest == nil else { return }
+                pages.loadPullRequest(project: project, number: number)
+            }
     }
 
     private var project: String? {
@@ -58,6 +64,15 @@ struct PullRequestsPage: View {
                 && (query.isEmpty || pull.title.localizedCaseInsensitiveContains(query) || "#\(pull.number)".contains(query)
                     || pull.head.localizedCaseInsensitiveContains(query))
         }
+    }
+
+    private var current: PullRequest? {
+        visible.first { $0.number == selected } ?? visible.first
+    }
+
+    private var detail: PullRequestDetail? {
+        guard let current, pages.pullDetailNumber == current.number, let request = pages.pullDetailRequest else { return nil }
+        return store.workspace.pullRequestDetails[request]
     }
 
     @ViewBuilder private var content: some View {
@@ -91,11 +106,15 @@ struct PullRequestsPage: View {
                         }
                     }
                 }
-                .frame(width: 360)
+                .frame(width: 340)
                 .background(Theme.sidebar)
                 Rectangle().fill(Theme.hairline).frame(width: 1)
                 if let current {
-                    PullDetail(pull: current)
+                    PullDetailView(
+                        store: store, project: project ?? "", pull: current, detail: detail,
+                        error: pages.pullDetailNumber == current.number ? pages.pullDetailError : nil, tab: tab
+                    )
+                    .id(current.number)
                 } else {
                     PageEmptyState(symbol: "arrow.triangle.pull", title: "Select a pull request")
                 }
@@ -103,10 +122,6 @@ struct PullRequestsPage: View {
         } else {
             PageEmptyState(symbol: "arrow.triangle.pull", title: "Loading pull requests…")
         }
-    }
-
-    private var current: PullRequest? {
-        visible.first { $0.number == selected } ?? visible.first
     }
 }
 
@@ -140,9 +155,9 @@ private struct PullRow: View {
 
     var body: some View {
         Button(action: select) {
-            HStack(alignment: .top, spacing: 10) {
-                PullStateIcon(state: pull.state)
-                    .padding(.top, 2)
+            HStack(alignment: .top, spacing: 8) {
+                PullStateGlyph(state: pull.state)
+                    .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(pull.title)
                         .font(.system(size: 13))
@@ -154,13 +169,14 @@ private struct PullRow: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                         Spacer(minLength: 4)
-                        ChecksBadge(checks: pull.checks)
+                        ChecksGlyph(checks: pull.checks)
+                            .font(.system(size: 11, weight: .light))
                     }
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
                 }
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 8)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -169,144 +185,378 @@ private struct PullRow: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .contextMenu {
-            Button("Open in Browser") { open(pull) }
-            Button("Copy Link") { copy(pull.url) }
+            Button("Open in Browser") { openPull(pull) }
+            Button("Copy Link") { copyText(pull.url) }
         }
     }
 }
 
-private struct PullDetail: View {
+enum PullTab: Hashable {
+    case summary, code, timeline, checks
+}
+
+private struct PullDetailView: View {
+    let store: StudioStore
+    let project: String
     let pull: PullRequest
+    let detail: PullRequestDetail?
+    let error: String?
+    @State private var tab: PullTab
+    @State private var diff: DiffModel?
+
+    init(store: StudioStore, project: String, pull: PullRequest, detail: PullRequestDetail?, error: String?, tab: PullTab = .summary) {
+        self.store = store
+        self.project = project
+        self.pull = pull
+        self.detail = detail
+        self.error = error
+        _tab = State(initialValue: tab)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+            Picker("Section", selection: $tab) {
+                Text("Summary").tag(PullTab.summary)
+                Text(detail.map { "Code (\($0.files.count))" } ?? "Code").tag(PullTab.code)
+                Text("Timeline").tag(PullTab.timeline)
+                Text(detail.map { "Checks (\($0.checks.count))" } ?? "Checks").tag(PullTab.checks)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .padding(.horizontal, 20)
+            .padding(.bottom, 10)
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            body(for: tab)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .onChange(of: detail?.files, initial: true) { _, files in
+            guard let files else { return }
+            let model = DiffModel(project: project, thread: nil, workspace: store.workspace, settings: store.pages.settings)
+            model.loaded(files, request: nil)
+            diff = model
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                PullStateGlyph(state: pull.state)
+                Text(pull.title)
+                    .font(.system(size: 17, weight: .semibold))
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+            }
+            HStack(spacing: 8) {
+                Text(meta)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 8)
+                Button("Copy Link") { copyText(pull.url) }
+                Button("Open in Browser") { openPull(pull) }
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private var meta: String {
+        var parts = ["#\(pull.number)"]
+        if let author = detail?.author { parts.append(author) }
+        parts.append("\(pull.head) → \(pull.base)")
+        if let created = detail?.createdAt { parts.append("opened \(PageFormat.ago(created))") }
+        return parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder private func body(for tab: PullTab) -> some View {
+        if let detail {
+            switch tab {
+            case .summary: PullSummary(detail: detail)
+            case .code: code(detail)
+            case .timeline: PullTimeline(detail: detail)
+            case .checks: PullChecks(checks: detail.checks)
+            }
+        } else if let error {
+            PageEmptyState(symbol: "exclamationmark.triangle", title: "Couldn’t load the pull request", message: error)
+        } else {
+            PageEmptyState(symbol: "arrow.triangle.pull", title: "Loading #\(pull.number)…")
+        }
+    }
+
+    @ViewBuilder private func code(_ detail: PullRequestDetail) -> some View {
+        if detail.files.isEmpty {
+            PageEmptyState(symbol: "checkmark.circle", title: "No file changes in this pull request.")
+        } else if let diff {
+            let settings = store.pages.settings
+            DiffList(model: diff, palette: PanelPalette.diff(settings?.diffColors), fontSize: CGFloat(settings?.codeFontSize ?? 12), panels: store.panels)
+        }
+    }
+}
+
+private struct PullSummary: View {
+    let detail: PullRequestDetail
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 8) {
-                    PullStateIcon(state: pull.state)
-                    Text(stateTitle)
-                        .font(.system(size: 12, weight: .medium))
-                    Text("#\(pull.number)")
-                        .font(.system(size: 12))
+            VStack(alignment: .leading, spacing: 16) {
+                if detail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("No description provided.")
+                        .font(.system(size: 13))
                         .foregroundStyle(Theme.secondaryText)
+                } else {
+                    MarkdownView(text: detail.body, size: 13)
+                        .textSelection(.enabled)
                 }
-                Text(pull.title)
-                    .font(.system(size: 18, weight: .semibold))
-                    .textSelection(.enabled)
                 PageCard {
-                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+                    Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 9) {
                         GridRow {
                             Text("Branch").foregroundStyle(Theme.secondaryText)
-                            Text("\(pull.head) → \(pull.base)").textSelection(.enabled)
+                            Text("\(detail.pull.head) → \(detail.pull.base)").textSelection(.enabled)
                         }
                         GridRow {
                             Text("Checks").foregroundStyle(Theme.secondaryText)
-                            ChecksBadge(checks: pull.checks, labelled: true)
+                            HStack(spacing: 5) {
+                                ChecksGlyph(checks: detail.checks.isEmpty ? detail.pull.checks : PullChecks.aggregate(detail.checks))
+                                Text(PullChecks.summary(detail.checks))
+                            }
                         }
                         GridRow {
-                            Text("Link").foregroundStyle(Theme.secondaryText)
-                            Text(pull.url)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .textSelection(.enabled)
+                            Text("Changes").foregroundStyle(Theme.secondaryText)
+                            HStack(spacing: 6) {
+                                Text(detail.files.count == 1 ? "1 file" : "\(detail.files.count) files")
+                                PanelDiffStat(
+                                    additions: detail.files.reduce(0) { $0 + $1.additions },
+                                    deletions: detail.files.reduce(0) { $0 + $1.deletions },
+                                    colors: nil
+                                )
+                            }
                         }
                     }
                     .font(.system(size: 12.5))
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                HStack {
-                    Button("Open in Browser") { open(pull) }
-                        .buttonStyle(.borderedProminent)
-                    Button("Copy Link") { copy(pull.url) }
+                if !detail.comments.isEmpty {
+                    Text(detail.comments.count == 1 ? "1 comment" : "\(detail.comments.count) comments")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.secondaryText)
+                    ForEach(Array(detail.comments.enumerated()), id: \.offset) { _, comment in
+                        PullComment(comment: comment)
+                    }
                 }
             }
-            .padding(24)
-            .frame(maxWidth: 720, alignment: .leading)
+            .padding(20)
+            .frame(maxWidth: 760, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct PullComment: View {
+    let comment: PrComment
+
+    var body: some View {
+        PageCard {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(comment.author.isEmpty ? "Someone" : comment.author)
+                        .font(.system(size: 12, weight: .medium))
+                    if let path = comment.path {
+                        Text(comment.line.map { "\(path):\($0)" } ?? path)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Spacer(minLength: 4)
+                    if let created = comment.createdAt {
+                        Text(PageFormat.ago(created))
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                MarkdownView(text: comment.body, size: 12.5)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+private struct PullTimeline: View {
+    let detail: PullRequestDetail
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(detail.timeline.enumerated()), id: \.offset) { index, event in
+                    HStack(alignment: .top, spacing: 10) {
+                        VStack(spacing: 0) {
+                            Image(systemName: symbol(event.kind))
+                                .font(.system(size: 12, weight: .light))
+                                .foregroundStyle(tint(event.kind))
+                                .frame(width: 22, height: 22)
+                                .background(Theme.input, in: Circle())
+                            if index + 1 < detail.timeline.count {
+                                Rectangle().fill(Theme.hairline).frame(width: 1).frame(maxHeight: .infinity)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(headline(event))
+                                    .font(.system(size: 12.5, weight: .medium))
+                                if let created = event.createdAt {
+                                    Text(PageFormat.ago(created))
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.secondaryText)
+                                }
+                            }
+                            if !event.text.isEmpty {
+                                Text(event.text)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Theme.secondaryText)
+                                    .lineLimit(3)
+                                    .textSelection(.enabled)
+                            }
+                        }
+                        .padding(.bottom, 14)
+                    }
+                }
+                if detail.timeline.isEmpty {
+                    Text("No activity yet.")
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    private var stateTitle: String {
-        switch pull.state {
-        case "OPEN": "Open"
-        case "MERGED": "Merged"
-        case "CLOSED": "Closed"
-        default: pull.state.capitalized
+    private func headline(_ event: PrEvent) -> String {
+        let actor = event.actor ?? "Someone"
+        switch event.kind {
+        case "opened": return "\(actor) opened the pull request"
+        case "commit": return "\(actor) committed"
+        case "comment": return "\(actor) commented"
+        case "review": return "\(actor) reviewed"
+        case "merged": return "\(actor) merged"
+        case "closed": return "Closed"
+        default: return "\(actor) \(event.kind)"
+        }
+    }
+
+    private func symbol(_ kind: String) -> String {
+        switch kind {
+        case "opened": "arrow.triangle.pull"
+        case "commit": "circle.circle"
+        case "comment": "text.bubble"
+        case "review": "eye"
+        case "merged": "arrow.triangle.merge"
+        case "closed": "xmark"
+        default: "circle"
+        }
+    }
+
+    private func tint(_ kind: String) -> Color {
+        switch kind {
+        case "merged": Theme.primary
+        case "closed": PanelPalette.removedText
+        case "opened": PanelPalette.addedText
+        default: Theme.chromeIcon
         }
     }
 }
 
-private struct PullStateIcon: View {
-    let state: String
+private struct PullChecks: View {
+    let checks: [PrCheck]
 
-    var body: some View {
-        Image(systemName: state == "MERGED" ? "arrow.triangle.merge" : (state == "CLOSED" ? "xmark.circle" : "arrow.triangle.pull"))
-            .font(.system(size: 13, weight: .light))
-            .foregroundStyle(color)
-            .accessibilityLabel(state.capitalized)
-    }
-
-    private var color: Color {
+    static func outcome(_ state: String) -> String {
         switch state {
-        case "MERGED": .purple
-        case "CLOSED": .red
-        default: .green
+        case "success": "passing"
+        case "failure", "error", "timed_out", "cancelled", "action_required", "startup_failure": "failing"
+        case "pending", "in_progress", "queued", "expected", "waiting", "requested": "pending"
+        default: "none"
         }
     }
-}
 
-private struct ChecksBadge: View {
-    let checks: String
-    var labelled = false
+    static func aggregate(_ checks: [PrCheck]) -> String {
+        let outcomes = Set(checks.map { outcome($0.state) })
+        for candidate in ["failing", "pending", "passing"] where outcomes.contains(candidate) {
+            return candidate
+        }
+        return "none"
+    }
+
+    static func summary(_ checks: [PrCheck]) -> String {
+        guard !checks.isEmpty else { return "No checks" }
+        let outcomes = checks.map { outcome($0.state) }
+        let failing = outcomes.filter { $0 == "failing" }.count
+        let pending = outcomes.filter { $0 == "pending" }.count
+        let passing = outcomes.filter { $0 == "passing" }.count
+        var parts: [String] = []
+        if failing > 0 { parts.append("\(failing) failing") }
+        if pending > 0 { parts.append("\(pending) running") }
+        if passing > 0 { parts.append("\(passing) passed") }
+        let other = checks.count - failing - pending - passing
+        if other > 0 { parts.append("\(other) skipped") }
+        return parts.joined(separator: " · ")
+    }
 
     var body: some View {
-        if checks != "none" || labelled {
-            HStack(spacing: 4) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .light))
-                    .foregroundStyle(color)
-                if labelled {
-                    Text(label)
+        if checks.isEmpty {
+            PageEmptyState(symbol: "checkmark.circle", title: "No checks", message: "This pull request has no status checks or check runs.")
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(Self.summary(checks))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Theme.secondaryText)
+                    PageCard {
+                        VStack(spacing: 0) {
+                            ForEach(Array(checks.enumerated()), id: \.offset) { index, check in
+                                if index > 0 { Divider().padding(.leading, 38) }
+                                HStack(spacing: 10) {
+                                    ChecksGlyph(checks: Self.outcome(check.state))
+                                        .font(.system(size: 13, weight: .light))
+                                        .frame(width: 18)
+                                    Text(check.name)
+                                        .font(.system(size: 12.5))
+                                        .lineLimit(1)
+                                    Spacer(minLength: 8)
+                                    Text(check.state.replacingOccurrences(of: "_", with: " "))
+                                        .font(.system(size: 11.5))
+                                        .foregroundStyle(Theme.secondaryText)
+                                    if let link = check.url, let url = URL(string: link) {
+                                        Button("Details") { NSWorkspace.shared.open(url) }
+                                            .controlSize(.small)
+                                    }
+                                }
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                            }
+                        }
+                    }
                 }
+                .padding(20)
+                .frame(maxWidth: 760, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .help(label)
-        }
-    }
-
-    private var symbol: String {
-        switch checks {
-        case "passing": "checkmark.circle"
-        case "failing": "xmark.circle"
-        case "pending": "clock"
-        default: "minus.circle"
-        }
-    }
-
-    private var color: Color {
-        switch checks {
-        case "passing": .green
-        case "failing": .red
-        case "pending": .orange
-        default: Theme.secondaryText
-        }
-    }
-
-    private var label: String {
-        switch checks {
-        case "passing": "Checks passing"
-        case "failing": "Checks failing"
-        case "pending": "Checks running"
-        default: "No checks"
         }
     }
 }
 
-@MainActor private func open(_ pull: PullRequest) {
+@MainActor private func openPull(_ pull: PullRequest) {
     guard let url = URL(string: pull.url) else { return }
     NSWorkspace.shared.open(url)
 }
 
-@MainActor private func copy(_ text: String) {
+@MainActor private func copyText(_ text: String) {
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
 }

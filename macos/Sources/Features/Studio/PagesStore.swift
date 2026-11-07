@@ -38,6 +38,9 @@ final class PagesStore {
     private(set) var pullsProject: String?
     private(set) var pullsRequest: String?
     private(set) var pullsError: String?
+    private(set) var pullDetailNumber: UInt64?
+    private(set) var pullDetailRequest: String?
+    private(set) var pullDetailError: String?
 
     @ObservationIgnored private let core: CoreHandle
     @ObservationIgnored private let requests: RequestCenter
@@ -196,5 +199,26 @@ final class PagesStore {
     func showPullRequests(project: String, request: String) {
         pullsProject = project
         pullsRequest = request
+    }
+
+    func loadPullRequest(project: String, number: UInt64) {
+        pullDetailNumber = number
+        pullDetailError = nil
+        guard live else { return }
+        let request = requests.issue { [weak self] outcome in
+            guard let self, case .failed(let message) = outcome else { return }
+            pullDetailError = message
+        }
+        pullDetailRequest = request
+        core.run { $0.loadPullRequest(request: request, project: project, number: number) }
+    }
+
+    func showPullRequest(number: UInt64, request: String) {
+        pullDetailNumber = number
+        pullDetailRequest = request
+    }
+
+    func setHiddenModel(provider: String, model: String, hidden: Bool) {
+        core.run { $0.setHiddenModel(provider: provider, model: model, hidden: hidden) }
     }
 }
