@@ -30,6 +30,17 @@ extension StudioStore {
         select(thread)
     }
 
+    func newThread(onBranchOf row: ThreadRow) {
+        newThread(in: row.project)
+        let options = conversation.newThread
+        if let worktree = row.worktree {
+            options.existingWorktree = worktree
+            options.existingBranch = row.branch
+        } else {
+            options.chooseWorkspace(worktree: false)
+        }
+    }
+
     func newThread(in project: String?) {
         if conversation.thread != nil {
             shell.record(from: conversation.thread, to: nil)
