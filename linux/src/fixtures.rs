@@ -209,6 +209,7 @@ pub fn conversation(app: &Rc<App>, live: bool) {
                 pull_request: None,
                 is_repo: true,
                 changed_files: 4,
+                has_remote: true,
             },
         },
     ];

@@ -163,7 +163,7 @@ impl Header {
                 Some(("Commit", "win.git-commit", "Commit every change (message generated from the changed paths)"))
             } else if status.behind > 0 {
                 Some(("Pull", "win.git-pull", "Fast-forward this branch from its upstream"))
-            } else if status.upstream.is_none() && status.pull_request.is_none() && status.default_branch.is_none() {
+            } else if !status.has_remote {
                 Some(("Publish", "win.git-publish", "Create a GitHub repository for this project"))
             } else if status.ahead > 0 || (status.upstream.is_none() && status.branch.is_some()) {
                 Some(("Push", "win.git-push", "Push this branch"))

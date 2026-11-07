@@ -290,6 +290,7 @@ pub fn thread_menu(state: &State, id: &str) -> gio::Menu {
     menu.append_section(None, &first);
     let second = gio::Menu::new();
     item(&second, "Rename Thread…", "thread-rename");
+    item(&second, "Regenerate Title", "thread-regenerate-title");
     item(&second, if unread { "Mark as Read" } else { "Mark Unread" }, "thread-unread");
     item(&second, "Fork Thread", "thread-fork");
     if let Some(name) = project_name {

@@ -73,11 +73,12 @@ pub fn install(app: &Rc<App>) {
         });
         app.window.add_action(&action);
     }
-    let threaded: [(&str, ThreadAction); 4] = [
+    let threaded: [(&str, ThreadAction); 5] = [
         ("thread-move-up", |app, id| move_by(app, &id, -1)),
         ("thread-move-down", |app, id| move_by(app, &id, 1)),
         ("thread-auto-settle-on", |app, id| app.core.run(|studio| studio.set_auto_settle(id, true))),
         ("thread-auto-settle-off", |app, id| app.core.run(|studio| studio.set_auto_settle(id, false))),
+        ("thread-regenerate-title", |app, id| app.core.run(|studio| studio.regenerate_title(id))),
     ];
     for (name, activate) in threaded {
         let action = gio::SimpleAction::new(name, Some(glib::VariantTy::STRING));
