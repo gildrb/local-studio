@@ -334,7 +334,6 @@ private struct TimelineScroll: View {
             }
         }
         .opacity(current ? 1 : 0)
-        .allowsHitTesting(current)
         .accessibilityHidden(!current)
         .zIndex(current ? 1 : 0)
     }
