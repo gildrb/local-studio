@@ -154,18 +154,57 @@ final class ConversationStore {
     }
 
     @ObservationIgnored private var infoCache: [String: ThreadInfo] = [:]
+    @ObservationIgnored private var transcripts: [String: CachedTranscript] = [:]
+    @ObservationIgnored private var recency: [String] = []
+    @ObservationIgnored private var awaitingReset = false
+    @ObservationIgnored var scrollTop: UInt64?
 
-    func focus(_ thread: String?) {
+    static let cachedThreads = 12
+
+    func focus(_ thread: String?, row: ThreadRow? = nil) {
         guard thread != self.thread else { return }
+        park()
         self.thread = thread
-        info = thread.flatMap { infoCache[$0] }
-        entries = []
-        rows = []
-        anchors = []
-        approvals = []
-        queued = []
-        expandedFolds = []
-        followsEnd = true
+        let cached = thread.flatMap { transcripts[$0] }
+        info = thread.flatMap { infoCache[$0] }.map { Self.reconciled($0, row: row) }
+        entries = cached?.entries ?? []
+        rows = cached?.rows ?? []
+        if anchors != cached?.anchors ?? [] {
+            anchors = cached?.anchors ?? []
+        }
+        approvals = cached?.approvals ?? []
+        queued = cached?.queued ?? []
+        expandedFolds = cached?.expandedFolds ?? []
+        followsEnd = cached?.scroll.followsEnd ?? true
+        scrollTop = cached?.scroll.top
+        awaitingReset = cached != nil
+    }
+
+    var restoredScroll: ThreadScroll {
+        ThreadScroll(followsEnd: followsEnd, top: scrollTop)
+    }
+
+    private func park() {
+        guard let thread, !entries.isEmpty else { return }
+        transcripts[thread] = CachedTranscript(
+            entries: entries, rows: rows, anchors: anchors, expandedFolds: expandedFolds, approvals: approvals, queued: queued,
+            scroll: ThreadScroll(followsEnd: followsEnd, top: scrollTop)
+        )
+        recency.removeAll { $0 == thread }
+        recency.insert(thread, at: 0)
+        while recency.count > Self.cachedThreads {
+            transcripts[recency.removeLast()] = nil
+        }
+    }
+
+    private static func reconciled(_ info: ThreadInfo, row: ThreadRow?) -> ThreadInfo {
+        guard let row else { return info }
+        var info = info
+        info.busy = row.status == .working || row.status == .approval
+        if !row.title.isEmpty {
+            info.title = row.title
+        }
+        return info
     }
 
     func threadStarted(draft: String, thread: String) -> Bool {
@@ -180,7 +219,7 @@ final class ConversationStore {
 
     func setInfo(thread: String, info: ThreadInfo) {
         infoCache[thread] = info
-        guard thread == self.thread else { return }
+        guard thread == self.thread, self.info != info else { return }
         self.info = info
     }
 
@@ -188,13 +227,15 @@ final class ConversationStore {
         guard thread == self.thread else { return nil }
         switch op {
         case .reset(let items):
-            entries = items.map(TimelineEntry.init)
-            rebuildRows()
+            awaitingReset = false
+            reconcile(items)
         case .insert(let index, let item):
+            guard !awaitingReset else { return nil }
             guard let position = Int(exactly: index), position <= entries.count else { return outOfSync }
             entries.insert(TimelineEntry(item: item), at: position)
             rebuildRows()
         case .update(let index, let item):
+            guard !awaitingReset else { return nil }
             guard let position = Int(exactly: index), position < entries.count else { return outOfSync }
             let entry = entries[position]
             let restructures = entry.id != item.id || entry.item.turn != item.turn || entry.item.kind.shape != item.kind.shape
@@ -208,13 +249,28 @@ final class ConversationStore {
         return nil
     }
 
+    private func reconcile(_ items: [Item]) {
+        let existing = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let next = items.map { item -> TimelineEntry in
+            guard let entry = existing[item.id] else { return TimelineEntry(item: item) }
+            if entry.item != item {
+                entry.item = item
+            }
+            return entry
+        }
+        if !next.elementsEqual(entries, by: ===) {
+            entries = next
+        }
+        rebuildRows()
+    }
+
     func setApprovals(thread: String, approvals: [Approval]) {
-        guard thread == self.thread else { return }
+        guard thread == self.thread, self.approvals != approvals else { return }
         self.approvals = approvals
     }
 
     func setQueue(thread: String, queued: [QueuedMessage]) {
-        guard thread == self.thread else { return }
+        guard thread == self.thread, self.queued != queued else { return }
         self.queued = queued
     }
 
@@ -560,7 +616,10 @@ final class ConversationStore {
     }
 
     private func rebuildRows() {
-        rows = TimelineLayout.rows(for: entries, expanded: expandedFolds)
+        let layout = TimelineLayout.rows(for: entries, expanded: expandedFolds)
+        if !layout.elementsEqual(rows, by: { $0.same(as: $1) }) {
+            rows = layout
+        }
         let next = rows.enumerated().compactMap { index, row -> TimelineAnchor? in
             guard case .entry(let entry, _) = row, case .user(let text, _, _, _) = entry.item.kind else { return nil }
             let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
@@ -580,6 +639,21 @@ struct TimelineAnchor: Identifiable, Equatable {
     let id: UInt64
     let order: Int
     let preview: String
+}
+
+struct ThreadScroll: Equatable {
+    var followsEnd = true
+    var top: UInt64?
+}
+
+private struct CachedTranscript {
+    let entries: [TimelineEntry]
+    let rows: [TimelineRow]
+    let anchors: [TimelineAnchor]
+    let expandedFolds: Set<UInt64>
+    let approvals: [Approval]
+    let queued: [QueuedMessage]
+    let scroll: ThreadScroll
 }
 
 @MainActor
@@ -604,6 +678,15 @@ enum TimelineRow: Identifiable {
         case .entry(let entry, _): entry.id
         case .tools(let entries): entries.first?.id ?? 0
         case .fold(let entry, _): entry.id
+        }
+    }
+
+    func same(as other: TimelineRow) -> Bool {
+        switch (self, other) {
+        case let (.entry(lhs, lhsHides), .entry(rhs, rhsHides)): lhs === rhs && lhsHides == rhsHides
+        case let (.tools(lhs), .tools(rhs)): lhs.elementsEqual(rhs, by: ===)
+        case let (.fold(lhs, lhsExpanded), .fold(rhs, rhsExpanded)): lhs === rhs && lhsExpanded == rhsExpanded
+        default: false
         }
     }
 }

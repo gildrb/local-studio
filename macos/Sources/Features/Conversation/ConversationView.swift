@@ -8,9 +8,8 @@ struct ThreadView: View {
 
     var body: some View {
         Group {
-            if let thread = store.conversation.thread {
+            if store.conversation.thread != nil {
                 ConversationColumn(store: store)
-                    .id(thread)
             } else {
                 DraftHero(store: store)
             }
@@ -142,6 +141,7 @@ private struct ConversationColumn: View {
         let settings = store.pages.settings
         let width = settings?.chatWidth.maxWidth ?? ChatWidth.normal.maxWidth
         TimelineScroll(store: store, width: width)
+            .id(store.conversation.thread)
             .environment(\.responseStreaming, settings?.responseStreaming ?? .paragraph)
             .environment(\.timeFormat, settings?.timeFormat ?? .locale)
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -190,13 +190,24 @@ private final class ScrollTracker {
 private struct TimelineScroll: View {
     let store: StudioStore
     let width: CGFloat
-    @State private var position = ScrollPosition(edge: .bottom)
+    private let thread: String?
+    private let restoredTop: UInt64?
+    @State private var position: ScrollPosition
     @State private var tracker = ScrollTracker()
     @State private var awayFromEnd = false
     @State private var currentAnchor: UInt64?
     @State private var roomForMinimap = false
 
     private static let followSlack: CGFloat = 40
+
+    init(store: StudioStore, width: CGFloat) {
+        self.store = store
+        self.width = width
+        let restored = store.conversation.restoredScroll
+        thread = store.conversation.thread
+        restoredTop = restored.followsEnd ? nil : restored.top
+        _position = State(initialValue: restoredTop.map { ScrollPosition(id: $0, anchor: .top) } ?? ScrollPosition(edge: .bottom))
+    }
 
     var body: some View {
         let conversation = store.conversation
@@ -217,7 +228,7 @@ private struct TimelineScroll: View {
             .frame(maxWidth: .infinity)
         }
         .scrollPosition($position)
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(restoredTop == nil ? .bottom : nil, for: .initialOffset)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .onScrollPhaseChange { _, phase in
             let wasUserDriven = tracker.userDriven
@@ -229,6 +240,7 @@ private struct TimelineScroll: View {
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height, 0)
         } action: { _, distance in
+            guard current else { return }
             tracker.distance = distance
             if tracker.userDriven {
                 follow(distance < Self.followSlack)
@@ -241,7 +253,7 @@ private struct TimelineScroll: View {
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             geometry.contentSize.height
         } action: { _, _ in
-            if conversation.followsEnd, !tracker.userDriven {
+            if current, conversation.followsEnd, !tracker.userDriven {
                 position.scrollTo(edge: .bottom)
             }
         }
@@ -279,10 +291,17 @@ private struct TimelineScroll: View {
         }
     }
 
+    private var current: Bool {
+        store.conversation.thread == thread
+    }
+
     private func updateCurrentAnchor(visible ids: [UInt64]) {
+        guard current else { return }
+        let order = Dictionary(store.conversation.rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let top = ids.min { (order[$0] ?? .max) < (order[$1] ?? .max) }
+        store.conversation.scrollTop = top
         let anchors = store.conversation.anchors
         guard !anchors.isEmpty else { return }
-        let order = Dictionary(store.conversation.rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         guard let top = ids.compactMap({ order[$0] }).min() else { return }
         let next = anchors.last { $0.order <= top }?.id ?? anchors.first?.id
         if next != currentAnchor {
@@ -291,7 +310,7 @@ private struct TimelineScroll: View {
     }
 
     private func follow(_ value: Bool) {
-        if store.conversation.followsEnd != value {
+        if current, store.conversation.followsEnd != value {
             store.conversation.followsEnd = value
         }
     }

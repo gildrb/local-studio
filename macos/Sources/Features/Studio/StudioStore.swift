@@ -43,7 +43,7 @@ final class StudioStore {
     }
 
     func select(_ thread: String?) {
-        conversation.focus(thread)
+        conversation.focus(thread, row: inbox.thread(thread))
         shell.touchRecent(thread)
         core.run { $0.selectThread(thread: thread) }
     }

@@ -63,6 +63,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.vim.onMode = { [weak coordinator] mode in coordinator?.parent.onVimMode(mode) }
         scrollView.documentView = textView
         context.coordinator.textView = textView
+        context.coordinator.draft = draft
         context.coordinator.focusToken = focusToken
         DispatchQueue.main.async {
             textView.window?.makeFirstResponder(textView)
@@ -91,6 +92,13 @@ struct ComposerTextView: NSViewRepresentable {
         if textView.font?.pointSize != fontSize {
             textView.font = .systemFont(ofSize: fontSize)
         }
+        if context.coordinator.draft !== draft {
+            context.coordinator.draft = draft
+            textView.undoManager?.removeAllActions(withTarget: textView)
+            if let storage = textView.textStorage {
+                textView.undoManager?.removeAllActions(withTarget: storage)
+            }
+        }
         if textView.string != draft.text {
             context.coordinator.updating = true
             textView.string = draft.text
@@ -112,6 +120,7 @@ struct ComposerTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerTextView
         weak var textView: ComposerNSTextView?
+        weak var draft: ComposerDraft?
         var focusToken = 0
         var updating = false
 
