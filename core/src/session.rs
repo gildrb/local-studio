@@ -183,24 +183,37 @@ pub(crate) fn model_options(data: &Value) -> anyhow::Result<Vec<ModelOption>> {
         configured_providers: Vec<String>,
     }
     let catalog = Catalog::deserialize(data)?;
-    Ok(catalog
-        .models
-        .into_iter()
-        .map(|entry| ModelOption {
-            configured: catalog.configured_providers.contains(&entry.model.provider),
-            thinking_levels: entry
-                .thinking_levels
-                .iter()
-                .filter_map(|level| serde_json::to_value(level).ok())
-                .filter_map(|level| level.as_str().map(str::to_string))
-                .collect(),
-            context_window: entry.model.context_window,
-            reasoning: entry.model.reasoning,
-            provider: entry.model.provider,
-            id: entry.model.id,
-            name: entry.model.name,
-        })
-        .collect())
+    let mut options: Vec<ModelOption> = faux_option().into_iter().collect();
+    options.extend(catalog.models.into_iter().map(|entry| ModelOption {
+        configured: catalog.configured_providers.contains(&entry.model.provider),
+        thinking_levels: entry
+            .thinking_levels
+            .iter()
+            .filter_map(|level| serde_json::to_value(level).ok())
+            .filter_map(|level| level.as_str().map(str::to_string))
+            .collect(),
+        context_window: entry.model.context_window,
+        reasoning: entry.model.reasoning,
+        provider: entry.model.provider,
+        id: entry.model.id,
+        name: entry.model.name,
+    }));
+    Ok(options)
+}
+
+fn faux_option() -> Option<ModelOption> {
+    let path = std::env::var_os("EUKHE_FAUX_SCRIPT")?;
+    let script: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+    let id = script.get("modelId").and_then(Value::as_str).unwrap_or("faux-1").to_string();
+    Some(ModelOption {
+        provider: "faux".to_string(),
+        name: "Faux Model".to_string(),
+        id,
+        reasoning: false,
+        thinking_levels: Vec::new(),
+        context_window: script.get("contextWindow").and_then(Value::as_u64).unwrap_or(128_000),
+        configured: true,
+    })
 }
 
 pub(crate) fn model_ref(value: &Value) -> Option<ModelRef> {
