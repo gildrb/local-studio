@@ -16,7 +16,7 @@ final class ShellSmoke {
     private var index = 0
     private var acted = false
     private var subscription: AnyCancellable?
-    private var poll: Timer?
+    private var poll: Task<Void, Never>?
     private var project = ""
     private var thread = ""
     private let title = "Shell smoke renamed"
@@ -35,8 +35,11 @@ final class ShellSmoke {
 
     func start() {
         subscription = store.didTick.sink { [weak self] in self?.advance() }
-        poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.advance() }
+        poll = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                self?.advance()
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
             guard let self, index < steps.count else { return }
@@ -216,7 +219,7 @@ final class ShellSmoke {
     private func finish(passed: Bool, _ detail: String) {
         guard subscription != nil else { return }
         subscription = nil
-        poll?.invalidate()
+        poll?.cancel()
         print(passed ? "PASS macOS shell smoke: \(detail)" : "FAIL macOS shell smoke: \(detail)")
         if passed {
             NSApp.terminate(nil)

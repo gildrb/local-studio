@@ -20,7 +20,7 @@ final class ProvidersSmoke {
     private var index = 0
     private var acted = false
     private var subscription: AnyCancellable?
-    private var poll: Timer?
+    private var poll: Task<Void, Never>?
     private var discovered: (baseUrl: String, models: [ProviderModel])?
     private var outcomes: [String: RequestOutcome] = [:]
     private var failure: String?
@@ -33,8 +33,11 @@ final class ProvidersSmoke {
     func start() {
         stub.start()
         subscription = store.didTick.sink { [weak self] in self?.advance() }
-        poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.advance() }
+        poll = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                self?.advance()
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in
             guard let self, index < steps.count else { return }
@@ -152,7 +155,7 @@ final class ProvidersSmoke {
     private func finish(passed: Bool, _ detail: String) {
         guard subscription != nil else { return }
         subscription = nil
-        poll?.invalidate()
+        poll?.cancel()
         stub.stop()
         print(passed ? "PASS macOS providers smoke: \(detail)" : "FAIL macOS providers smoke: \(detail)")
         if passed {

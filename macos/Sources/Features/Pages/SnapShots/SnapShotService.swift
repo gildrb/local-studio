@@ -200,7 +200,7 @@ final class SnapShotService {
                 context.duration = 0.28
                 window.animator().alphaValue = 0
             } completionHandler: { [weak self] in
-                MainActor.assumeIsolated { self?.removeFlash(window) }
+                Task { @MainActor in self?.removeFlash(window) }
             }
         } else {
             Task {
@@ -233,7 +233,7 @@ final class SnapShotService {
             var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
             InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
                 DispatchQueue.main.async {
-                    MainActor.assumeIsolated { SnapShotService.shared.capture(.window) }
+                    SnapShotService.shared.capture(.window)
                 }
                 return noErr
             }, 1, &spec, nil, &handler)
