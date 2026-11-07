@@ -127,10 +127,10 @@ final class StudioStore {
             workspace.terminalExited(terminal: terminal, code: code)
         case .usage(let request, let report):
             requests.settle(request)
-            pages.setUsage(report)
+            pages.setUsage(request: request, report: report)
         case .local(let request, let snapshot):
             requests.settle(request)
-            pages.setLocal(snapshot)
+            pages.setLocal(request: request, snapshot: snapshot)
         case .providers(let providers):
             pages.setProviders(providers)
         case .settings(let settings):
