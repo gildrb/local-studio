@@ -289,8 +289,8 @@ struct SearchResultRow: View {
         guard !needle.isEmpty else { return result }
         var searchStart = result.startIndex
         while searchStart < result.endIndex, let range = result[searchStart...].range(of: needle, options: .caseInsensitive) {
-            result[range].font = .system(size: size, weight: .semibold)
-            result[range].foregroundColor = Theme.primary
+            result[range][AttributeScopes.SwiftUIAttributes.FontAttribute.self] = .system(size: size, weight: .semibold)
+            result[range][AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.primary
             searchStart = range.upperBound
         }
         return result
