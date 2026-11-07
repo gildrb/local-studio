@@ -52,6 +52,7 @@ struct SettingsView: View {
         }
         .background(Theme.canvas)
         .navigationTitle(selection?.title ?? "Settings")
+        .toolbar(removing: .title)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 ControlGroup {
@@ -62,8 +63,16 @@ struct SettingsView: View {
                 }
                 .controlGroupStyle(.navigation)
             }
+            ToolbarItem(placement: .navigation) {
+                Text(selection?.title ?? "Settings")
+                    .font(.system(size: 15, weight: .semibold))
+                    .fixedSize()
+                    .padding(.horizontal, 6)
+            }
+            .sharedBackgroundVisibility(.hidden)
         }
         .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .background(SettingsWindowStyle())
         .frame(minWidth: 720, minHeight: 480)
         .transaction { $0.disablesAnimations = true }
         .onChange(of: selection) { previous, _ in
@@ -260,6 +269,25 @@ struct SettingsSearchField: NSViewRepresentable {
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSSearchField else { return }
             text.wrappedValue = field.stringValue
+        }
+    }
+}
+
+private struct SettingsWindowStyle: NSViewRepresentable {
+    func makeNSView(context: Context) -> StyledWindowView {
+        StyledWindowView()
+    }
+
+    func updateNSView(_ view: StyledWindowView, context: Context) {}
+
+    final class StyledWindowView: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            window.toolbarStyle = .unified
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.styleMask.insert(.fullSizeContentView)
         }
     }
 }

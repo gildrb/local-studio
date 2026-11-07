@@ -15,7 +15,7 @@ struct ProvidersSettings: View {
 
     var body: some View {
         SettingsForm {
-            SettingsSection(.providerList, footer: "Configured providers have credentials the agent daemon can use. Star models to pin them to the top of the model picker.") {
+            SettingsSection(.providerList, footer: "Configured providers have credentials the agent daemon can use. Star models to pin them to the top of the model picker; hide models you never use to keep them out of it.") {
                 if pages.providers.isEmpty {
                     Text("No providers reported yet. The list fills in once the agent daemon returns its model catalog.")
                         .foregroundStyle(Theme.secondaryText)
@@ -28,17 +28,43 @@ struct ProvidersSettings: View {
                                 .foregroundStyle(Theme.secondaryText)
                         }
                         ForEach(models, id: \.self) { model in
-                            ModelFavoriteRow(model: model, favorite: isFavorite(model)) { favorite in
+                            ModelRow(
+                                model: model, favorite: isFavorite(model), hidden: isHidden(model)
+                            ) { favorite in
                                 pages.setFavorite(provider: model.provider, model: model.id, favorite: favorite)
+                            } hide: { hidden in
+                                pages.setHiddenModel(provider: model.provider, model: model.id, hidden: hidden)
                             }
                         }
                     } label: {
-                        ProviderRow(provider: provider)
+                        ProviderRow(provider: provider, hidden: hiddenCount(provider.id))
                     }
                 }
                 HStack {
                     Spacer()
                     Button("Refresh Providers") { pages.loadProviders() }
+                }
+            }
+            SettingsSection(.hiddenModels, footer: "Hidden models are left out of the model picker.") {
+                SettingRow(.hiddenModels) {
+                    if store.conversation.hiddenModels.isEmpty {
+                        Text("No hidden models.")
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                    ForEach(store.conversation.hiddenModels, id: \.self) { key in
+                        HStack(spacing: 8) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(displayName(key))
+                                Text("\(providerName(key.provider)) · \(key.model)")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(Theme.secondaryText)
+                            }
+                            Spacer()
+                            Button("Unhide") {
+                                pages.setHiddenModel(provider: key.provider, model: key.model, hidden: false)
+                            }
+                        }
+                    }
                 }
             }
             SettingsSection(.providerSignIn) {
@@ -72,10 +98,27 @@ struct ProvidersSettings: View {
     private func isFavorite(_ model: ModelOption) -> Bool {
         store.conversation.favorites.contains { $0.provider == model.provider && $0.model == model.id }
     }
+
+    private func isHidden(_ model: ModelOption) -> Bool {
+        store.conversation.hiddenModels.contains { $0.provider == model.provider && $0.model == model.id }
+    }
+
+    private func hiddenCount(_ provider: String) -> Int {
+        store.conversation.hiddenModels.filter { $0.provider == provider }.count
+    }
+
+    private func displayName(_ key: ModelKey) -> String {
+        store.conversation.models.first { $0.provider == key.provider && $0.id == key.model }?.name ?? key.model
+    }
+
+    private func providerName(_ id: String) -> String {
+        pages.providers.first { $0.id == id }?.name ?? id
+    }
 }
 
 private struct ProviderRow: View {
     let provider: ProviderStatus
+    let hidden: Int
 
     var body: some View {
         HStack(spacing: 10) {
@@ -84,7 +127,7 @@ private struct ProviderRow: View {
                 .frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 2) {
                 Text(provider.name)
-                Text(provider.modelCount == 1 ? "1 model" : "\(provider.modelCount) models")
+                Text(summary)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -94,22 +137,40 @@ private struct ProviderRow: View {
                 .foregroundStyle(provider.configured ? .primary : Theme.secondaryText)
         }
     }
+
+    private var summary: String {
+        let models = provider.modelCount == 1 ? "1 model" : "\(provider.modelCount) models"
+        return hidden > 0 ? "\(models) · \(hidden) hidden" : models
+    }
 }
 
-private struct ModelFavoriteRow: View {
+private struct ModelRow: View {
     let model: ModelOption
     let favorite: Bool
+    let hidden: Bool
     let toggle: (Bool) -> Void
+    let hide: (Bool) -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(model.name)
+                    .foregroundStyle(hidden ? Theme.secondaryText : .primary)
                 Text(detail)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
             }
             Spacer()
+            Button {
+                hide(!hidden)
+            } label: {
+                Image(systemName: hidden ? "eye.slash" : "eye")
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(Theme.chromeIcon)
+            }
+            .buttonStyle(.borderless)
+            .help(hidden ? "Show in the model picker" : "Hide from the model picker")
+            .accessibilityLabel(hidden ? "Show \(model.name) in the model picker" : "Hide \(model.name) from the model picker")
             Button {
                 toggle(!favorite)
             } label: {
