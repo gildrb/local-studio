@@ -16,8 +16,11 @@ def developer-dir []: nothing -> string {
 
 def compile-icon [package: path, resources: path] {
     let partial = (mktemp -t "local-studio-icon.XXXXXX")
-    ^xcrun actool ($package | path join "AppIcon.icon") --compile $resources --platform macosx --minimum-deployment-target 26.0 --app-icon AppIcon --output-partial-info-plist $partial --output-format human-readable-text | ignore
+    let result = (do { ^xcrun actool ($package | path join "AppIcon.icon") --compile $resources --platform macosx --minimum-deployment-target 26.0 --app-icon AppIcon --output-partial-info-plist $partial --output-format human-readable-text } | complete)
     rm -f $partial
+    if $result.exit_code != 0 or not ($resources | path join "Assets.car" | path exists) {
+        error make { msg: $"actool could not compile AppIcon.icon \(needs Xcode 26+; run `sudo xcodebuild -runFirstLaunch` once\):\n($result.stdout)($result.stderr)" }
+    }
 }
 
 def build-kit [repo: path, package: path, profile: string] {

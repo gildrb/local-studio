@@ -5,6 +5,7 @@
   - Output: `macos/build/<configuration>/LocalStudio.app`; bundles `eukhe-daemon` (`EUKHE_DAEMON` or `../eukhe/target/{release,debug}`) and `controller/`.
   - Toolchain: Xcode when its license is accepted, else CommandLineTools; an explicit `DEVELOPER_DIR` wins. The script stamps the real SDK version (minimum macOS 26) so the window gets the current system chrome.
   - Honors `CARGO_TARGET_DIR`.
+  - App icon: `macos/AppIcon.icon` (Icon Composer document) compiled by `actool`; needs Xcode 26+ after `sudo xcodebuild -runFirstLaunch`. Edit it in Icon Composer, check renditions with its `ictool`.
 - Lint with SwiftLint (`macos/.swiftlint.yml`), zero violations:
   - `env TOOLCHAIN_DIR=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain nix run nixpkgs#swiftlint -- lint --strict` from `macos/`.
 - Verify end to end in an isolated environment (see root `AGENTS.md`):
