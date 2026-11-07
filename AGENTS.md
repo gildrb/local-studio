@@ -28,6 +28,7 @@ Native desktop clients for local LLM work. The agent core is [Eukhe](https://git
 - Core: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings`
 - Core end to end: `cargo run -p local-studio-core --example smoke -- <eukhe-daemon> <scratch>` and `--example workspace_smoke -- <eukhe-daemon> <scratch>`
 - Providers end to end: `cargo build -p local-studio-core --examples`, then `providers_smoke <eukhe-daemon> <scratch>` from the examples dir; it starts the `provider_stub` example on a random 127.0.0.1 port, round-trips a custom endpoint through Eukhe without real keys, and stops the stub by PID
+- Durability end to end: `--example durable_smoke -- <eukhe-daemon> <scratch>` quits the core mid-turn, checks the Eukhe daemon survives, and requires the reopened core to show the answer finished while it was closed
 - Stop a scratch daemon: `cargo run -p local-studio-core --example smoke -- --stop <socket>`
 - Controller: `cd controller && bun install && bun run typecheck && bun run test`
 - Share one cargo target across worktrees: `CARGO_TARGET_DIR=/tmp/ls-cargo-target`
