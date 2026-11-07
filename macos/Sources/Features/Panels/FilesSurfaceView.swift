@@ -12,6 +12,7 @@ struct FilesSurfaceView: View {
                 Image(systemName: "folder")
                     .font(.system(size: 12, weight: .light))
                     .foregroundStyle(Theme.chromeIcon)
+                    .accessibilityHidden(true)
                 Text((model.project as NSString).lastPathComponent)
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
@@ -59,10 +60,12 @@ private struct FileRowView: View {
                 }
             }
             .frame(width: 12)
+            .accessibilityHidden(true)
             Image(systemName: row.entry.directory ? "folder" : "doc")
                 .font(.system(size: 12, weight: .light))
                 .foregroundStyle(Theme.chromeIcon)
                 .frame(width: 16)
+                .accessibilityHidden(true)
             Text(row.entry.name)
                 .font(.system(size: 13))
                 .lineLimit(1)
@@ -87,6 +90,11 @@ private struct FileRowView: View {
         .onTapGesture(perform: activate)
         .onHover { hovering = $0 }
         .help(row.entry.relative)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityLabel(row.entry.name)
+        .accessibilityValue(row.entry.directory ? (row.loading ? "folder, loading" : row.expanded ? "folder, expanded" : "folder, collapsed") : ByteCountFormatter.string(fromByteCount: Int64(clamping: row.entry.size), countStyle: .file))
+        .accessibilityAction { activate() }
         .contextMenu {
             Button(row.entry.directory ? (row.expanded ? "Collapse" : "Expand") : "Open Preview", action: activate)
             Button("Copy Relative Path") {
@@ -107,6 +115,7 @@ struct FilePreviewView: View {
                 Image(systemName: "doc.text")
                     .font(.system(size: 12, weight: .light))
                     .foregroundStyle(Theme.chromeIcon)
+                    .accessibilityHidden(true)
                 PathLabel(relative: model.relative)
                 Spacer(minLength: 4)
                 if case .text(_, let language) = model.content, let language {

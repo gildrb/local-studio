@@ -22,6 +22,7 @@ final class PanelSmoke {
     private var files: FilesModel?
     private var preview: FilePreviewModel?
     private var session: TerminalSession?
+    private var devices: DeviceModel?
     private var passed: Set<String> = []
 
     init(store: StudioStore, output: URL) {
@@ -74,6 +75,9 @@ final class PanelSmoke {
         let preview = FilePreviewModel(project: repository, relative: "notes.txt", line: 3, workspace: workspace)
         preview.load()
         self.preview = preview
+        let devices = DeviceModel(workspace: workspace)
+        devices.load()
+        self.devices = devices
         panels.terminalOpen = true
         session = panels.decks[repository]?.activeGroup?.sessions.first
         session?.write(Data("echo hi-from-panels\r".utf8))
@@ -118,13 +122,25 @@ final class PanelSmoke {
             passed.insert("terminal")
             print("ok terminal \(session.terminal ?? "?"): \(session.buffer.count) bytes, echo output seen")
         }
-        guard passed.count == 4, let diff else { return }
+        if !passed.contains("devices"), let devices {
+            switch devices.phase {
+            case .loaded:
+                passed.insert("devices")
+                let simulators = devices.simulators.count
+                print("ok list_devices: \(devices.devices.count) devices (\(simulators) iOS simulators)")
+            case .failed(let message):
+                return finish(passed: false, "list_devices failed: \(message)")
+            case .idle, .loading:
+                break
+            }
+        }
+        guard passed.count == 5, let diff else { return }
         diff.setAllCollapsed(false)
         if let problem = render(diff) {
             return finish(passed: false, problem)
         }
         session?.close()
-        finish(passed: true, "diff, files, read_file and terminal round-trips; diff snapshot \(output.path)")
+        finish(passed: true, "diff, files, read_file, list_devices and terminal round-trips; diff snapshot \(output.path)")
     }
 
     private static func verify(_ diff: DiffModel) -> String? {

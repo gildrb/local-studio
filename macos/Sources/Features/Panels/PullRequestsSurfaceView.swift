@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PullRequestsSurfaceView: View {
     @Bindable var model: PullRequestsModel
+    let settings: LocalStudioKit.Settings?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,6 +16,7 @@ struct PullRequestsSurfaceView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.secondaryText)
                         .monospacedDigit()
+                        .accessibilityLabel("\(model.pulls.count) pull requests")
                 }
                 Spacer()
                 PanelIconButton("Refresh", symbol: "arrow.clockwise") { model.load() }
@@ -41,10 +43,10 @@ struct PullRequestsSurfaceView: View {
                             }
                             .padding(6)
                         }
-                        .frame(minHeight: 120)
-                        if let selected = model.selected {
-                            PullRequestDetailView(pull: selected)
-                                .frame(minHeight: 180)
+                        .frame(minHeight: 110, idealHeight: 200)
+                        if let detail = model.selectedDetail {
+                            PullRequestDetailView(model: detail, settings: settings)
+                                .frame(minHeight: 260)
                         }
                     }
                 }
@@ -86,61 +88,176 @@ private struct PullRequestRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         .onHover { hovering = $0 }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityLabel(pull.title)
+        .accessibilityValue("#\(pull.number), \(stateLabel(pull.state)), \(checksLabel(pull.checks)), \(pull.head)")
+        .accessibilityAction { select() }
         .contextMenu {
-            Button("Open in Browser") { open(pull) }
+            Button("Open in Browser") { open(pull.url) }
             Button("Copy Link") { copy(pull.url) }
         }
     }
 }
 
 struct PullRequestDetailView: View {
-    let pull: PullRequest
+    @Bindable var model: PullRequestDetailModel
+    let settings: LocalStudioKit.Settings?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        let pull = model.current
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     PullStateGlyph(state: pull.state)
                     Text(pull.title)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .lineLimit(2)
                         .textSelection(.enabled)
                     Spacer(minLength: 0)
                 }
+                HStack(spacing: 6) {
+                    Text("#\(pull.number)").monospacedDigit()
+                    if let author = model.detail?.author {
+                        Text("·")
+                        Text(author)
+                    }
+                    Text("·")
+                    Text(pull.head)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 9, weight: .light))
+                        .accessibilityLabel("into")
+                    Text(pull.base)
+                        .font(.system(size: 11.5, design: .monospaced))
+                    Spacer(minLength: 4)
+                    PanelIconButton("Copy Link", symbol: "link") { copy(pull.url) }
+                    PanelIconButton("Open in Browser", symbol: "arrow.up.right.circle") { open(pull.url) }
+                }
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.secondaryText)
+                Picker("Section", selection: $model.tab) {
+                    ForEach(PullRequestTab.allCases) { tab in
+                        Text(title(tab)).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 10)
+            PanelHairline()
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func title(_ tab: PullRequestTab) -> String {
+        guard let detail = model.detail else { return tab.rawValue }
+        switch tab {
+        case .summary: return tab.rawValue
+        case .code: return "Code \(detail.files.count)"
+        case .timeline: return "Timeline \(detail.timeline.count)"
+        case .checks: return "Checks \(detail.checks.count)"
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch model.phase {
+        case .idle, .loading:
+            PanelMessage(symbol: "clock", title: "Loading pull request…")
+        case .failed(let message):
+            PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t load this pull request.", detail: message, actionTitle: "Try Again") { model.load() }
+        case .loaded:
+            if let detail = model.detail {
+                switch model.tab {
+                case .summary:
+                    PullRequestSummary(detail: detail)
+                case .code:
+                    if detail.files.isEmpty {
+                        PanelMessage(symbol: "plus.forwardslash.minus", title: "No file changes in this pull request.")
+                    } else {
+                        VStack(spacing: 0) {
+                            PanelToolbar {
+                                PanelDiffStat(additions: model.code.additions, deletions: model.code.deletions, colors: settings?.diffColors)
+                                Text("\(detail.files.count) \(detail.files.count == 1 ? "file" : "files")")
+                                    .font(.system(size: 11.5))
+                                    .foregroundStyle(Theme.secondaryText)
+                                Spacer()
+                                PanelIconButton(model.code.layout == .split ? "Stacked Layout" : "Split Layout", symbol: model.code.layout == .split ? "rectangle" : "rectangle.split.2x1") {
+                                    model.code.layout = model.code.layout == .split ? .stacked : .split
+                                }
+                                PanelIconButton(model.code.allCollapsed ? "Expand All Files" : "Collapse All Files", symbol: model.code.allCollapsed ? "chevron.down" : "chevron.up") {
+                                    model.code.setAllCollapsed(!model.code.allCollapsed)
+                                }
+                            }
+                            DiffList(model: model.code, palette: PanelPalette.diff(settings?.diffColors), fontSize: CGFloat(settings?.codeFontSize ?? 12), panels: nil)
+                        }
+                    }
+                case .timeline:
+                    PullRequestTimeline(events: detail.timeline)
+                case .checks:
+                    PullRequestChecks(checks: detail.checks)
+                }
+            }
+        }
+    }
+}
+
+private struct PullRequestSummary: View {
+    let detail: PullRequestDetail
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
                 Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 7) {
                     GridRow {
-                        label("Number")
-                        Text("#\(pull.number)").monospacedDigit()
-                    }
-                    GridRow {
                         label("State")
-                        Text(stateLabel(pull.state))
+                        Text(stateLabel(detail.pull.state))
                     }
                     GridRow {
                         label("Checks")
                         HStack(spacing: 5) {
-                            ChecksGlyph(checks: pull.checks)
-                            Text(checksLabel(pull.checks))
+                            ChecksGlyph(checks: detail.pull.checks)
+                            Text(checksLabel(detail.pull.checks))
+                        }
+                    }
+                    if let created = detail.createdAt {
+                        GridRow {
+                            label("Opened")
+                            Text(date(created), format: .dateTime.day().month().year().hour().minute())
                         }
                     }
                     GridRow {
-                        label("Branches")
-                        HStack(spacing: 5) {
-                            Text(pull.head).textSelection(.enabled)
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 10, weight: .light))
-                                .foregroundStyle(Theme.secondaryText)
-                            Text(pull.base).textSelection(.enabled)
-                        }
-                        .font(.system(size: 12, design: .monospaced))
+                        label("Changes")
+                        let additions = detail.files.reduce(0) { $0 + $1.additions }
+                        let deletions = detail.files.reduce(0) { $0 + $1.deletions }
+                        Text("\(detail.files.count) files · +\(additions) −\(deletions)")
+                            .monospacedDigit()
                     }
                 }
                 .font(.system(size: 12.5))
-                HStack(spacing: 8) {
-                    Button("Open in Browser") { open(pull) }
-                        .keyboardShortcut(.defaultAction)
-                    Button("Copy Link") { copy(pull.url) }
+                if detail.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text("No description provided.")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Theme.secondaryText)
+                } else {
+                    MarkdownView(text: detail.body, size: 13)
+                        .textSelection(.enabled)
                 }
-                .controlSize(.small)
+                if !detail.comments.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Review comments")
+                            .font(.system(size: 12.5, weight: .semibold))
+                        ForEach(Array(detail.comments.enumerated()), id: \.offset) { _, comment in
+                            ReviewComment(comment: comment)
+                        }
+                    }
+                }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -151,6 +268,190 @@ struct PullRequestDetailView: View {
         Text(text)
             .foregroundStyle(Theme.secondaryText)
             .gridColumnAlignment(.trailing)
+    }
+}
+
+private struct ReviewComment: View {
+    let comment: PrComment
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                Text(comment.author)
+                    .font(.system(size: 12, weight: .medium))
+                if let path = comment.path {
+                    Text(comment.line.map { "\(path):\($0)" } ?? path)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                }
+                Spacer(minLength: 4)
+                if let created = comment.createdAt {
+                    Text(date(created), style: .relative)
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
+            MarkdownView(text: comment.body, size: 12.5)
+                .textSelection(.enabled)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline))
+    }
+}
+
+private struct PullRequestTimeline: View {
+    let events: [PrEvent]
+
+    var body: some View {
+        if events.isEmpty {
+            PanelMessage(symbol: "clock", title: "No activity yet.")
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(events.enumerated()), id: \.offset) { _, event in
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            Image(systemName: symbol(event.kind))
+                                .font(.system(size: 12, weight: .light))
+                                .foregroundStyle(tint(event.kind))
+                                .frame(width: 16)
+                                .accessibilityHidden(true)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 4) {
+                                    Text(event.actor ?? "Someone")
+                                        .fontWeight(.medium)
+                                    Text(verb(event.kind))
+                                        .foregroundStyle(Theme.secondaryText)
+                                    Spacer(minLength: 4)
+                                    if let created = event.createdAt {
+                                        Text(date(created), style: .relative)
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(Theme.secondaryText)
+                                    }
+                                }
+                                .font(.system(size: 12.5))
+                                if !event.text.isEmpty {
+                                    Text(event.text)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(event.kind == "commit" ? Color.primary : Theme.secondaryText)
+                                        .lineLimit(3)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+            }
+        }
+    }
+
+    private func symbol(_ kind: String) -> String {
+        switch kind {
+        case "opened": "arrow.triangle.pull"
+        case "commit": "circle"
+        case "comment": "text.bubble"
+        case "review": "eye"
+        case "merged": "arrow.triangle.merge"
+        case "closed": "xmark.circle"
+        default: "circle"
+        }
+    }
+
+    private func tint(_ kind: String) -> Color {
+        switch kind {
+        case "opened": PanelPalette.addedText
+        case "merged": Theme.primary
+        case "closed": PanelPalette.removedText
+        default: Theme.secondaryText
+        }
+    }
+
+    private func verb(_ kind: String) -> String {
+        switch kind {
+        case "opened": "opened this pull request"
+        case "commit": "committed"
+        case "comment": "commented"
+        case "review": "reviewed"
+        case "merged": "merged"
+        case "closed": "closed this pull request"
+        default: kind
+        }
+    }
+}
+
+private struct PullRequestChecks: View {
+    let checks: [PrCheck]
+
+    var body: some View {
+        if checks.isEmpty {
+            PanelMessage(symbol: "checkmark.circle", title: "No checks reported for this pull request.")
+        } else {
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(Array(checks.enumerated()), id: \.offset) { _, check in
+                        CheckRow(check: check)
+                    }
+                }
+                .padding(6)
+            }
+        }
+    }
+}
+
+private struct CheckRow: View {
+    let check: PrCheck
+    @State private var hovering = false
+
+    var body: some View {
+        let style = CheckStyle(check.state)
+        HStack(spacing: 9) {
+            Image(systemName: style.symbol)
+                .font(.system(size: 13, weight: .light))
+                .foregroundStyle(style.tint)
+                .frame(width: 18)
+                .accessibilityHidden(true)
+            Text(check.name)
+                .font(.system(size: 13))
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Text(style.label)
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.secondaryText)
+            if let url = check.url {
+                PanelIconButton("Open \(check.name)", symbol: "arrow.up.right.circle") { open(url) }
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .rowSurface(selected: false, hovering: hovering)
+        .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct CheckStyle {
+    let symbol: String
+    let tint: Color
+    let label: String
+
+    init(_ state: String) {
+        switch state {
+        case "success":
+            (symbol, tint, label) = ("checkmark.circle", PanelPalette.addedText, "Passed")
+        case "failure", "error", "timed_out", "cancelled", "action_required", "startup_failure":
+            (symbol, tint, label) = ("xmark.circle", PanelPalette.removedText, state == "cancelled" ? "Cancelled" : "Failed")
+        case "neutral", "skipped", "stale":
+            (symbol, tint, label) = ("minus.circle", Theme.secondaryText, state == "skipped" ? "Skipped" : "Neutral")
+        default:
+            (symbol, tint, label) = ("clock", Theme.secondaryText, state.isEmpty ? "Pending" : state.replacingOccurrences(of: "_", with: " ").capitalized)
+        }
     }
 }
 
@@ -168,6 +469,7 @@ struct PullStateGlyph: View {
             .foregroundStyle(tint)
             .frame(width: 18)
             .help(stateLabel(state))
+            .accessibilityLabel(stateLabel(state))
     }
 }
 
@@ -177,14 +479,21 @@ struct ChecksGlyph: View {
     var body: some View {
         switch checks {
         case "passing":
-            Image(systemName: "checkmark.circle").foregroundStyle(PanelPalette.addedText).help("Checks passing")
+            glyph("checkmark.circle", PanelPalette.addedText)
         case "failing":
-            Image(systemName: "xmark.circle").foregroundStyle(PanelPalette.removedText).help("Checks failing")
+            glyph("xmark.circle", PanelPalette.removedText)
         case "pending":
-            Image(systemName: "clock").foregroundStyle(Theme.secondaryText).help("Checks pending")
+            glyph("clock", Theme.secondaryText)
         default:
             EmptyView()
         }
+    }
+
+    private func glyph(_ symbol: String, _ tint: Color) -> some View {
+        Image(systemName: symbol)
+            .foregroundStyle(tint)
+            .help(checksLabel(checks))
+            .accessibilityLabel(checksLabel(checks))
     }
 }
 
@@ -205,9 +514,13 @@ private func checksLabel(_ checks: String) -> String {
     }
 }
 
+private func date(_ millis: Int64) -> Date {
+    Date(timeIntervalSince1970: TimeInterval(millis) / 1000)
+}
+
 @MainActor
-private func open(_ pull: PullRequest) {
-    if let url = URL(string: pull.url) {
+private func open(_ link: String) {
+    if let url = URL(string: link) {
         NSWorkspace.shared.open(url)
     }
 }

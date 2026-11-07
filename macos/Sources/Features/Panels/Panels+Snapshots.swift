@@ -96,6 +96,7 @@ extension SnapshotCatalog {
                 store.workspace.panels.openSurface(.pullRequests)
                 guard case .pullRequests(let model) = store.workspace.panels.activeContent?.content, let request = model.request else { return }
                 store.receive([.pullRequests(request: request, pulls: PanelFixtures.pulls)])
+                PanelFixtures.feedDetail(store, model.selectedDetail)
             },
             panelEntry("panels-prs-empty", size: size, updates: PanelFixtures.base) { store in
                 store.workspace.panels.openSurface(.pullRequests)
@@ -107,8 +108,50 @@ extension SnapshotCatalog {
                 guard case .pullRequests(let model) = store.workspace.panels.activeContent?.content, let request = model.request else { return }
                 store.receive([.requestFailed(request: request, message: "gh: To use GitHub CLI, run: gh auth login")])
             },
-            panelEntry("panels-pr-detail", size: size, updates: PanelFixtures.base) { store in
+            panelEntry("panels-pr-loading", size: size, updates: PanelFixtures.base) { store in
                 store.workspace.panels.openSurface(.pullRequest)
+            },
+            panelEntry("panels-pr-summary", size: size, updates: PanelFixtures.base) { store in
+                PanelFixtures.openDetail(store, tab: .summary)
+            },
+            panelEntry("panels-pr-code", size: size, updates: PanelFixtures.base) { store in
+                PanelFixtures.openDetail(store, tab: .code)
+            },
+            panelEntry("panels-pr-timeline", size: size, updates: PanelFixtures.base) { store in
+                PanelFixtures.openDetail(store, tab: .timeline)
+            },
+            panelEntry("panels-pr-checks", size: size, updates: PanelFixtures.base) { store in
+                PanelFixtures.openDetail(store, tab: .checks)
+            },
+            panelEntry("panels-pr-error", size: size, updates: PanelFixtures.base) { store in
+                store.workspace.panels.openSurface(.pullRequest)
+                guard case .pullRequest(let model) = store.workspace.panels.activeContent?.content, let request = model.request else { return }
+                store.receive([.requestFailed(request: request, message: "gh: Could not resolve to a PullRequest with the number of 412.")])
+            },
+            panelEntry("panels-device-loading", size: size, updates: PanelFixtures.base) { store in
+                store.workspace.panels.openSurface(.device)
+            },
+            panelEntry("panels-device", size: size, updates: PanelFixtures.base) { store in
+                store.workspace.panels.openSurface(.device)
+                guard case .device(let model) = store.workspace.panels.activeContent?.content, let request = model.request else { return }
+                store.receive([.devices(request: request, devices: PanelFixtures.devices)])
+                if let pixel = PanelFixtures.devices.first(where: { $0.name == "Pixel 9 API 35" }) {
+                    model.boot(pixel)
+                }
+            },
+            panelEntry("panels-device-empty", size: size, updates: PanelFixtures.base) { store in
+                store.workspace.panels.openSurface(.device)
+                guard case .device(let model) = store.workspace.panels.activeContent?.content, let request = model.request else { return }
+                store.receive([
+                    .notice(level: .info, text: "Android devices need adb (Android SDK platform-tools)."),
+                    .devices(request: request, devices: []),
+                ])
+                model.reason = "Android devices need adb (Android SDK platform-tools)."
+            },
+            panelEntry("panels-device-error", size: size, updates: PanelFixtures.base) { store in
+                store.workspace.panels.openSurface(.device)
+                guard case .device(let model) = store.workspace.panels.activeContent?.content, let request = model.request else { return }
+                store.receive([.requestFailed(request: request, message: "xcrun simctl list timed out after 10 s.")])
             },
             panelEntry("panels-agents-empty", size: size, focus: PanelFixtures.thread, updates: PanelFixtures.base + PanelFixtures.thread(agents: false)) { store in
                 store.workspace.panels.openSurface(.agents)
@@ -202,6 +245,66 @@ enum PanelFixtures {
         base: "main"
     )
 
+    static func feedDetail(_ store: StudioStore, _ model: PullRequestDetailModel?) {
+        guard let model, let request = model.request else { return }
+        store.receive([.pullRequestDetail(request: request, detail: detail(model.pull))])
+    }
+
+    static func openDetail(_ store: StudioStore, tab: PullRequestTab) {
+        store.workspace.panels.openSurface(.pullRequest)
+        guard case .pullRequest(let model) = store.workspace.panels.activeContent?.content else { return }
+        feedDetail(store, model)
+        model.tab = tab
+        if tab == .code {
+            model.code.setAllCollapsed(false)
+        }
+    }
+
+    static func detail(_ pull: PullRequest) -> PullRequestDetail {
+        PullRequestDetail(
+            pull: pull,
+            body: """
+            Ports the right panel and the terminal drawer to the native app.
+
+            - **Diff**: working tree, branch and per-turn scopes with stacked and split layouts
+            - **Terminal**: SwiftTerm over the core's PTY, with splits
+            - **Files**, **Browser**, **Pull requests**, **Agents** and **Devices** surfaces
+
+            Closes #377.
+            """,
+            author: "gildrb",
+            createdAt: now - 86_400_000 * 2,
+            files: Array(diffFiles.prefix(3)),
+            comments: [
+                PrComment(author: "reviewer", body: "Should the drawer remember its height per project?", createdAt: now - 7_200_000, path: "macos/Sources/Features/Panels/TerminalViews.swift", line: 21),
+            ],
+            timeline: [
+                PrEvent(kind: "opened", actor: "gildrb", createdAt: now - 86_400_000 * 2, text: pull.title),
+                PrEvent(kind: "commit", actor: "gildrb", createdAt: now - 86_400_000, text: "feat(macos): right panel surfaces and terminal drawer"),
+                PrEvent(kind: "review", actor: "reviewer", createdAt: now - 7_200_000, text: "CHANGES_REQUESTED: drawer height per project"),
+                PrEvent(kind: "commit", actor: "gildrb", createdAt: now - 3_600_000, text: "fix(macos): remember drawer height"),
+                PrEvent(kind: "comment", actor: "reviewer", createdAt: now - 1_800_000, text: "Looks good now."),
+            ],
+            checks: [
+                PrCheck(name: "macOS build", state: "success", url: "https://github.com/gildrb/local-studio/actions/runs/1"),
+                PrCheck(name: "cargo clippy", state: "success", url: "https://github.com/gildrb/local-studio/actions/runs/2"),
+                PrCheck(name: "SwiftLint", state: "failure", url: "https://github.com/gildrb/local-studio/actions/runs/3"),
+                PrCheck(name: "Linux build", state: "in_progress", url: nil),
+                PrCheck(name: "Docs preview", state: "skipped", url: nil),
+            ]
+        )
+    }
+
+    static let devices: [Device] = [
+        Device(id: "8C1F2D3A-1111", name: "iPhone 17 Pro", platform: .iosSimulator, state: "Booted", runtime: "iOS 26.1"),
+        Device(id: "8C1F2D3A-2222", name: "iPhone 17", platform: .iosSimulator, state: "Shutdown", runtime: "iOS 26.1"),
+        Device(id: "8C1F2D3A-3333", name: "iPad Pro 13-inch (M5)", platform: .iosSimulator, state: "Shutdown", runtime: "iOS 26.1"),
+        Device(id: "8C1F2D3A-4444", name: "iPhone SE (3rd generation)", platform: .iosSimulator, state: "Shutdown", runtime: "iOS 18.6"),
+        Device(id: "Pixel_9_API_35", name: "Pixel 9 API 35", platform: .androidEmulator, state: "Shutdown", runtime: "Android"),
+        Device(id: "emulator-5554", name: "Medium Phone API 36", platform: .androidEmulator, state: "Booted", runtime: "Android"),
+        Device(id: "R5CT30ABCDE", name: "Galaxy S24", platform: .androidDevice, state: "Booted", runtime: nil),
+    ]
+
     static let pulls: [PullRequest] = [
         branchPull,
         PullRequest(number: 409, title: "Core: coalesce terminal output to 16 ms frames", url: "https://github.com/gildrb/local-studio/pull/409", state: "MERGED", checks: "passing", head: "core/terminal-coalesce", base: "main"),
@@ -221,7 +324,8 @@ enum PanelFixtures {
                 defaultBranch: "main",
                 pullRequest: branchPull,
                 isRepo: true,
-                changedFiles: 4
+                changedFiles: 4,
+                hasRemote: true
             )),
         ]
     }

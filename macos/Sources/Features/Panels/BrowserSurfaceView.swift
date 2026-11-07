@@ -135,6 +135,7 @@ struct BrowserSurfaceView: View {
                     .font(.system(size: 12.5))
                     .focused($addressFocused)
                     .onSubmit { model.go() }
+                    .accessibilityLabel("Address")
                     .padding(.horizontal, 9)
                     .frame(height: 26)
                     .background(Theme.input.opacity(0.7), in: RoundedRectangle(cornerRadius: 7, style: .continuous))

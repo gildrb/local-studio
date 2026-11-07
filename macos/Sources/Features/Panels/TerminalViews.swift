@@ -100,6 +100,7 @@ private struct TerminalGroupTab: View {
         HStack(spacing: 6) {
             Image(systemName: group.sessions.count > 1 ? (group.axis == .sideBySide ? "rectangle.split.2x1" : "rectangle.split.1x2") : "terminal")
                 .font(.system(size: 11, weight: .light))
+                .accessibilityHidden(true)
             Text(group.title)
                 .font(.system(size: 12))
                 .lineLimit(1)
@@ -123,6 +124,10 @@ private struct TerminalGroupTab: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: select)
         .onHover { hovering = $0 }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(group.title)
+        .accessibilityAddTraits(active ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { select() }
     }
 }
 
@@ -169,6 +174,7 @@ struct TerminalGroupSurfaceView: View {
                 Image(systemName: "terminal")
                     .font(.system(size: 12, weight: .light))
                     .foregroundStyle(Theme.chromeIcon)
+                    .accessibilityHidden(true)
                 Text(group.title)
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
@@ -234,6 +240,7 @@ private struct TerminalPaneView: View {
                 HStack(spacing: 6) {
                     Image(systemName: session.status == .closed ? "xmark.circle" : "stop.circle")
                         .font(.system(size: 11, weight: .light))
+                        .accessibilityHidden(true)
                     Text(statusText(message))
                         .font(.system(size: 11.5))
                     Spacer()
