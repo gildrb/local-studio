@@ -156,7 +156,7 @@ enum SettingKey: CaseIterable {
     case contextMeter
     case colorScheme, themes
     case contrast, glassOpacity, diffColors, chatWidth, openLinks
-    case interfaceFont, promptFont, codeFont, terminalFont, fontSmoothing, wordWrap
+    case interfaceFont, promptFont, codeFont, terminalFont, terminalScrollback, terminalCursorBlink, fontSmoothing, wordWrap
     case providers, favorites, signIn, hiddenModels
     case autoPull, fetchInterval, mergeMethod
     case writingStyle, customInstructions, followTemplates, writerModel
@@ -182,7 +182,7 @@ enum SettingKey: CaseIterable {
         case .contextMeter: .legacy
         case .colorScheme, .themes: .theme
         case .contrast, .glassOpacity, .diffColors, .chatWidth, .openLinks: .interface
-        case .interfaceFont, .promptFont, .codeFont, .terminalFont, .fontSmoothing, .wordWrap: .typography
+        case .interfaceFont, .promptFont, .codeFont, .terminalFont, .terminalScrollback, .terminalCursorBlink, .fontSmoothing, .wordWrap: .typography
         case .providers, .favorites: .providerList
         case .signIn: .providerSignIn
         case .hiddenModels: .hiddenModels
@@ -245,6 +245,8 @@ enum SettingKey: CaseIterable {
         case .promptFont: "Prompt font"
         case .codeFont: "Code font"
         case .terminalFont: "Terminal font"
+        case .terminalScrollback: "Terminal scrollback"
+        case .terminalCursorBlink: "Blink the terminal cursor"
         case .fontSmoothing: "Font smoothing"
         case .wordWrap: "Word wrap"
         case .providers: "Providers"
@@ -318,6 +320,8 @@ enum SettingKey: CaseIterable {
         case .chatWidth: "wide full column"
         case .openLinks: "browser"
         case .interfaceFont, .promptFont, .codeFont, .terminalFont: "typeface size monospace"
+        case .terminalScrollback: "history lines buffer"
+        case .terminalCursorBlink: "caret animation"
         case .fontSmoothing: "antialias"
         case .wordWrap: "wrap lines"
         case .providers: "auth api key configured"

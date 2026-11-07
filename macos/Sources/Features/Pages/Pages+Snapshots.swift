@@ -163,20 +163,6 @@ extension SnapshotCatalog {
         ] + codeEntries("gildrb", theme: "gildrb") + codeEntries("vscode", theme: imported.first?.id ?? "", custom: imported, only: true)
             + codeEntries("default", theme: ThemeLibrary.defaultId) + [
             SnapshotEntry(
-                name: "pages-theme-gildrb-terminal",
-                size: CGSize(width: 900, height: 420),
-                updates: themed("gildrb") + PanelFixtures.base,
-                view: { store in
-                    store.workspace.panels.terminalHeight = 300
-                    store.workspace.panels.terminalOpen = true
-                    PanelFixtures.feedDeck(store)
-                    return AnyView(VStack(spacing: 0) {
-                        Theme.canvas
-                        TerminalDrawerView(store: store)
-                    })
-                }
-            ),
-            SnapshotEntry(
                 name: "pages-theme-default-reset",
                 size: CGSize(width: 200, height: 60),
                 updates: themed("local-studio"),
@@ -228,6 +214,21 @@ extension SnapshotCatalog {
                     store.workspace.panels.rightPanelOpen = true
                     PanelFixtures.feedFile(store, relative: "core/src/workspace/terminal.rs", line: 9, content: .text(text: PanelFixtures.rustSource, language: "rust"))
                     return AnyView(RightPanelView(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-\(name)-terminal",
+                size: CGSize(width: 900, height: 420),
+                updates: themed(theme) + PanelFixtures.base,
+                view: { store in
+                    store.workspace.panels.terminalHeight = 300
+                    store.workspace.panels.terminalOpen = true
+                    store.workspace.panels.deck(for: PanelFixtures.project).split(.sideBySide)
+                    PanelFixtures.feedDeck(store)
+                    return AnyView(VStack(spacing: 0) {
+                        Theme.canvas
+                        TerminalDrawerView(store: store)
+                    })
                 }
             ),
         ]

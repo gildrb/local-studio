@@ -24,6 +24,8 @@ final class PanelSmoke {
     private var session: TerminalSession?
     private var devices: DeviceModel?
     private var passed: Set<String> = []
+    private var chatRequested = false
+    private var entered = false
 
     init(store: StudioStore, output: URL) {
         self.store = store
@@ -80,7 +82,7 @@ final class PanelSmoke {
         self.devices = devices
         panels.terminalOpen = true
         session = panels.decks[repository]?.activeGroup?.sessions.first
-        session?.write(Data("echo hi-from-panels\r".utf8))
+        session?.write(Data("echo hi-from-panels".utf8))
     }
 
     private func check() {
@@ -118,16 +120,32 @@ final class PanelSmoke {
             passed.insert("preview")
             print("ok read_file: \(preview.lines.count) lines")
         }
-        if !passed.contains("terminal"), let session, session.text.contains("\r\nhi-from-panels\r\n") || session.text.contains("\nhi-from-panels\r\n") {
+        if !entered, let session, session.status == .running {
+            entered = true
+            let none = TerminalMods(shift: false, control: false, alt: false, superKey: false, capsLock: false)
+            session.key(TerminalKey(action: .press, code: 0x24, mods: none, text: nil, unshifted: 0, composing: false))
+        }
+        if !passed.contains("terminal"), let session, session.grid.lines.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "hi-from-panels" }) {
             passed.insert("terminal")
-            store.workspace.panels.addToChat(session.chatContext, source: session.label)
-            let draftProject = store.conversation.draftProject
-            guard let context = store.conversation.composer(project: draftProject).contexts.last,
-                  context.text.contains("hi-from-panels") else {
-                return finish(passed: false, "Add to chat did not reach the composer")
+            print("ok terminal \(session.terminal ?? "?"): \(session.grid.columns)x\(session.grid.rows.count) grid, echo row rendered from core frames")
+            let shot = output.deletingPathExtension().appendingPathExtension("terminal.png")
+            if let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }), let content = window.contentView {
+                if let problem = Self.write(content, to: shot) {
+                    return finish(passed: false, problem)
+                }
+                print("ok terminal window snapshot \(shot.path)")
             }
-            print("ok add to chat: \(context.title)")
-            print("ok terminal \(session.terminal ?? "?"): \(session.buffer.count) bytes, echo output seen")
+        }
+        if passed.contains("terminal"), !chatRequested, let session {
+            chatRequested = true
+            session.addToChat(store.workspace.panels)
+        }
+        if chatRequested, !passed.contains("chat") {
+            let draftProject = store.conversation.draftProject
+            if let context = store.conversation.composer(project: draftProject).contexts.last, context.text.contains("hi-from-panels") {
+                passed.insert("chat")
+                print("ok add to chat: \(context.title)")
+            }
         }
         if !passed.contains("devices"), let devices {
             switch devices.phase {
@@ -141,7 +159,7 @@ final class PanelSmoke {
                 break
             }
         }
-        guard passed.count == 5, let diff else { return }
+        guard passed.count == 6, let diff else { return }
         let commands = store.commands
         guard commands.perform("preview.toggle"), store.workspace.panels.activeContent?.kind == .browser,
               commands.canPerform("preview.refresh"), commands.canPerform("preview.focusUrl") else {
@@ -153,7 +171,7 @@ final class PanelSmoke {
             return finish(passed: false, problem)
         }
         session?.close()
-        finish(passed: true, "diff, files, read_file, list_devices and terminal round-trips; diff snapshot \(output.path)")
+        finish(passed: true, "diff, files, read_file, list_devices, terminal and Add to Chat round-trips; diff snapshot \(output.path)")
     }
 
     private static func verify(_ diff: DiffModel) -> String? {
@@ -195,12 +213,17 @@ final class PanelSmoke {
             host.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
         }
-        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return "no bitmap for the diff view" }
-        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let problem = Self.write(host, to: output)
         window.close()
+        return problem
+    }
+
+    private static func write(_ view: NSView, to url: URL) -> String? {
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return "no bitmap for \(url.lastPathComponent)" }
+        view.cacheDisplay(in: view.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]) else { return "PNG encoding failed" }
         do {
-            try data.write(to: output)
+            try data.write(to: url)
         } catch {
             return error.localizedDescription
         }

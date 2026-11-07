@@ -137,6 +137,16 @@ private struct AppearanceForm: View {
                 SettingRow(.terminalFont) {
                     FontRow(title: SettingKey.terminalFont.title, family: bind(\.terminalFont), size: bind(\.terminalFontSize), families: FontCatalog.monospaced)
                 }
+                SettingRow(.terminalScrollback) {
+                    Picker(SettingKey.terminalScrollback.title, selection: bind(\.terminalScrollback)) {
+                        ForEach([UInt32(1_000), 10_000, 50_000, 100_000], id: \.self) { lines in
+                            Text("\(lines.formatted()) lines").tag(lines)
+                        }
+                    }
+                }
+                SettingRow(.terminalCursorBlink) {
+                    Toggle(SettingKey.terminalCursorBlink.title, isOn: bind(\.terminalCursorBlink))
+                }
                 SettingRow(.fontSmoothing) {
                     Toggle(isOn: bind(\.fontSmoothing)) {
                         Text(SettingKey.fontSmoothing.title)

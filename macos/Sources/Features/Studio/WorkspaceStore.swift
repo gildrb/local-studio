@@ -110,12 +110,21 @@ final class WorkspaceStore {
         session.bind(terminal)
     }
 
-    func terminalOutput(terminal: String, data: Data) {
-        sessions[terminal]?.receive(data)
+    func terminalFrame(terminal: String, frame: TerminalFrame) {
+        sessions[terminal]?.apply(frame)
+    }
+
+    func terminalText(request: String, text: String) {
+        guard case .terminalText(let completion) = routes.removeValue(forKey: request) else { return }
+        completion(text)
     }
 
     func terminalExited(terminal: String, code: Int32?) {
-        sessions.removeValue(forKey: terminal)?.exited(code: code)
+        sessions[terminal]?.exited(code: code)
+    }
+
+    func requestTerminalText(_ completion: @escaping @MainActor (String) -> Void, _ call: (Studio, String) -> Void) {
+        _ = issue(.terminalText(completion), call)
     }
 
     func issue(_ route: PanelRoute, _ call: (Studio, String) -> Void) -> String {
@@ -175,6 +184,7 @@ enum PanelRoute {
     case devices(DeviceModel)
     case deviceAction(DeviceModel, String)
     case terminal(TerminalSession)
+    case terminalText(@MainActor (String) -> Void)
 
     func done(_ message: String) {
         if case .deviceAction(let model, let device) = self {
@@ -202,6 +212,8 @@ enum PanelRoute {
             model.actionFinished(device: device, message: message, failed: true)
         case .terminal(let session):
             session.failed(message)
+        case .terminalText:
+            break
         }
     }
 }

@@ -9,9 +9,6 @@ let kitLibrary = packageDirectory.appendingPathComponent("Generated/lib").path
 let package = Package(
     name: "LocalStudio",
     platforms: [.macOS("26.0")],
-    dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.20.0"),
-    ],
     targets: [
         .systemLibrary(
             name: "local_studio_coreFFI",
@@ -29,7 +26,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "LocalStudio",
-            dependencies: ["LocalStudioKit", .product(name: "SwiftTerm", package: "SwiftTerm")],
+            dependencies: ["LocalStudioKit"],
             path: "Sources",
             swiftSettings: [.enableExperimentalFeature("StrictConcurrency")],
             linkerSettings: [

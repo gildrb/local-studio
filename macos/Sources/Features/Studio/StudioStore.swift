@@ -141,8 +141,11 @@ final class StudioStore {
         case .terminalOpened(let request, let terminal):
             requests.settle(request)
             workspace.terminalOpened(request: request, terminal: terminal)
-        case .terminalOutput(let terminal, let data):
-            workspace.terminalOutput(terminal: terminal, data: data)
+        case .terminalFrame(let terminal, let frame):
+            workspace.terminalFrame(terminal: terminal, frame: frame)
+        case .terminalText(let request, _, let text):
+            requests.settle(request)
+            workspace.terminalText(request: request, text: text)
         case .terminalExited(let terminal, let code):
             workspace.terminalExited(terminal: terminal, code: code)
         case .usage(let request, let report):
