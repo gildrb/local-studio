@@ -44,6 +44,7 @@ final class StudioStore {
 
     func select(_ thread: String?) {
         conversation.focus(thread)
+        shell.touchRecent(thread)
         core.run { $0.selectThread(thread: thread) }
     }
 

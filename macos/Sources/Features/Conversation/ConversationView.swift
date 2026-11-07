@@ -71,6 +71,7 @@ private struct DraftHero: View {
                     .padding(.bottom, 8)
                 }
                 ComposerView(store: store)
+                    .focusRegionFrame(.composer, in: store.shell)
                 ThreadContextStrip(store: store)
             }
             .frame(maxWidth: 720)
@@ -82,33 +83,45 @@ private struct DraftHero: View {
     }
 }
 
-private struct ProjectMenu: View {
+struct ProjectMenu: View {
     let store: StudioStore
-    @State private var hovering = false
 
     var body: some View {
         let inbox = store.inbox
         let current = inbox.project(inbox.currentProject)
-        Menu {
-            Picker("Project", selection: Binding(get: { inbox.currentProject }, set: { inbox.selectProject($0) })) {
-                ForEach(inbox.projects, id: \.id) { project in
-                    Label(project.name, systemImage: "folder").tag(Optional(project.id))
-                }
-                Label("No project", systemImage: "circle.slash").tag(String?.none)
+        PickerChipButton(
+            title: current?.name ?? "No project",
+            symbol: "folder",
+            help: "Project",
+            label: "Project: \(current?.name ?? "No project")",
+            width: 300,
+            rows: Self.rows(projects: inbox.projects, current: inbox.currentProject) {
+                inbox.selectProject($0)
+            } add: {
+                Task { addProject() }
             }
-            .pickerStyle(.inline)
-            Divider()
-            Button("Add Project…", action: addProject)
-        } label: {
-            ComposerChip(title: current?.name ?? "No project", symbol: "folder", hovering: hovering)
-        }
-        .menuStyle(.button)
-        .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .onHover { hovering = $0 }
-        .help("Project")
-        .accessibilityLabel("Project: \(current?.name ?? "No project")")
+        )
+    }
+
+    static func rows(
+        projects: [Project],
+        current: String?,
+        select: @escaping @MainActor (String?) -> Void,
+        add: @escaping @MainActor () -> Void
+    ) -> [PickerRow] {
+        projects.map { project in
+            PickerRow(
+                id: project.id,
+                title: project.name,
+                symbol: "folder",
+                subtitle: (project.path as NSString).abbreviatingWithTildeInPath,
+                checked: project.id == current,
+                section: "Projects"
+            ) { select(project.id) }
+        } + [
+            PickerRow(id: "no-project", title: "No project", symbol: "circle.slash", checked: current == nil, section: "Projects") { select(nil) },
+            PickerRow(id: "add-project", title: "Add Project…", symbol: "plus", action: add),
+        ]
     }
 
     private func addProject() {
@@ -135,6 +148,7 @@ private struct ConversationColumn: View {
                 VStack(spacing: 8) {
                     ApprovalCard(store: store)
                     ComposerView(store: store)
+                        .focusRegionFrame(.composer, in: store.shell)
                     ThreadContextStrip(store: store)
                         .padding(.top, -4)
                 }
@@ -191,6 +205,7 @@ private struct TimelineScroll: View {
                 LoadingPlaceholder(conversation: conversation)
                 ForEach(conversation.rows) { row in
                     TimelineRowView(row: row, store: store)
+                        .keyboardFocusRing(store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
                 }
                 TimelineFooter(store: store)
             }
@@ -232,6 +247,11 @@ private struct TimelineScroll: View {
         }
         .onChange(of: conversation.endRequest) {
             position.scrollTo(edge: .bottom)
+        }
+        .onChange(of: store.shell.timelineCursor) { _, cursor in
+            guard let cursor, store.shell.region == .timeline else { return }
+            follow(cursor == conversation.rows.last?.id)
+            position.scrollTo(id: cursor)
         }
         .onScrollTargetVisibilityChange(idType: UInt64.self, threshold: 0.3) { ids in
             updateCurrentAnchor(visible: ids)

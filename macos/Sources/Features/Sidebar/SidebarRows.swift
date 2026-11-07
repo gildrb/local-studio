@@ -127,6 +127,7 @@ struct InboxRowView: View {
         }
         .contentShape(Rectangle())
         .rowSurface(selected: highlighted, hovering: hovering)
+        .keyboardFocusRing(store.shell.region == .sidebar && store.shell.sidebarCursor == row.id)
         .opacity(row.status == .working && !highlighted ? 0.85 : 1)
         .onHover { hovering = $0 }
         .onTapGesture { click() }
@@ -338,6 +339,7 @@ struct InboxRowView: View {
     }
 
     private func click() {
+        store.shell.sidebarCursor = row.id
         let flags = NSEvent.modifierFlags
         if NSApp.currentEvent?.clickCount == 2, flags.isDisjoint(with: [.command, .shift]) {
             store.inbox.renaming = row.id

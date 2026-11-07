@@ -106,39 +106,48 @@ private struct RemoveBadge: View {
 struct StashMenu: View {
     let store: StudioStore
     let project: String?
-    @State private var hovering = false
 
     var body: some View {
         let conversation = store.conversation
         let key = conversation.stashKey(project: project)
         let prompts = conversation.stash.list(key)
         if !prompts.isEmpty {
-            Menu {
-                Button("Stash Current Prompt") { conversation.stashPrompt(project: project) }
-                    .disabled(conversation.composer(project: project).isEmpty)
-                Divider()
-                Section("Stashed Prompts") {
-                    ForEach(prompts) { prompt in
-                        Button {
-                            conversation.restoreStash(prompt, project: project)
-                        } label: {
-                            Text(prompt.title)
-                            Text(prompt.created, format: .relative(presentation: .named))
-                        }
-                    }
-                }
-                Divider()
-                Button("Clear Stash", role: .destructive) { conversation.stash.clear(project: key) }
-            } label: {
-                ComposerChip(title: "\(prompts.count)", symbol: "archivebox", hovering: hovering)
-            }
-            .menuStyle(.button)
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .onHover { hovering = $0 }
-            .help(prompts.count == 1 ? "1 stashed prompt" : "\(prompts.count) stashed prompts")
-            .accessibilityLabel(prompts.count == 1 ? "1 stashed prompt" : "\(prompts.count) stashed prompts")
+            let label = prompts.count == 1 ? "1 stashed prompt" : "\(prompts.count) stashed prompts"
+            PickerChipButton(
+                title: "\(prompts.count)",
+                symbol: "archivebox",
+                help: label,
+                label: label,
+                width: 300,
+                rows: Self.rows(
+                    prompts: prompts,
+                    canStash: !conversation.composer(project: project).isEmpty,
+                    restore: { conversation.restoreStash($0, project: project) },
+                    stash: { _ = conversation.stashPrompt(project: project) },
+                    clear: { conversation.stash.clear(project: key) }
+                )
+            )
         }
+    }
+
+    static func rows(
+        prompts: [StashedPrompt],
+        canStash: Bool,
+        restore: @escaping @MainActor (StashedPrompt) -> Void,
+        stash: @escaping @MainActor () -> Void,
+        clear: @escaping @MainActor () -> Void
+    ) -> [PickerRow] {
+        prompts.map { prompt in
+            PickerRow(
+                id: prompt.id.uuidString,
+                title: prompt.title,
+                symbol: "text.bubble",
+                subtitle: prompt.created.formatted(.relative(presentation: .named)),
+                section: "Stashed Prompts"
+            ) { restore(prompt) }
+        } + [
+            PickerRow(id: "stash-current", title: "Stash Current Prompt", symbol: "archivebox", enabled: canStash, action: stash),
+            PickerRow(id: "clear-stash", title: "Clear Stash", symbol: "trash", destructive: true, action: clear),
+        ]
     }
 }

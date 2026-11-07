@@ -69,6 +69,7 @@ enum SettingsGroup: Hashable {
     case projectDefaults
     case organization
     case behavior
+    case keyboard
     case confirmations
     case textGeneration
     case about
@@ -98,6 +99,7 @@ enum SettingsGroup: Hashable {
         case .projectDefaults: "Project Defaults"
         case .organization: "Organization"
         case .behavior: "Behavior"
+        case .keyboard: "Keyboard"
         case .confirmations: "Confirmations"
         case .textGeneration: "Text Generation"
         case .about: "About"
@@ -126,7 +128,7 @@ enum SettingsGroup: Hashable {
 
     var pane: SettingsPane {
         switch self {
-        case .projectDefaults, .organization, .behavior, .confirmations, .textGeneration, .about, .diagnostics, .legacy: .general
+        case .projectDefaults, .organization, .behavior, .keyboard, .confirmations, .textGeneration, .about, .diagnostics, .legacy: .general
         case .theme, .interface, .typography: .appearance
         case .shortcuts: .keybindings
         case .snapshotCapture, .snapshotFeedback: .snapshots
@@ -149,6 +151,7 @@ enum SettingKey: CaseIterable {
     case workingSection, autoSettleMerged, autoSettleInactive, inactiveDays
     case notifications, inAppNotifications, timeFormat, responseStreaming, hideWhitespace, diffFileState, diffLayout
     case proactivePanels, skillsInSlash, richText, collapseComposer, sendShortcut, followUp, continueThreads
+    case vimKeys
     case confirmUnpin, confirmArchive, confirmDelete, quitShortcut
     case textGenerationModel
     case version
@@ -175,6 +178,7 @@ enum SettingKey: CaseIterable {
         case .workingSection, .autoSettleMerged, .autoSettleInactive, .inactiveDays: .organization
         case .notifications, .inAppNotifications, .timeFormat, .responseStreaming, .hideWhitespace, .diffFileState, .diffLayout,
              .proactivePanels, .skillsInSlash, .richText, .collapseComposer, .sendShortcut, .followUp, .continueThreads: .behavior
+        case .vimKeys: .keyboard
         case .confirmUnpin, .confirmArchive, .confirmDelete, .quitShortcut: .confirmations
         case .textGenerationModel: .textGeneration
         case .version: .about
@@ -226,6 +230,7 @@ enum SettingKey: CaseIterable {
         case .sendShortcut: "Send shortcut"
         case .followUp: "Follow-up behavior"
         case .continueThreads: "Continue threads after restarts"
+        case .vimKeys: "Vim keys"
         case .confirmUnpin: "Confirm before unpinning"
         case .confirmArchive: "Confirm before archiving"
         case .confirmDelete: "Confirm before deleting"
@@ -306,6 +311,7 @@ enum SettingKey: CaseIterable {
         case .sendShortcut: "enter return keyboard"
         case .followUp: "queue steer"
         case .continueThreads: "resume restart"
+        case .vimKeys: "vim modal normal insert hjkl keyboard navigation composer lists"
         case .confirmUnpin, .confirmArchive, .confirmDelete: "dialog prompt"
         case .quitShortcut: "cmd q hold"
         case .textGenerationModel: "titles commit messages"

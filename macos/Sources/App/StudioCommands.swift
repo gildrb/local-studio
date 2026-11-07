@@ -44,6 +44,10 @@ final class CommandRefresh: ObservableObject {
         _ = store.pages.settings?.timeFormat
         _ = store.workspace.gitStatus
         _ = store.inbox.projectScripts
+        _ = store.shell.region
+        _ = store.shell.timelineCursor
+        _ = store.panels.surfaces
+        _ = store.pages.settings?.vimMode
     }
 }
 
@@ -55,6 +59,7 @@ struct StudioCommands: Commands {
         CommandGroup(replacing: .newItem) {
             CommandButton(store: store, title: "New Thread", command: "chat.new")
             CommandButton(store: store, title: "New Thread in Current Project", command: "chat.newLocal")
+            CommandButton(store: store, title: "New Thread Here", command: "chat.newTab")
             CommandButton(store: store, title: "New Thread Without a Project", command: "chat.newWithoutProject")
             Button("New Thread in Project…") { store.shell.palette = .newThread }
                 .disabled(store.inbox.projects.isEmpty)
@@ -63,6 +68,7 @@ struct StudioCommands: Commands {
             Button("Clone Repository…") { store.shell.cloneShown = true }
             CommandButton(store: store, title: "Open in Editor", command: "editor.openFavorite")
             CommandButton(store: store, title: "Close Panel Tab", command: "rightPanel.close")
+            CommandButton(store: store, title: "Close Thread", command: "thread.close")
             Menu("Terminal") {
                 CommandButton(store: store, title: "New Terminal", command: "terminal.new")
                 CommandButton(store: store, title: "Split Horizontally", command: "terminal.split")
@@ -85,12 +91,15 @@ struct StudioCommands: Commands {
             CommandButton(store: store, title: store.panels.terminalOpen ? "Hide Terminal" : "Show Terminal", command: "terminal.toggle")
             CommandButton(store: store, title: store.panels.rightPanelOpen ? "Hide Right Panel" : "Show Right Panel", command: "rightPanel.toggle")
             CommandButton(store: store, title: "Toggle Diff", command: "diff.toggle")
+            CommandButton(store: store, title: "Previous Panel Tab", command: "rightPanel.previousTab")
+            CommandButton(store: store, title: "Next Panel Tab", command: "rightPanel.nextTab")
             CommandButton(store: store, title: "Toggle Browser Preview", command: "preview.toggle")
             Divider()
             CommandButton(store: store, title: "Command Palette", command: "commandPalette.toggle")
             CommandButton(store: store, title: "Go to File…", command: "filePicker.toggle")
             CommandButton(store: store, title: "Search Project…", command: "projectSearch.toggle")
             Divider()
+            focusMenu
             Menu("Browser") {
                 CommandButton(store: store, title: "Reload Page", command: "preview.refresh")
                 CommandButton(store: store, title: "Focus Address Bar", command: "preview.focusUrl")
@@ -200,6 +209,8 @@ struct StudioCommands: Commands {
         Divider()
         CommandButton(store: store, title: "Previous Thread", command: "thread.previous")
         CommandButton(store: store, title: "Next Thread", command: "thread.next")
+        CommandButton(store: store, title: "Next Recent Thread", command: "thread.recentNext")
+        CommandButton(store: store, title: "Previous Recent Thread", command: "thread.recentPrevious")
         Menu("Go to Thread") {
             ForEach(1...9, id: \.self) { number in
                 CommandButton(store: store, title: jumpTitle(number), command: "thread.jump.\(number)")
@@ -207,6 +218,7 @@ struct StudioCommands: Commands {
         }
         Divider()
         CommandButton(store: store, title: "Copy Reference", command: "thread.copyReference")
+        CommandButton(store: store, title: "Copy Message", command: "timeline.copyMessage")
         CommandButton(store: store, title: "Copy Pull Request Number", command: "pullRequest.copyNumber")
         Divider()
         Menu("Project Actions") {
@@ -223,6 +235,26 @@ struct StudioCommands: Commands {
         .disabled(store.focusedProject == nil)
         Button("Project Settings…") { store.openProjectSettings(store.focusedProject) }
             .disabled(store.focusedProject == nil)
+    }
+
+    @ViewBuilder private var focusMenu: some View {
+        Menu("Focus") {
+            CommandButton(store: store, title: "Next Region", command: "focus.next")
+            CommandButton(store: store, title: "Previous Region", command: "focus.previous")
+            CommandButton(store: store, title: "Cycle Regions", command: "focus.cycle")
+            CommandButton(store: store, title: "Cycle Regions Backward", command: "focus.cycleBack")
+            Divider()
+            Button("Sidebar") { store.focus(.sidebar) }
+            Button("Timeline") { store.focus(.timeline) }
+                .disabled(store.conversation.thread == nil || store.shell.route != .thread)
+            CommandButton(store: store, title: "Composer", command: "focus.composer")
+            Button("Right Panel") { store.focus(.rightPanel) }
+                .disabled(store.shell.route != .thread)
+            Button("Terminal") { store.focus(.terminal) }
+                .disabled(store.shell.route != .thread)
+            Divider()
+            Button("Search Threads") { store.focusSidebarSearch() }
+        }
     }
 
     private var undoTitle: String {

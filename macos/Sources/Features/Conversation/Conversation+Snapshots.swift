@@ -391,6 +391,93 @@ extension SnapshotCatalog {
                 ],
                 view: thread
             ),
+            SnapshotEntry(
+                name: "conversation-vim-indicator",
+                size: CGSize(width: 980, height: 640),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .settings(settings: fixtures.settings { $0.vimMode = true }),
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: fixtures.settled)),
+                ],
+                view: { store in
+                    store.conversation.composer(project: nil).text = "Round the send button and keep it 28pt"
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-timeline-focus",
+                size: CGSize(width: 980, height: 640),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: fixtures.settled)),
+                ],
+                view: { store in
+                    store.shell.region = .timeline
+                    store.shell.timelineCursor = store.conversation.rows.dropLast().last?.id
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "picker-access",
+                size: CGSize(width: 300, height: 250),
+                updates: [],
+                view: { _ in
+                    AnyView(PickerPanel(title: "Access", rows: AccessMenu.rows(current: .autoAcceptEdits) { _ in }, width: 300) {}.background(Theme.card))
+                }
+            ),
+            SnapshotEntry(
+                name: "picker-thinking",
+                size: CGSize(width: 220, height: 200),
+                updates: [],
+                view: { _ in
+                    let rows = ThinkingMenu.rows(levels: ["off", "low", "medium", "high", "xhigh"], current: "high") { _ in }
+                    return AnyView(PickerPanel(title: "Thinking", rows: rows, width: 220) {}.background(Theme.card))
+                }
+            ),
+            SnapshotEntry(
+                name: "picker-branches",
+                size: CGSize(width: 300, height: 220),
+                updates: [],
+                view: { _ in
+                    let branches = [
+                        Branch(name: "main", remote: false, current: true, worktree: nil),
+                        Branch(name: "swift/k", remote: false, current: false, worktree: "/Users/gil/Repos/ls-k"),
+                        Branch(name: "feature/picker-panels", remote: false, current: false, worktree: nil),
+                        Branch(name: "origin/main", remote: true, current: false, worktree: nil),
+                        Branch(name: "origin/release/0.9", remote: true, current: false, worktree: nil),
+                    ]
+                    let rows = BaseBranchButton.rows(branches, selected: "swift/k") { _ in }
+                    let panel = PickerPanel(rows: rows, query: .constant(""), prompt: "Search branches", width: 300, maxHeight: 300) {}
+                    return AnyView(panel.background(Theme.card))
+                }
+            ),
+            SnapshotEntry(
+                name: "picker-project",
+                size: CGSize(width: 300, height: 210),
+                updates: [],
+                view: { _ in
+                    let other = Project(id: "/Users/gil/Repos/eukhe", name: "eukhe", path: "/Users/gil/Repos/eukhe", icon: nil, isGit: true)
+                    let rows = ProjectMenu.rows(projects: [fixtures.project, other], current: fixtures.project.id) { _ in } add: {}
+                    return AnyView(PickerPanel(rows: rows, width: 300) {}.background(Theme.card))
+                }
+            ),
+            SnapshotEntry(
+                name: "picker-stash",
+                size: CGSize(width: 300, height: 210),
+                updates: [],
+                view: { _ in
+                    let prompts = [
+                        StashedPrompt(text: "Round the send button and keep it 28pt", files: [], contexts: [], created: .now.addingTimeInterval(-3_600)),
+                        StashedPrompt(text: "Audit the settings panes for contrast", files: [], contexts: [], created: .now.addingTimeInterval(-86_400 * 2)),
+                    ]
+                    let rows = StashMenu.rows(prompts: prompts, canStash: false, restore: { _ in }, stash: {}, clear: {})
+                    return AnyView(PickerPanel(rows: rows, width: 300) {}.background(Theme.card))
+                }
+            ),
         ]
     }
 }

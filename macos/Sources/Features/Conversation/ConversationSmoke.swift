@@ -301,6 +301,43 @@ final class ConversationSmoke {
         guard draft.contexts.count == 1, draft.promptText.contains("Terminal:\n```\n$ make\nok\n```") else { return "attachContext did not add a terminal chip" }
         draft.clear()
         print("ok   attachContext(text:source:) added a terminal context chip")
+        return vimChecks()
+    }
+
+    private func vimChecks() -> String? {
+        let undo = VimSmokeUndo()
+        defer { withExtendedLifetime(undo) {} }
+        let textView = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 480, height: 200))
+        textView.allowsUndo = true
+        textView.delegate = undo
+        let original = "alpha beta gamma\nsecond line\nthird"
+        textView.string = original
+        textView.setSelectedRange(NSRange(location: 0, length: 0))
+        let vim = textView.vim
+        let steps: [(String, String)] = [
+            ("\u{1b}dw", "beta gamma\nsecond line\nthird"),
+            ("u", original),
+            ("jdd", "alpha beta gamma\nthird"),
+            ("u", original),
+            ("gg2x", "pha beta gamma\nsecond line\nthird"),
+            ("cwnew\u{1b}", "new beta gamma\nsecond line\nthird"),
+            ("yyp", "new beta gamma\nnew beta gamma\nsecond line\nthird"),
+            ("Gdd", "new beta gamma\nnew beta gamma\nsecond line"),
+            ("u", "new beta gamma\nnew beta gamma\nsecond line\nthird"),
+            ("gg2dd", "second line\nthird"),
+        ]
+        for (keys, expected) in steps {
+            vim.feed(keys, in: textView)
+            guard textView.string == expected else {
+                return "vim keys \(keys.debugDescription) left \(textView.string.debugDescription), expected \(expected.debugDescription)"
+            }
+        }
+        guard vim.mode == .normal else { return "vim did not return to normal mode after Esc" }
+        vim.feed("$", in: textView)
+        guard textView.selectedRange().location == 10 else { return "vim $ put the caret at \(textView.selectedRange().location), expected 10" }
+        vim.feed("0", in: textView)
+        guard textView.selectedRange().location == 0 else { return "vim 0 put the caret at \(textView.selectedRange().location), expected 0" }
+        print("ok   vim composer motions (dw, dd, u, cw, yy p)")
         return nil
     }
 
@@ -319,5 +356,18 @@ final class ConversationSmoke {
             store.stop()
             exit(1)
         }
+    }
+}
+
+@MainActor
+private final class VimSmokeUndo: NSObject, NSTextViewDelegate {
+    let manager: UndoManager = {
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        return manager
+    }()
+
+    func undoManager(for view: NSTextView) -> UndoManager? {
+        manager
     }
 }

@@ -3,7 +3,7 @@ import LocalStudioKit
 import SwiftUI
 
 extension StudioStore {
-    private static let focusClauses = ["terminalFocus", "previewFocus", "modelPickerOpen", "usagePageOpen"]
+    private static let focusClauses = ["terminalFocus", "previewFocus", "modelPickerOpen", "usagePageOpen", "timelineFocus"]
 
     func binding(_ command: String) -> Keybinding? {
         pages.keybindings.first { $0.command == command }
@@ -11,7 +11,7 @@ extension StudioStore {
 
     func dispatch(_ command: String) {
         if let chord = binding(command)?.shortcut {
-            for other in pages.keybindings where other.command != command && other.shortcut == chord && commands.canPerform(other.command) {
+            for other in pages.keybindings where other.command != command && other.shortcut == chord && clauseHolds(other) && commands.canPerform(other.command) {
                 commands.perform(other.command)
                 return
             }
@@ -32,6 +32,13 @@ extension StudioStore {
             let collides = pages.keybindings.contains { $0.command != command && $0.shortcut == chord && !Self.isFocusScoped($0) }
             if collides { return nil }
             if binding.when?.contains("usagePageOpen") == true, shell.route != .usage { return nil }
+            if binding.when?.contains("timelineFocus") == true, shell.region != .timeline || shell.route != .thread { return nil }
+        } else {
+            let peers = pages.keybindings.filter { $0.shortcut == chord && !Self.isFocusScoped($0) }
+            if peers.count > 1 {
+                let owner = peers.first { builtin($0.command) != nil || commands.canPerform($0.command) } ?? peers[0]
+                if owner.command != command { return nil }
+            }
         }
         return CoreShortcut.parse(chord)
     }
@@ -41,6 +48,13 @@ extension StudioStore {
         return focusClauses.contains { clause in
             when.contains(clause) && !when.contains("!\(clause)")
         }
+    }
+
+    private func clauseHolds(_ binding: Keybinding) -> Bool {
+        guard let when = binding.when else { return true }
+        if when.contains("previewFocus"), !when.contains("!previewFocus") { return shell.region == .rightPanel }
+        if when.contains("timelineFocus"), !when.contains("!timelineFocus") { return shell.region == .timeline }
+        return true
     }
 
     func builtin(_ command: String) -> (@MainActor () -> Void)? {
@@ -70,6 +84,26 @@ extension StudioStore {
         case "chat.new": return { self.newThreadCommand(currentProject: false) }
         case "chat.newLocal": return { self.newThreadCommand(currentProject: true) }
         case "chat.newWithoutProject": return { self.newThread(in: nil) }
+        case "chat.newTab": return { self.newThreadTab() }
+        case "thread.close":
+            guard shell.route == .thread, conversation.thread != nil, !panels.rightPanelOpen else { return nil }
+            return { self.closeThread() }
+        case "thread.recentNext": return { self.cycleRecent(1) }
+        case "thread.recentPrevious": return { self.cycleRecent(-1) }
+        case "focus.next", "focus.cycle": return { self.cycleFocus(1) }
+        case "focus.previous", "focus.cycleBack": return { self.cycleFocus(-1) }
+        case "focus.composer":
+            guard shell.route == .thread else { return nil }
+            return { self.focus(.composer) }
+        case "rightPanel.previousTab":
+            guard panels.rightPanelOpen, panels.surfaces.count > 1 else { return nil }
+            return { self.stepPanelTab(-1) }
+        case "rightPanel.nextTab":
+            guard panels.rightPanelOpen, panels.surfaces.count > 1 else { return nil }
+            return { self.stepPanelTab(1) }
+        case "timeline.copyMessage":
+            guard shell.region == .timeline, shell.timelineCursor != nil else { return nil }
+            return { _ = self.copyTimelineMessage() }
         case "editor.openFavorite":
             guard let path = workspacePath(for: row) else { return nil }
             return { EditorLauncher.openFavorite(path) }

@@ -13,7 +13,8 @@ Needs Xcode 26+, Rust 1.98, Nushell, and a sibling `eukhe` checkout. Linux: see 
 ## Use
 
 - Open `macos/build/Release/LocalStudio.app`, add a project folder, start a thread.
-- ⌘N new thread, ⌘K command palette, ⌘J terminal, ⌥⌘B right panel, ⌘, settings.
+- ⌘N new thread, ⌘T new thread in the current project, ⌘W close the thread, ⌃Tab recent threads, ⌘K command palette, ⌘J terminal, ⌥⌘B right panel, ⌘, settings.
+- On macOS everything works from the keyboard: F6 or ⌘⌥←/→ move between sidebar, timeline, composer, right panel and terminal; arrows, Return, Space and Delete work in the lists; ⌘L focuses the composer. Settings → General → Keyboard turns on vim keys (j/k, gg/G, h/l, / and a modal composer).
 
 ## Many threads, one inbox
 

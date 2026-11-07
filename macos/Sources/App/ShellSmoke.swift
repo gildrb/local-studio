@@ -24,6 +24,9 @@ final class ShellSmoke {
     private var expectedPinned: [String] = []
     private var revision = 0
     private var routed: [String] = []
+    private var vimResult: [Bool] = []
+    private var vimCursor: String?
+    private var vimRegion: FocusRegion?
 
     init(store: StudioStore) {
         self.store = store
@@ -138,6 +141,7 @@ final class ShellSmoke {
                 return true
             }),
             Step(name: "second turn settles", act: { _ in }, done: { $0.store.inbox.thread($0.second)?.status != .working }),
+        ] + keyboardSteps() + [
             Step(name: "pin both", act: { $0.store.inbox.setPinned([$0.thread, $0.second], true) }, done: { smoke in
                 smoke.store.inbox.sections.pinned.count == 2
             }),
@@ -222,3 +226,86 @@ final class ShellSmoke {
         }
     }
 }
+
+extension ShellSmoke {
+    private func keyboardSteps() -> [Step] {
+        [
+            Step(name: "⌘T opens a draft in the current project", act: { $0.store.dispatch("chat.newTab") }, done: { smoke in
+                smoke.store.focusedThread == nil && smoke.store.shell.route == .thread && smoke.store.inbox.currentProject == smoke.project
+                    && smoke.store.currentRegion == .composer && smoke.menuItem("New Thread Here")?.keyEquivalent == "t"
+            }),
+            Step(name: "⌃Tab cycles recent threads", act: { smoke in
+                smoke.store.open(smoke.thread)
+                smoke.store.open(smoke.second)
+                smoke.store.dispatch("thread.recentNext")
+            }, done: { smoke in
+                guard smoke.store.focusedThread == smoke.thread else { return false }
+                let item = smoke.menuItem("Next Recent Thread")
+                return item?.keyEquivalent == "\t" && item?.keyEquivalentModifierMask.contains(.control) == true
+            }),
+            Step(name: "⌃Tab release commits, next ⌃Tab returns", act: { smoke in
+                smoke.store.endRecentCycle()
+                smoke.store.dispatch("thread.recentNext")
+                smoke.store.endRecentCycle()
+            }, done: { $0.store.focusedThread == $0.second && $0.store.shell.recent.prefix(2) == [$0.second, $0.thread] }),
+            Step(name: "⌘W closes the thread view", act: { smoke in
+                if smoke.store.panels.rightPanelOpen { smoke.store.panels.toggleRightPanel() }
+                smoke.store.dispatch(smoke.menuItem("Close Thread")?.keyEquivalent == "w" ? "thread.close" : "missing")
+            }, done: { smoke in
+                smoke.store.focusedThread == nil && smoke.store.inbox.thread(smoke.second) != nil && smoke.store.shell.canGoBack
+            }),
+            Step(name: "⌘[ goes back to the closed thread", act: { $0.store.dispatch("navigation.back") }, done: { $0.store.focusedThread == $0.second && !$0.store.conversation.rows.isEmpty }),
+            Step(name: "F6 cycles focus regions", act: { smoke in
+                smoke.store.focus(.sidebar)
+                smoke.store.dispatch("focus.cycle")
+            }, done: { smoke in
+                smoke.store.shell.region == .timeline && smoke.store.shell.timelineCursor == smoke.store.conversation.rows.last?.id
+                    && smoke.menuItem("Cycle Regions")?.keyEquivalent == String(Character(UnicodeScalar(NSF6FunctionKey) ?? " "))
+            }),
+            Step(name: "timeline arrows and copy text", act: { smoke in
+                _ = smoke.key(.up)
+            }, done: { smoke in
+                let rows = smoke.store.conversation.rows
+                guard rows.count > 1, smoke.store.shell.timelineCursor == rows[rows.count - 2].id else { return false }
+                return rows.contains { !$0.copyText.isEmpty }
+            }),
+            Step(name: "vim keys on", act: { $0.store.setVimMode(true) }, done: { $0.store.pages.settings?.vimMode == true }),
+            Step(name: "vim j/k, G, gg in the sidebar", act: { smoke in
+                smoke.store.focus(.sidebar)
+                smoke.store.shell.sidebarCursor = smoke.store.inbox.visibleOrder.first
+                smoke.vimResult = [smoke.key(.text("j")), smoke.key(.text("G")), smoke.key(.text("g")), smoke.key(.text("g")), smoke.key(.text("k"))]
+                smoke.vimCursor = smoke.store.shell.sidebarCursor
+                _ = smoke.key(.text("j"))
+            }, done: { smoke in
+                let order = smoke.store.inbox.visibleOrder
+                return order.count >= 2 && smoke.vimResult.allSatisfy(\.self) && smoke.vimCursor == order.first && smoke.store.shell.sidebarCursor == order[1]
+            }),
+            Step(name: "vim l moves to the timeline, i focuses the composer", act: { smoke in
+                _ = smoke.key(.text("l"))
+                smoke.vimRegion = smoke.store.shell.region
+                _ = smoke.key(.text("i"))
+            }, done: { smoke in
+                smoke.vimRegion == .timeline && smoke.store.currentRegion == .composer
+                    && smoke.store.mainWindow?.firstResponder is ComposerNSTextView
+            }),
+            Step(name: "vim keys off", act: { $0.store.setVimMode(false) }, done: { $0.store.pages.settings?.vimMode == false }),
+            Step(name: "type-to-filter from the sidebar", act: { smoke in
+                smoke.store.focus(.sidebar)
+                _ = smoke.key(.text("s"))
+            }, done: { smoke in
+                let filtered = smoke.store.inbox.query == "s"
+                if filtered { smoke.store.inbox.query = "" }
+                return filtered
+            }),
+        ]
+    }
+
+    private func key(_ key: NavInput.Key) -> Bool {
+        store.routeKey(NavInput(key), responder: store.mainWindow?.firstResponder)
+    }
+
+    private func menuItem(_ title: String) -> NSMenuItem? {
+        Self.find(title, in: NSApp.mainMenu)
+    }
+}
+

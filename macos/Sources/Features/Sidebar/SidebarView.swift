@@ -1,3 +1,4 @@
+import AppKit
 import LocalStudioKit
 import SwiftUI
 
@@ -23,6 +24,12 @@ struct SidebarView: View {
                 .frame(height: Theme.Metrics.titlebarHeight)
         }
         .onExitCommand { store.inbox.clearSelection() }
+        .onChange(of: store.shell.searchFocusRequest) {
+            searchFocused = true
+            DispatchQueue.main.async {
+                (NSApp.keyWindow?.firstResponder as? NSTextView)?.moveToEndOfDocument(nil)
+            }
+        }
     }
 
     private var searchRow: some View {
@@ -53,42 +60,49 @@ struct SidebarView: View {
         let sections = store.inbox.sections
         let order = store.inbox.visibleOrder
         let hints = store.shell.commandHeld ? Dictionary(order.prefix(9).enumerated().map { ($1, $0 + 1) }, uniquingKeysWith: { first, _ in first }) : [:]
-        return ScrollView {
-            VStack(spacing: 0) {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    if store.shell.route == .thread, store.focusedThread == nil {
-                        DraftRow(store: store, selected: store.inbox.selection.isEmpty)
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        if store.shell.route == .thread, store.focusedThread == nil {
+                            DraftRow(store: store, selected: store.inbox.selection.isEmpty)
+                        }
+                        ForEach(sections.pinned, id: \.id) { row in
+                            InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
+                                .pinnedDropTarget(store: store, before: row.id, target: $dropTarget)
+                        }
+                        if !sections.pinned.isEmpty {
+                            Color.clear
+                                .frame(height: 6)
+                                .pinnedDropTarget(store: store, before: nil, target: $dropTarget)
+                        }
+                        ForEach(sections.active, id: \.id) { row in
+                            InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
+                        }
+                        if sections.pinned.isEmpty, sections.active.isEmpty, sections.working.isEmpty {
+                            EmptyInbox(store: store)
+                        }
                     }
-                    ForEach(sections.pinned, id: \.id) { row in
-                        InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
-                            .pinnedDropTarget(store: store, before: row.id, target: $dropTarget)
-                    }
-                    if !sections.pinned.isEmpty {
-                        Color.clear
-                            .frame(height: 6)
-                            .pinnedDropTarget(store: store, before: nil, target: $dropTarget)
-                    }
-                    ForEach(sections.active, id: \.id) { row in
-                        InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
-                    }
-                    if sections.pinned.isEmpty, sections.active.isEmpty, sections.working.isEmpty {
-                        EmptyInbox(store: store)
+                    Spacer(minLength: 10)
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        shelf(.working, rows: sections.working, now: now, hints: hints, variant: .card)
+                        shelf(.snoozed, rows: sections.snoozed, now: now, hints: hints, variant: .slim)
+                        shelf(.settled, rows: sections.settled, now: now, hints: hints, variant: .slim)
                     }
                 }
-                Spacer(minLength: 10)
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    shelf(.working, rows: sections.working, now: now, hints: hints, variant: .card)
-                    shelf(.snoozed, rows: sections.snoozed, now: now, hints: hints, variant: .slim)
-                    shelf(.settled, rows: sections.settled, now: now, hints: hints, variant: .slim)
+                .padding(.horizontal, Theme.Metrics.sidebarInset)
+                .padding(.vertical, 4)
+                .frame(minHeight: viewport, alignment: .top)
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
+            .scrollIndicators(.never)
+            .scrollContentBackground(.hidden)
+            .onChange(of: store.shell.sidebarCursor) { _, cursor in
+                if let cursor, store.shell.region == .sidebar {
+                    proxy.scrollTo(cursor)
                 }
             }
-            .padding(.horizontal, Theme.Metrics.sidebarInset)
-            .padding(.vertical, 4)
-            .frame(minHeight: viewport, alignment: .top)
         }
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
-        .scrollIndicators(.never)
-        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
@@ -119,7 +133,7 @@ struct SidebarView: View {
         let results = store.inbox.searchEntries
         switch key {
         case .down:
-            guard !results.isEmpty else { return false }
+            guard !results.isEmpty else { return leaveSearch() }
             highlighted = min(highlighted + 1, results.count - 1)
         case .up:
             guard !results.isEmpty else { return false }
@@ -130,12 +144,19 @@ struct SidebarView: View {
             store.inbox.query = ""
             searchFocused = false
         case .escape:
-            guard !store.inbox.query.isEmpty else { return false }
+            guard !store.inbox.query.isEmpty else { return leaveSearch() }
             store.inbox.query = ""
         case .changed:
             highlighted = 0
             return false
         }
+        return true
+    }
+
+    private func leaveSearch() -> Bool {
+        guard store.inbox.query.isEmpty else { return false }
+        searchFocused = false
+        store.focus(.sidebar)
         return true
     }
 }
