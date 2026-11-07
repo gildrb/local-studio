@@ -166,6 +166,43 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             app.search.present(app);
             app.search.set_fixture("Shelf::", &project_hits());
         }
+        "38-worktree-setup-scripts" => {
+            conversation(app, false);
+            let project = project_id("local-studio");
+            let stage = |name: &str, state, output_tail: &str| local_studio_core::SetupStage {
+                name: name.to_string(),
+                state,
+                output_tail: output_tail.to_string(),
+            };
+            let script = |id: &str, name: &str, command: &str, setup: bool| local_studio_core::ProjectScript {
+                id: id.to_string(),
+                name: name.to_string(),
+                command: command.to_string(),
+                run_on_worktree_setup: setup,
+                ..local_studio_core::ProjectScript::default()
+            };
+            app.apply(vec![
+                Update::ProjectScripts {
+                    project: project.clone(),
+                    scripts: vec![
+                        script("install", "Install", "npm install", true),
+                        script("dev", "Dev server", "npm run dev", false),
+                        script("check", "Check", "cargo clippy --workspace -- -D warnings", false),
+                    ],
+                },
+                Update::WorktreeSetup {
+                    thread: FOCUSED.to_string(),
+                    stages: vec![
+                        stage("Create worktree", local_studio_core::SetupStageState::Done, ""),
+                        stage("Copy environment files", local_studio_core::SetupStageState::Done, ""),
+                        stage("Install", local_studio_core::SetupStageState::Running, "added 1204 packages in 18s"),
+                        stage("Dev server", local_studio_core::SetupStageState::Pending, ""),
+                    ],
+                    done: false,
+                    error: None,
+                },
+            ]);
+        }
         _ => {}
     }
 }

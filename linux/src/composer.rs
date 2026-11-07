@@ -37,6 +37,7 @@ pub struct Composer {
     app: Weak<App>,
     pub extras: Extras,
     pub tools: crate::tools::Tools,
+    setup: crate::setup::SetupCard,
 }
 
 impl Composer {
@@ -82,7 +83,11 @@ impl Composer {
         decline.add_css_class("flat");
         let approve = gtk::Button::with_label("Approve");
         approve.add_css_class("suggested-action");
+        let always = gtk::Button::with_label("Always Allow");
+        always.add_css_class("flat");
+        always.set_tooltip_text(Some("Approve and allow these effects for the rest of this session"));
         approval_buttons.append(&decline);
+        approval_buttons.append(&always);
         approval_buttons.append(&approve);
         approval.append(&approval_top);
         approval.append(&approval_command);
@@ -137,6 +142,7 @@ impl Composer {
         send.add_css_class("suggested-action");
         let extras = Extras::new(app.clone());
         let tools = crate::tools::Tools::new(&app);
+        let setup = crate::setup::SetupCard::new();
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         footer.append(&extras.attach);
         footer.append(&model);
@@ -158,6 +164,7 @@ impl Composer {
         card.append(&overlay);
         card.append(&footer);
         column.append(&working);
+        column.append(&setup.root);
         column.append(&queue);
         column.append(&card);
         let root = adw::Clamp::builder().maximum_size(820).tightening_threshold(640).child(&column).build();
@@ -233,7 +240,11 @@ impl Composer {
                 app.core.run(|studio| studio.abort(thread));
             }
         });
-        for (button, answer) in [(&approve, ApprovalAnswer::Approve), (&decline, ApprovalAnswer::Deny)] {
+        for (button, answer) in [
+            (&approve, ApprovalAnswer::Approve),
+            (&always, ApprovalAnswer::AlwaysAllowSession),
+            (&decline, ApprovalAnswer::Deny),
+        ] {
             let weak = app.clone();
             button.connect_clicked(move |_| {
                 let Some(app) = weak.upgrade() else { return };
@@ -341,6 +352,7 @@ impl Composer {
             app,
             extras,
             tools,
+            setup,
         }
     }
 
@@ -413,6 +425,7 @@ impl Composer {
     pub fn render(&self, state: &State) {
         self.shortcut.set(state.settings.send_shortcut);
         self.tools.render(state);
+        self.setup.render(state);
         let info = state.selected.as_ref().and(state.info.as_ref());
         let busy = info.is_some_and(|info| info.busy);
         self.stop.set_visible(busy);

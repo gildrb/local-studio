@@ -24,6 +24,7 @@ pub struct Pane {
     id: RefCell<Option<String>>,
     request: RefCell<Option<String>>,
     size: Cell<(i64, i64)>,
+    startup: RefCell<Option<String>>,
 }
 
 pub struct Drawer {
@@ -147,6 +148,15 @@ impl Drawer {
         let cols = u16::try_from(pane.terminal.column_count()).unwrap_or(80);
         let rows = u16::try_from(pane.terminal.row_count()).unwrap_or(24);
         app.core.run(|studio| studio.open_terminal(request, dir, cols, rows));
+    }
+
+    pub fn run(&self, app: &Rc<App>, name: &str, command: &str) {
+        self.add(app, Layout::SideBySide);
+        let pane = self.panes.borrow().last().cloned();
+        if let Some(pane) = pane {
+            pane.terminal.feed(format!("\x1b[2m▶ {name}\x1b[0m\r\n").as_bytes());
+            pane.startup.replace(Some(command.to_string()));
+        }
     }
 
     pub fn close_focused(&self, app: &Rc<App>) {
@@ -296,7 +306,13 @@ impl Drawer {
             crate::actions::popup_menu(&terminal, &model, x, y);
         });
         terminal.add_controller(menu);
-        Pane { terminal, id: RefCell::new(None), request: RefCell::new(None), size: Cell::new((0, 0)) }
+        Pane {
+            terminal,
+            id: RefCell::new(None),
+            request: RefCell::new(None),
+            size: Cell::new((0, 0)),
+            startup: RefCell::new(None),
+        }
     }
 
     fn pane_for(&self, terminal: &vte::Terminal) -> Option<Rc<Pane>> {
@@ -313,6 +329,10 @@ impl Drawer {
         pane.request.replace(None);
         pane.id.replace(Some(terminal.to_string()));
         pane.size.set((0, 0));
+        if let (Some(command), Some(app)) = (pane.startup.take(), self.app.upgrade()) {
+            let (id, data) = (terminal.to_string(), format!("{command}\n").into_bytes());
+            app.core.run(|studio| studio.write_terminal(id, data));
+        }
         true
     }
 

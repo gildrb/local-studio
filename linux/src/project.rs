@@ -75,10 +75,60 @@ pub fn present(app: &Rc<App>, project: &str) {
     identity.add(&kind);
     page.add(&identity);
     let threads = app.state.borrow().threads.iter().filter(|row| row.project.as_deref() == Some(project)).count();
+    let scoped = app.state.borrow().project_settings.get(project).cloned().unwrap_or_default();
+    let values: Vec<(&str, String)> = [
+        ("Provider", scoped.default_provider.clone()),
+        ("Model", scoped.default_model.clone()),
+        ("Thinking", scoped.default_thinking_level.clone()),
+        ("Permissions", scoped.default_access.map(|mode| format::access_label(mode).to_string())),
+        ("New threads start in", scoped.new_thread_workspace.map(|workspace| format!("{workspace:?}"))),
+        (
+            "New worktrees start from origin",
+            scoped.new_worktrees_start_from_origin.map(|value| if value { "Yes" } else { "No" }.to_string()),
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(label, value)| value.map(|value| (label, value)))
+    .collect();
     let overrides = adw::PreferencesGroup::builder()
         .title("Defaults for this project")
-        .description("This project uses the global defaults from Settings → General. Per-project overrides arrive with the core's scoped settings.")
+        .description(if values.is_empty() {
+            "This project uses the global defaults from Settings → General."
+        } else {
+            "These override the global defaults for threads in this project."
+        })
         .build();
+    for (label, value) in values {
+        overrides.add(&adw::ActionRow::builder().title(label).subtitle(format::escape(&value)).build());
+    }
+    let scripts = app.state.borrow().scripts.get(project).cloned().unwrap_or_default();
+    if !scripts.is_empty() {
+        let group = adw::PreferencesGroup::builder()
+            .title("Scripts")
+            .description("Runs in a new terminal in the drawer.")
+            .build();
+        for script in scripts {
+            let row = adw::ActionRow::builder()
+                .title(format::escape(&script.name))
+                .subtitle(format::escape(&script.command))
+                .build();
+            row.add_css_class("property");
+            if script.run_on_worktree_setup {
+                let tag = gtk::Label::new(Some("Worktree setup"));
+                tag.add_css_class("ls-pill");
+                tag.set_valign(gtk::Align::Center);
+                row.add_suffix(&tag);
+            }
+            let run =
+                gtk::Button::builder().icon_name("media-playback-start-symbolic").valign(gtk::Align::Center).build();
+            run.add_css_class("flat");
+            run.set_action_name(Some("win.run-script"));
+            run.set_action_target_value(Some(&script.id.to_variant()));
+            row.add_suffix(&run);
+            group.add(&row);
+        }
+        page.add(&group);
+    }
     let open_general = adw::ActionRow::builder().title("Open global defaults").activatable(true).build();
     open_general.add_suffix(&gtk::Image::from_icon_name("go-next-symbolic"));
     let weak = Rc::downgrade(app);

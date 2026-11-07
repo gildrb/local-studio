@@ -14,7 +14,7 @@ use crate::app::{App, Dirty};
 use crate::format;
 use crate::state::{Page, State};
 
-pub const SCENES: [&str; 37] = [
+pub const SCENES: [&str; 38] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -52,6 +52,7 @@ pub const SCENES: [&str; 37] = [
     "35-theme-editor",
     "36-theme-midnight",
     "37-scroll-pill-minimap",
+    "38-worktree-setup-scripts",
 ];
 
 pub const FOCUSED: &str = "t-sidebar";

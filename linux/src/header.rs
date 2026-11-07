@@ -19,9 +19,11 @@ pub struct Header {
     terminal: gtk::Button,
     git: adw::SplitButton,
     open: adw::SplitButton,
+    scripts: gtk::MenuButton,
 }
 
 impl Header {
+    #[allow(clippy::too_many_lines)]
     pub fn build(editors: &gtk::gio::Menu) -> Self {
         let bar = adw::HeaderBar::new();
         let toggle = gtk::ToggleButton::builder()
@@ -99,6 +101,12 @@ impl Header {
         bar.pack_end(&panel);
         bar.pack_end(&terminal);
         bar.pack_end(&git);
+        let scripts = gtk::MenuButton::builder()
+            .icon_name("media-playback-start-symbolic")
+            .tooltip_text("Run Project Script")
+            .visible(false)
+            .build();
+        bar.pack_end(&scripts);
         bar.pack_end(&open);
         bar.pack_end(&branch);
         Self {
@@ -117,6 +125,7 @@ impl Header {
             terminal,
             git,
             open,
+            scripts,
         }
     }
 
@@ -156,8 +165,20 @@ impl Header {
         };
         let project_name = state.project_name(project.as_deref());
         self.project.set_label(project_name.as_deref().unwrap_or_default());
-        self.project.set_visible(project_name.is_some());
         self.slash.set_visible(project_name.is_some());
+        let scripts =
+            project.as_ref().and_then(|project| state.scripts.get(project)).filter(|scripts| !scripts.is_empty());
+        self.scripts.set_visible(workspace && scripts.is_some());
+        if let Some(scripts) = scripts {
+            let menu = gtk::gio::Menu::new();
+            for script in scripts {
+                let item = gtk::gio::MenuItem::new(Some(&script.name), None);
+                item.set_action_and_target_value(Some("win.run-script"), Some(&script.id.to_variant()));
+                menu.append_item(&item);
+            }
+            self.scripts.set_menu_model(Some(&menu));
+        }
+        self.project.set_visible(project_name.is_some());
         let title = match &state.selected {
             Some(thread) => state
                 .info

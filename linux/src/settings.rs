@@ -106,6 +106,23 @@ impl SettingsDialog {
             }
         });
         group.set_header_suffix(Some(&refresh));
+        if let Some(daemon) = &state.daemon {
+            let mut parts = Vec::new();
+            parts.extend(daemon.version.as_ref().map(|version| format!("Version {version}")));
+            parts.extend(daemon.pid.map(|pid| format!("Supervisor PID {pid}")));
+            parts.push(daemon.socket.clone());
+            let row = adw::ActionRow::builder()
+                .title("Eukhe daemon")
+                .subtitle(format::escape(&parts.join(" · ")))
+                .subtitle_selectable(true)
+                .build();
+            let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            dot.add_css_class("ls-dot");
+            dot.add_css_class("serving");
+            dot.set_valign(gtk::Align::Center);
+            row.add_prefix(&dot);
+            group.add(&row);
+        }
         if state.providers.is_empty() {
             group.add(
                 &adw::ActionRow::builder()

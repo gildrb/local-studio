@@ -110,6 +110,7 @@ window, dialog { font-size: 13px; }
 .ls-minimap:hover { opacity: 1; }
 .ls-minimap-button { min-width: 18px; min-height: 18px; padding: 0; }
 .ls-small-toggle { font-size: 12px; font-weight: normal; min-height: 24px; padding: 0 8px; }
+.ls-setup { background: var(--card-bg-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 10px 12px; }
 ";
 
 const DARK: &str = r"

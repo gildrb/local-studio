@@ -496,6 +496,26 @@ impl App {
                 crate::bindings::apply(self);
                 dirty.settings = true;
             }
+            Update::ProjectScripts { project, scripts } => {
+                for script in scripts.iter().filter(|script| !script.id.contains('\'')) {
+                    let accel = script.keybinding.as_deref().map(crate::format::accelerator);
+                    let accels: Vec<&str> = accel.iter().map(String::as_str).collect();
+                    self.application.set_accels_for_action(&format!("win.run-script('{}')", script.id), &accels);
+                }
+                self.state.borrow_mut().scripts.insert(project, scripts);
+                dirty.header = true;
+            }
+            Update::ProjectSettings { project, settings, effective: _ } => {
+                self.state.borrow_mut().project_settings.insert(project, settings);
+            }
+            Update::WorktreeSetup { thread, stages, done, error } => {
+                self.state.borrow_mut().setup.insert(thread, crate::state::Setup { stages, done, error });
+                dirty.composer = true;
+            }
+            Update::Daemon { socket, version, pid } => {
+                self.state.borrow_mut().daemon = Some(crate::state::DaemonInfo { socket, version, pid });
+                dirty.settings = true;
+            }
             Update::RequestDone { request: _, message } => self.toast(&message),
             Update::RequestFailed { request, message } => {
                 self.local.request_failed();

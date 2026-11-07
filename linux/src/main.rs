@@ -22,6 +22,7 @@ mod pulls;
 mod scenes;
 mod search;
 mod settings;
+mod setup;
 mod sidebar;
 mod smoke;
 mod snapshot;

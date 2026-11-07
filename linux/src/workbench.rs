@@ -58,7 +58,18 @@ pub fn install(app: &Rc<App>) {
         });
         app.window.add_action(&action);
     }
-    let strings: [(&str, StringAction); 6] = [
+    let strings: [(&str, StringAction); 7] = [
+        ("run-script", |app, id| {
+            let script = {
+                let state = app.state.borrow();
+                let current = state.current_project().and_then(|project| state.scripts.get(&project));
+                current.into_iter().chain(state.scripts.values()).flatten().find(|script| script.id == id).cloned()
+            };
+            match script {
+                Some(script) => app.drawer.run(app, &script.name, &script.command),
+                None => app.toast("That script isn't defined for this project."),
+            }
+        }),
         ("project-settings", |app, project| crate::project::present(app, &project)),
         ("panel-open", |app, kind| app.open_surface(&kind)),
         ("panel-close", |app, kind| app.panel.close_tab(&kind)),

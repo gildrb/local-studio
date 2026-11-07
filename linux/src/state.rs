@@ -2,8 +2,23 @@ use std::collections::HashMap;
 
 use local_studio_core::{
     AccessMode, Approval, Connection, GitStatus, Keybinding, LocalSnapshot, ModelKey, ModelOption, Project,
-    ProviderStatus, QueuedMessage, Settings, ThreadInfo, ThreadRow, UsagePeriod, UsageReport,
+    ProjectScript, ProjectSettings, ProviderStatus, QueuedMessage, Settings, SetupStage, ThreadInfo, ThreadRow,
+    UsagePeriod, UsageReport,
 };
+
+#[derive(Clone, Default)]
+pub struct Setup {
+    pub stages: Vec<SetupStage>,
+    pub done: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Default)]
+pub struct DaemonInfo {
+    pub socket: String,
+    pub version: Option<String>,
+    pub pid: Option<u32>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Page {
@@ -39,6 +54,10 @@ pub struct State {
     pub hidden: Vec<ModelKey>,
     pub settings: Settings,
     pub keybindings: Vec<Keybinding>,
+    pub scripts: HashMap<String, Vec<ProjectScript>>,
+    pub project_settings: HashMap<String, ProjectSettings>,
+    pub setup: HashMap<String, Setup>,
+    pub daemon: Option<DaemonInfo>,
     pub providers: Vec<ProviderStatus>,
     pub archived: Vec<ThreadRow>,
     pub git: HashMap<String, GitStatus>,
