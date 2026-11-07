@@ -69,6 +69,7 @@ struct SidebarView: View {
                         }
                         ForEach(sections.pinned, id: \.id) { row in
                             InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
+                                .equatable()
                                 .pinnedDropTarget(store: store, before: row.id, target: $dropTarget)
                         }
                         if !sections.pinned.isEmpty {
@@ -79,6 +80,7 @@ struct SidebarView: View {
                         ForEach(keyed(sections.active), id: \.key) { item in
                             let row = item.row
                             InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
+                                .equatable()
                         }
                         if sections.pinned.isEmpty, sections.active.isEmpty, sections.working.isEmpty {
                             EmptyInbox(store: store)
@@ -116,6 +118,7 @@ struct SidebarView: View {
                 ForEach(keyed(visible), id: \.key) { item in
                     let row = item.row
                     InboxRowView(store: store, row: row, variant: variant, now: now, jump: hints[row.id])
+                        .equatable()
                 }
                 if shelf == .settled, rows.count > visible.count {
                     Button("Show \(min(InboxStore.settledPage, rows.count - visible.count)) more") {

@@ -111,7 +111,7 @@ struct RowSnoozeMenu: View {
     }
 }
 
-struct InboxRowView: View {
+struct InboxRowView: View, Equatable {
     enum Variant {
         case card
         case slim
@@ -122,7 +122,35 @@ struct InboxRowView: View {
     let variant: Variant
     let now: Date
     let jump: Int?
+    private let highlighted: Bool
+    private let cursor: Bool
+    private let renaming: Bool
+    private let pending: Bool
+    private let project: Project?
+    private let fanOut: FanOutPosition?
     @State private var hovering = false
+
+    init(store: StudioStore, row: ThreadRow, variant: Variant, now: Date, jump: Int?) {
+        self.store = store
+        self.row = row
+        self.variant = variant
+        self.now = now
+        self.jump = jump
+        let inbox = store.inbox
+        highlighted = inbox.selection.contains(row.id)
+            || (inbox.selection.isEmpty && store.shell.route == .thread && store.conversation.selectedID == row.id)
+        cursor = store.shell.region == .sidebar && store.shell.sidebarCursor == row.id
+        renaming = inbox.renaming == row.id
+        pending = inbox.isPending(row.id)
+        project = inbox.project(row.project)
+        fanOut = inbox.fanOut[row.id]
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.row == rhs.row && lhs.variant == rhs.variant && lhs.now == rhs.now && lhs.jump == rhs.jump
+            && lhs.highlighted == rhs.highlighted && lhs.cursor == rhs.cursor && lhs.renaming == rhs.renaming
+            && lhs.pending == rhs.pending && lhs.project == rhs.project && lhs.fanOut == rhs.fanOut
+    }
 
     var body: some View {
         Group {
@@ -133,11 +161,11 @@ struct InboxRowView: View {
         }
         .contentShape(Rectangle())
         .rowSurface(selected: highlighted, hovering: hovering)
-        .keyboardFocusRing(store.shell.region == .sidebar && store.shell.sidebarCursor == row.id)
+        .keyboardFocusRing(cursor)
         .opacity(row.status == .working && !highlighted ? 0.85 : 1)
         .onHover { hovering = $0 }
         .onTapGesture { click() }
-        .contextMenu { MenuNodes(nodes: menu) }
+        .contextMenu { ThreadRowMenu(store: store, row: row, pending: pending) }
         .draggable(row.id) {
             Text(row.title.isEmpty ? "Untitled thread" : row.title)
                 .font(.system(size: 13, weight: .medium))
@@ -145,7 +173,7 @@ struct InboxRowView: View {
                 .frame(height: 28)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .accessibilityElement(children: store.inbox.renaming == row.id ? .contain : .ignore)
+        .accessibilityElement(children: renaming ? .contain : .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(highlighted ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { store.open(row.id) }
@@ -155,15 +183,19 @@ struct InboxRowView: View {
         .help(tooltip)
     }
 
+    private var projectName: String {
+        project?.name ?? "No project"
+    }
+
     private var accessibilityText: String {
-        var parts = [row.title.isEmpty ? "Untitled thread" : row.title, store.inbox.projectName(row.project)]
+        var parts = [row.title.isEmpty ? "Untitled thread" : row.title, projectName]
         if let glyph = StatusBadge.glyph(row.status) { parts.append(glyph.title) }
         if row.pinned { parts.append("Pinned") }
         if row.unread { parts.append("Unread") }
         if row.shelf == .snoozed, let until = row.snoozedUntil { parts.append("Wakes in \(RelativeAge.countdown(millis: until, now: now))") }
         if let branch = row.branch { parts.append("Branch \(branch)") }
         if let pull = row.pullRequest { parts.append("Pull request \(pull.number), \(pull.state.lowercased())") }
-        if let position = store.inbox.fanOut[row.id] { parts.append("\(position.index) of \(position.count) models") }
+        if let fanOut { parts.append("\(fanOut.index) of \(fanOut.count) models") }
         return parts.joined(separator: ", ")
     }
 
@@ -171,7 +203,7 @@ struct InboxRowView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 ProjectTile(project: project, size: 14)
-                Text(store.inbox.projectName(row.project))
+                Text(projectName)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(1)
@@ -273,7 +305,7 @@ struct InboxRowView: View {
 
     @ViewBuilder
     private func titleText(weight: Font.Weight) -> some View {
-        if store.inbox.renaming == row.id {
+        if renaming {
             InlineRenameField(title: row.title) { store.inbox.rename(row.id, to: $0) } cancel: {
                 store.inbox.renaming = nil
             }
@@ -296,7 +328,7 @@ struct InboxRowView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            if let position = store.inbox.fanOut[row.id] {
+            if let position = fanOut {
                 HStack(spacing: 2) {
                     Image(systemName: "square.stack")
                         .font(.system(size: 9.5))
@@ -327,36 +359,15 @@ struct InboxRowView: View {
     }
 
     private var hasMeta: Bool {
-        row.branch != nil || row.additions > 0 || row.deletions > 0 || row.provider != nil || row.pullRequest != nil || store.inbox.fanOut[row.id] != nil
-    }
-
-    private var project: Project? {
-        store.inbox.project(row.project)
-    }
-
-    private var highlighted: Bool {
-        store.inbox.selection.contains(row.id) || (store.inbox.selection.isEmpty && store.shell.route == .thread && store.conversation.selectedID == row.id)
+        row.branch != nil || row.additions > 0 || row.deletions > 0 || row.provider != nil || row.pullRequest != nil || fanOut != nil
     }
 
     private var tooltip: String {
-        var lines = [row.title, store.inbox.projectName(row.project)]
+        var lines = [row.title, projectName]
         if let branch = row.branch { lines.append(branch) }
         if let model = row.model { lines.append([row.provider, model].compactMap(\.self).joined(separator: " · ")) }
         if let note = row.note { lines.append(note) }
         return lines.joined(separator: "\n")
-    }
-
-    private var pending: Bool {
-        store.inbox.isPending(row.id)
-    }
-
-    private var menu: [MenuNode] {
-        guard pending else { return ThreadActions.menu(store, for: row.id) }
-        guard row.status == .failed else { return [] }
-        return [
-            .action("Retry", symbol: "arrow.clockwise") { store.conversation.retryPending(row.id) },
-            .action("Edit Message", symbol: "pencil") { store.conversation.editPending(row.id) },
-        ]
     }
 
     private func click() {
@@ -375,6 +386,25 @@ struct InboxRowView: View {
             store.inbox.selectionAnchor = row.id
             store.open(row.id)
         }
+    }
+}
+
+private struct ThreadRowMenu: View {
+    let store: StudioStore
+    let row: ThreadRow
+    let pending: Bool
+
+    var body: some View {
+        MenuNodes(nodes: nodes)
+    }
+
+    private var nodes: [MenuNode] {
+        guard pending else { return ThreadActions.menu(store, for: row.id) }
+        guard row.status == .failed else { return [] }
+        return [
+            .action("Retry", symbol: "arrow.clockwise") { store.conversation.retryPending(row.id) },
+            .action("Edit Message", symbol: "pencil") { store.conversation.editPending(row.id) },
+        ]
     }
 }
 
