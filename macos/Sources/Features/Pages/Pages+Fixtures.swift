@@ -21,9 +21,36 @@ enum PagesFixtures {
             autoPull: false, mergeMethod: .squash, gitFetchIntervalSeconds: 30, writingStyle: .conventionalCommits,
             writingInstructions: "", followPrTemplates: true, sourceControlProvider: nil, sourceControlModel: nil,
             worktreeCleanupAfterDays: 7, worktreeCleanupOnMerge: true, worktreeCleanupOnDelete: true,
-            worktreeCleanupUnchanged: false, localControllerUrl: "", fleetKey: "fk_live_8c1d", startController: true
+            worktreeCleanupUnchanged: false, localControllerUrl: "", fleetKey: "fk_live_8c1d", startController: true,
+            onboardingCompleted: true, customThemes: "", glassOpacity: 80, snapshotEnabled: true, snapshotIncludeText: true,
+            snapshotPlaySound: true, snapshotSound: .softPop, snapshotFlash: true, snapshotAnimations: true
         )
     }
+
+    static let vsCodeTheme = """
+    {
+      "name": "dracula-soft",
+      "type": "dark",
+      "colors": {
+        "editor.background": "#282a36",
+        "editor.foreground": "#f8f8f2",
+        "sideBar.background": "#21222c",
+        "sideBar.foreground": "#f8f8f2",
+        "focusBorder": "#bd93f9",
+        "button.background": "#bd93f9",
+        "button.foreground": "#282a36",
+        "list.hoverBackground": "#44475a75",
+        "list.inactiveSelectionBackground": "#44475a",
+        "panel.border": "#bd93f950",
+        "input.border": "#191a21",
+        "descriptionForeground": "#a0a4c0",
+        "editorError.foreground": "#ff5555",
+        "editorWarning.foreground": "#ffb86c",
+        "terminal.background": "#282a36"
+      },
+      "tokenColors": []
+    }
+    """
 
     static let keybindings: [Keybinding] = [
         Keybinding(command: "sidebar.toggle", title: "Sidebar: Toggle", shortcut: "cmd+b", defaultShortcut: "cmd+b", when: nil),
@@ -43,6 +70,7 @@ enum PagesFixtures {
         Keybinding(command: "usage.tokens", title: "Usage: Tokens", shortcut: "t", defaultShortcut: "t", when: "usagePageOpen"),
         Keybinding(command: "usage.period.day", title: "Usage: Period: Past 24h", shortcut: "cmd+shift+1", defaultShortcut: "cmd+shift+1", when: "usagePageOpen"),
         Keybinding(command: "usage.period.week", title: "Usage: Period: 7 days", shortcut: "cmd+shift+2", defaultShortcut: "cmd+shift+2", when: "usagePageOpen"),
+        Keybinding(command: "snapshot.capture", title: "SnapShot: Capture", shortcut: "cmd+option+shift+s", defaultShortcut: "cmd+option+shift+s", when: nil),
     ]
 
     static let models: [ModelOption] = [

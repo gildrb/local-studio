@@ -105,10 +105,69 @@ extension SnapshotCatalog {
                 updates: PagesFixtures.base + [.archivedThreads(request: "fixture", threads: [])],
                 view: { store in AnyView(ArchivePage(store: store)) }
             ),
-        ]
+        ] + themeEntries
     }
 
     private static let settingsSize = CGSize(width: 860, height: 680)
+
+    @MainActor private static func themed(_ id: String, custom: [ThemeDefinition] = []) -> [Update] {
+        var settings = PagesFixtures.settings
+        settings.theme = id
+        settings.colorScheme = .system
+        settings.customThemes = ThemeLibrary.encodeCustom(custom)
+        return PagesFixtures.base + [.settings(settings: settings)]
+    }
+
+    @MainActor private static var themeEntries: [SnapshotEntry] {
+        let imported = (try? ThemeImport.load(Data(PagesFixtures.vsCodeTheme.utf8), taken: [])).map { [$0] } ?? []
+        return [
+            SnapshotEntry(
+                name: "pages-theme-grove-settings",
+                size: settingsSize,
+                updates: themed("grove"),
+                view: { store in AnyView(SettingsView(store: store, pane: .appearance)) }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-ocean-window",
+                size: CGSize(width: 1180, height: 720),
+                updates: themed("ocean") + [.archivedThreads(request: "fixture", threads: PagesFixtures.archived)],
+                view: { store in
+                    store.shell.route = .archive
+                    return AnyView(RootView(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-editor",
+                size: CGSize(width: 360, height: 760),
+                updates: themed("t3-chat"),
+                view: { store in
+                    let model = ThemeEditorModel(source: ThemeStore.shared.active)
+                    return AnyView(ThemeEditorView(pages: store.pages, model: model) {}.themeRoot())
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-vscode-import",
+                size: CGSize(width: 1180, height: 720),
+                updates: themed(imported.first?.id ?? "", custom: imported) + [.local(request: "fixture", snapshot: PagesFixtures.localSnapshot)],
+                view: { store in
+                    store.shell.route = .local
+                    return AnyView(RootView(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-picker",
+                size: CGSize(width: 520, height: 420),
+                updates: themed("iris", custom: imported),
+                view: { store in AnyView(ThemePickerView(pages: store.pages)) }
+            ),
+            SnapshotEntry(
+                name: "pages-theme-default-reset",
+                size: CGSize(width: 200, height: 60),
+                updates: themed("local-studio"),
+                view: { _ in AnyView(Text("Default theme").padding()) }
+            ),
+        ]
+    }
 
     @MainActor private static var pullEntries: [SnapshotEntry] {
         let tabs: [(String, PullTab)] = [("summary", .summary), ("code", .code), ("timeline", .timeline), ("checks", .checks)]
