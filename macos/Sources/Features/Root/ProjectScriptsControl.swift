@@ -41,7 +41,7 @@ struct ProjectScriptsControl: View {
                     }
                     Divider()
                     Button("Add Action…") { store.openProjectSettings(project) }
-                    Button("Import from t3.json") { importScripts() }
+                    Button("Import from local-studio.json") { importScripts() }
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: symbol(preferred))
@@ -57,7 +57,7 @@ struct ProjectScriptsControl: View {
             } else {
                 Menu {
                     Button("Add Action…") { store.openProjectSettings(project) }
-                    Button("Import from t3.json") { importScripts() }
+                    Button("Import from local-studio.json") { importScripts() }
                 } label: {
                     Image(systemName: "play")
                         .accessibilityHidden(true)

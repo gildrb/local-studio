@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Local Studio</string>
 	<key>CFBundleIdentifier</key>
-	<string>org.local.studio.t3.macos</string>
+	<string>org.local.studio.macos</string>
 	<key>CFBundleExecutable</key>
 	<string>LocalStudio</string>
 	<key>CFBundleIconFile</key>

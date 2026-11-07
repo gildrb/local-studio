@@ -147,13 +147,13 @@ struct ProjectScriptsSection: View {
             }
             HStack {
                 Button("Add Action…") { editing = ScriptDraft(nil) }
-                Button(importing ? "Importing…" : "Import from t3.json") { importScripts() }
+                Button(importing ? "Importing…" : "Import from local-studio.json") { importScripts() }
                     .disabled(importing)
             }
         } header: {
             Text("Actions")
         } footer: {
-            Text("Right-click an action to reorder or delete it. Imports read t3.json or local-studio.json in the project root.")
+            Text("Right-click an action to reorder or delete it. Imports read local-studio.json in the project root.")
                 .foregroundStyle(Theme.secondaryText)
         }
         .sheet(item: $editing) { draft in
