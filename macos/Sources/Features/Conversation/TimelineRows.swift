@@ -117,16 +117,34 @@ private struct UserMessageEditButton: View {
     }
 }
 
+extension EnvironmentValues {
+    @Entry var responseStreaming: ResponseStreaming = .paragraph
+    @Entry var timeFormat: TimeFormat = .locale
+}
+
 private struct TimestampText: View {
     let millis: Int64
+    @Environment(\.timeFormat) private var timeFormat
 
     var body: some View {
         let date = Date(timeIntervalSince1970: TimeInterval(millis) / 1_000)
-        Text(date, format: .dateTime.hour().minute())
+        Text(Self.format(date, timeFormat))
             .font(.system(size: 11.5))
             .monospacedDigit()
             .foregroundStyle(Theme.secondaryText)
             .help(date.formatted(date: .complete, time: .standard))
+    }
+
+    static func format(_ date: Date, _ format: TimeFormat) -> String {
+        switch format {
+        case .locale:
+            return date.formatted(.dateTime.hour().minute())
+        case .twelveHour, .twentyFourHour:
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = format == .twelveHour ? "h:mm a" : "HH:mm"
+            return formatter.string(from: date)
+        }
     }
 }
 
@@ -139,6 +157,7 @@ private struct AssistantMessage: View {
     let hidesThinking: Bool
     let openDiff: (String) -> Void
     @State private var hovering = false
+    @Environment(\.responseStreaming) private var responseStreaming
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -149,7 +168,9 @@ private struct AssistantMessage: View {
                         ThinkingBlock(text: text, live: streaming && index == blocks.count - 1)
                     }
                 case .text(let text):
-                    MarkdownView(text: text)
+                    if let shown = StreamingText.visible(text, streaming: streaming && index == blocks.count - 1, mode: responseStreaming) {
+                        MarkdownView(text: shown)
+                    }
                 }
             }
             if !streaming, error == nil, answer.isEmpty, !blocks.contains(where: \.isThinking) {
@@ -225,6 +246,22 @@ extension View {
         @ViewBuilder actions: @escaping () -> Actions
     ) -> some View {
         modifier(HoverActions(alignment: alignment, hovering: hovering, actions: actions))
+    }
+}
+
+enum StreamingText {
+    static func visible(_ text: String, streaming: Bool, mode: ResponseStreaming) -> String? {
+        guard streaming else { return text }
+        switch mode {
+        case .token:
+            return text
+        case .turn:
+            return nil
+        case .paragraph:
+            guard let boundary = text.range(of: "\n\n", options: .backwards) else { return nil }
+            let settled = String(text[..<boundary.lowerBound])
+            return settled.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : settled
+        }
     }
 }
 
