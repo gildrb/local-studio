@@ -12,7 +12,7 @@ The controller is a small Bun service (`controller/`). It watches the inference 
 
 ## Configuration
 
-`~/.local-studio-controller/config.json` is written on first start with mode 0600:
+`~/.local-studio-controller/config.json` is written on first start with mode 0600. Older installs that keep their data in `~/.local-studio-t3` keep working: when only that directory has a `config.json`, the controller reads and writes it in place.
 
 | Field                   | Meaning                                                                          |
 | ----------------------- | -------------------------------------------------------------------------------- |
@@ -45,7 +45,7 @@ To link machines by hand:
 `GET /api/tailnet` lists online Linux and macOS devices from `tailscale status`, with or without a controller. `POST /api/tailnet/deploy` installs one, from your machine's controller:
 
 1. `ssh <tailnet-ip> sh -s` with `BatchMode`, so key-based access is required. A new host key is accepted.
-2. On the remote machine, it refuses if `~/.local-studio-controller/config.json` exists or anything answers on port 18091. An existing controller is never replaced.
+2. On the remote machine, it refuses if `~/.local-studio-controller/config.json` or `~/.local-studio-t3/config.json` exists or anything answers on port 18091. An existing controller is never replaced.
 3. It downloads the matching binary from `LOCAL_STUDIO_CONTROLLER_RELEASE`.
 4. It writes a config with your fleet key and the device's tailnet URL.
 5. It installs and starts the user service.

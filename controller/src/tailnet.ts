@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { LocalTailnet } from "./contracts.ts";
-import { type Config, decodeJson, exec, fail, fetchJson, lastLine } from "./core.ts";
+import { type Config, decodeJson, exec, fail, fetchJson, lastLine, LEGACY_DIR } from "./core.ts";
 import { normUrl } from "./graph.ts";
 
 const Peer = Schema.Struct({ HostName: Schema.String, OS: Schema.String, Online: Schema.Boolean, TailscaleIPs: Schema.Array(Schema.String) });
@@ -38,8 +38,8 @@ const RELEASE = process.env.LOCAL_STUDIO_CONTROLLER_RELEASE ?? "https://github.c
 const quote = (v: string) => `'${v.replaceAll("'", `'\\''`)}'`;
 const SCRIPT = `set -e
 case "$(uname -s)-$(uname -m)" in Linux-x86_64) T=linux-x64;; Linux-aarch64|Linux-arm64) T=linux-arm64;; Darwin-arm64) T=darwin-arm64;; Darwin-x86_64) T=darwin-x64;; *) echo "unsupported $(uname -sm)" >&2; exit 2;; esac
-D="$HOME/.local-studio-controller"; B="$HOME/.local/bin/local-studio-controller"
-if [ -e "$D/config.json" ] || curl -s -m 2 -o /dev/null "http://$HOST:18091/api/health"; then echo "a controller is already set up on this machine; connect it instead" >&2; exit 3; fi
+D="$HOME/.local-studio-controller"; L="$HOME/${LEGACY_DIR}"; B="$HOME/.local/bin/local-studio-controller"
+if [ -e "$D/config.json" ] || [ -e "$L/config.json" ] || curl -s -m 2 -o /dev/null "http://$HOST:18091/api/health"; then echo "a controller is already set up on this machine; connect it instead" >&2; exit 3; fi
 mkdir -p "$D" "$HOME/.local/bin" && chmod 700 "$D"
 curl -fsSL "$RELEASE/local-studio-controller-$T" -o "$B.tmp" && chmod 755 "$B.tmp" && mv "$B.tmp" "$B"
 umask 077 && printf '%s\\n' "$CFG" > "$D/config.json"
