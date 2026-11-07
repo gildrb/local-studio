@@ -65,14 +65,14 @@ struct OpenInEditorButton: View {
                     Label {
                         Text("Open in \(app.name)")
                     } icon: {
-                        Image(nsImage: app.icon)
+                        Image(nsImage: app.icon).accessibilityHidden(true)
                     }
                 }
             }
         } label: {
             HStack(spacing: 5) {
                 if let favorite {
-                    Image(nsImage: favorite.icon)
+                    Image(nsImage: favorite.icon).accessibilityHidden(true)
                 }
                 Text("Open")
             }
@@ -86,6 +86,7 @@ struct OpenInEditorButton: View {
         .fixedSize()
         .disabled(path == nil)
         .help(favorite.map { "Open in \($0.name)" } ?? "Open in editor")
+        .accessibilityLabel(favorite.map { "Open in \($0.name)" } ?? "Open in editor")
     }
 
     private func open(with app: EditorApp) {

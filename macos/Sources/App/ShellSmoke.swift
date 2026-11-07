@@ -20,6 +20,9 @@ final class ShellSmoke {
     private var project = ""
     private var thread = ""
     private let title = "Shell smoke renamed"
+    private var second = ""
+    private var expectedPinned: [String] = []
+    private var revision = 0
 
     init(store: StudioStore) {
         self.store = store
@@ -31,7 +34,7 @@ final class ShellSmoke {
         poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.advance() }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
             guard let self, index < steps.count else { return }
             let menu = menuShortcut("Show Terminal") ?? "missing"
             Self.dump(NSApp.mainMenu).forEach { print($0) }
@@ -79,14 +82,45 @@ final class ShellSmoke {
             Step(name: "wake", act: { $0.store.inbox.snooze([$0.thread], until: nil) }, done: { $0.row?.shelf == .active }),
             Step(name: "mark unread", act: { $0.store.inbox.markUnread([$0.thread], true) }, done: { $0.row?.unread == true }),
             Step(name: "rename", act: { $0.store.inbox.rename($0.thread, to: $0.title) }, done: { $0.row?.title == $0.title }),
+            Step(name: "message search", act: { smoke in
+                smoke.store.inbox.query = "smoke-ok"
+                smoke.store.inbox.searchMessages()
+            }, done: { smoke in
+                smoke.store.inbox.searchEntries.contains { $0.id == smoke.thread && !($0.snippet ?? "").isEmpty }
+            }),
+            Step(name: "clear search", act: { $0.store.inbox.query = "" }, done: { $0.store.inbox.searchEntries.isEmpty }),
+            Step(name: "auto-settle off", act: { $0.store.inbox.setAutoSettle($0.thread, false) }, done: { $0.row?.autoSettle == false }),
+            Step(name: "auto-settle on", act: { $0.store.inbox.setAutoSettle($0.thread, true) }, done: { $0.row?.autoSettle == true }),
+            Step(name: "second thread", act: { smoke in
+                smoke.store.newThread(in: smoke.project)
+                smoke.store.conversation.send("second smoke thread", project: smoke.project, steer: false)
+            }, done: { smoke in
+                guard let id = smoke.store.focusedThread, id != smoke.thread, smoke.store.inbox.thread(id) != nil else { return false }
+                smoke.second = id
+                return true
+            }),
+            Step(name: "second turn settles", act: { _ in }, done: { $0.store.inbox.thread($0.second)?.status != .working }),
+            Step(name: "pin both", act: { $0.store.inbox.setPinned([$0.thread, $0.second], true) }, done: { smoke in
+                smoke.store.inbox.sections.pinned.count == 2
+            }),
+            Step(name: "reorder pinned", act: { smoke in
+                let pinned = smoke.store.inbox.sections.pinned.map(\.id)
+                guard let first = pinned.first, let last = pinned.last else { return }
+                smoke.expectedPinned = [last, first]
+                smoke.revision = smoke.store.inbox.threadsRevision
+                smoke.store.inbox.movePinned(last, before: first)
+            }, done: { smoke in
+                smoke.store.inbox.threadsRevision > smoke.revision && smoke.store.inbox.sections.pinned.map(\.id) == smoke.expectedPinned
+            }),
+            Step(name: "unpin both", act: { $0.store.inbox.setPinned([$0.thread, $0.second], false) }, done: { $0.store.inbox.sections.pinned.isEmpty }),
             Step(name: "archive", act: { $0.store.inbox.setArchived([$0.thread], true) }, done: { $0.store.inbox.receivedThreads && $0.row == nil }),
             Step(name: "unarchive", act: { $0.store.inbox.setArchived([$0.thread], false) }, done: { $0.row != nil && $0.row?.archived == false }),
             Step(name: "delete", act: { smoke in
-                smoke.store.requestDelete([smoke.thread])
+                smoke.store.requestDelete([smoke.thread, smoke.second])
                 if let confirmation = smoke.store.shell.confirmation {
                     smoke.store.confirm(confirmation)
                 }
-            }, done: { $0.row == nil }),
+            }, done: { $0.row == nil && $0.store.inbox.thread($0.second) == nil }),
             Step(name: "menu shortcut from core", act: { _ in }, done: { $0.menuShortcut("Show Terminal") == "⌘j" }),
             Step(name: "override shortcut", act: { smoke in
                 smoke.store.core.run { $0.setKeybinding(command: "terminal.toggle", shortcut: "cmd+shift+y") }

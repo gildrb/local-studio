@@ -221,7 +221,8 @@ enum PanelFixtures {
                 defaultBranch: "main",
                 pullRequest: branchPull,
                 isRepo: true,
-                changedFiles: 4
+                changedFiles: 4,
+                hasRemote: true
             )),
         ]
     }

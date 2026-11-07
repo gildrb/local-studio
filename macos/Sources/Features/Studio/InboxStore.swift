@@ -42,6 +42,15 @@ struct InboxUndo: Equatable {
     }
 }
 
+struct InboxSearchEntry: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let project: String?
+    let branch: String?
+    let snippet: String?
+    let updatedAt: Int64?
+}
+
 @MainActor
 @Observable
 final class InboxStore {
@@ -57,8 +66,17 @@ final class InboxStore {
     private(set) var undo: InboxUndo?
     private(set) var receivedThreads = false
 
+    private(set) var searchEntries: [InboxSearchEntry] = []
+    private(set) var searchingMessages = false
+
     var query = "" {
-        didSet { if query != oldValue { rebuild() } }
+        didSet {
+            guard query != oldValue else { return }
+            searchRequest = nil
+            searchedQuery = nil
+            searchingMessages = !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            rebuild()
+        }
     }
     var projectFilter: String? {
         didSet { if projectFilter != oldValue { rebuild() } }
@@ -80,6 +98,9 @@ final class InboxStore {
     @ObservationIgnored private let requests: RequestCenter
     @ObservationIgnored private var projectChosen = false
     @ObservationIgnored private var index: [String: ThreadRow] = [:]
+    @ObservationIgnored private(set) var searchRequest: String?
+    @ObservationIgnored private var searchedQuery: String?
+    @ObservationIgnored private(set) var threadsRevision = 0
 
     init(core: CoreHandle, requests: RequestCenter) {
         self.core = core
@@ -98,10 +119,65 @@ final class InboxStore {
 
     func setThreadSearch(request: String, hits: [ThreadSearchHit]) {
         threadSearch = (request, hits)
+        guard request == searchRequest else { return }
+        searchingMessages = false
+        rebuildSearch()
+        rebuildOrder()
+    }
+
+    func searchMessages() {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else {
+            searchRequest = nil
+            searchingMessages = false
+            return
+        }
+        guard needle != searchedQuery || searchRequest == nil else { return }
+        let request = requests.issue { [weak self] outcome in
+            if case .failed = outcome { self?.searchingMessages = false }
+        }
+        searchRequest = request
+        searchedQuery = needle
+        searchingMessages = true
+        core.run { $0.searchThreads(request: request, query: needle, limit: 40) }
+    }
+
+    func movePinned(_ id: String, before target: String?) {
+        guard id != target else { return }
+        var order = threads.filter { $0.shelf == .pinned }.map(\.id)
+        let wasPinned = order.contains(id)
+        order.removeAll { $0 == id }
+        order.insert(id, at: target.flatMap { order.firstIndex(of: $0) } ?? order.endIndex)
+        var local = threads.filter { $0.id != id }
+        if var moved = index[id] {
+            moved.pinned = true
+            moved.shelf = .pinned
+            local.append(moved)
+        }
+        let rank = Dictionary(order.enumerated().map { ($1, $0) }, uniquingKeysWith: { first, _ in first })
+        let pinned = local.filter { rank[$0.id] != nil }.sorted { (rank[$0.id] ?? 0) < (rank[$1.id] ?? 0) }
+        apply(pinned + local.filter { rank[$0.id] == nil })
+        core.run { studio in
+            if !wasPinned { studio.setPinned(thread: id, pinned: true) }
+            studio.reorderPinned(threads: order)
+        }
+    }
+
+    func setAutoSettle(_ id: String, _ enabled: Bool) {
+        core.run { $0.setAutoSettle(thread: id, enabled: enabled) }
+    }
+
+    func regenerateTitles(_ ids: [String]) {
+        core.run { studio in ids.forEach { studio.regenerateTitle(thread: $0) } }
     }
 
     func setThreads(_ threads: [ThreadRow]) {
         receivedThreads = true
+        threadsRevision += 1
+        apply(threads)
+    }
+
+    private func apply(_ threads: [ThreadRow]) {
         self.threads = threads
         index = Dictionary(threads.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         selection.formIntersection(index.keys)
@@ -293,7 +369,24 @@ final class InboxStore {
                     || projectName(row.project).localizedCaseInsensitiveContains(needle)
                     || (row.branch?.localizedCaseInsensitiveContains(needle) ?? false))
         }
+        rebuildSearch()
         rebuildOrder()
+    }
+
+    private func rebuildSearch() {
+        let hits = threadSearch.flatMap { $0.request == searchRequest ? $0.hits : nil } ?? []
+        let snippets = Dictionary(hits.map { ($0.thread, $0.snippet) }, uniquingKeysWith: { first, _ in first })
+        var entries = searchResults.map { row in
+            InboxSearchEntry(id: row.id, title: row.title, project: row.project, branch: row.branch, snippet: snippets[row.id], updatedAt: row.updatedAt)
+        }
+        let titled = Set(entries.map(\.id))
+        for hit in hits where !titled.contains(hit.thread) && (projectFilter.map { hit.project == $0 } ?? true) {
+            let row = index[hit.thread]
+            entries.append(InboxSearchEntry(id: hit.thread, title: hit.title, project: hit.project, branch: row?.branch, snippet: hit.snippet, updatedAt: row?.updatedAt))
+        }
+        if entries != searchEntries {
+            searchEntries = entries
+        }
     }
 
     private func rebuildOrder() {
@@ -302,7 +395,7 @@ final class InboxStore {
         if !collapsed.contains(.snoozed) { order += sections.snoozed.map(\.id) }
         if !collapsed.contains(.settled) { order += sections.settled.prefix(settledLimit).map(\.id) }
         if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            order = searchResults.map(\.id)
+            order = searchEntries.map(\.id)
         }
         if order != visibleOrder {
             visibleOrder = order
