@@ -198,6 +198,7 @@ struct ToastView: View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: symbol)
                 .foregroundStyle(tint)
+                .accessibilityHidden(true)
             Text(notice.text)
                 .font(.system(size: 13))
                 .textSelection(.enabled)

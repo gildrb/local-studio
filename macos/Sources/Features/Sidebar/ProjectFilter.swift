@@ -114,6 +114,7 @@ private struct ProjectFilterRow: View {
                     Image(systemName: "square.grid.2x2")
                         .font(.system(size: 12, weight: .light))
                         .frame(width: 16)
+                        .accessibilityHidden(true)
                     Text("All projects")
                         .font(.system(size: 13))
                 }
@@ -122,6 +123,7 @@ private struct ProjectFilterRow: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.primary)
+                        .accessibilityLabel("Selected")
                 }
             }
             .padding(.horizontal, 8)

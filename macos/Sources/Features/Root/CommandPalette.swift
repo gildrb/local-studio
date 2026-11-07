@@ -49,6 +49,7 @@ struct CommandPalette: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 14, weight: .light))
                         .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
                 }
                 TextField(placeholder, text: $query)
                     .textFieldStyle(.plain)
@@ -128,6 +129,9 @@ struct CommandPalette: View {
                             .id(item.id)
                             .onTapGesture { item.action() }
                             .onHover { if $0 { highlighted = offset } }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(offset == highlighted ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityAction { item.action() }
                     }
                 }
                 .padding(6)
@@ -255,6 +259,10 @@ struct CommandPalette: View {
                     store.shell.palette = nil
                     store.shell.headerRenaming = true
                 },
+                PaletteItem(id: "regenerate", group: group, title: "Regenerate Thread Title", icon: .symbol("sparkles")) {
+                    store.shell.palette = nil
+                    store.inbox.regenerateTitles([row.id])
+                },
                 PaletteItem(id: "copy-ref", group: group, title: "Copy Thread Reference", icon: .symbol("doc.on.doc"), shortcut: store.shortcutText("thread.copyReference")) {
                     store.shell.palette = nil
                     store.copyReference(row.id)
@@ -372,6 +380,7 @@ private struct PaletteRow: View {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.primary)
+                    .accessibilityLabel("Selected")
             }
             if let shortcut = item.shortcut {
                 ShortcutHint(text: shortcut)
@@ -389,6 +398,7 @@ private struct PaletteRow: View {
             Image(systemName: name)
                 .font(.system(size: 13, weight: .light))
                 .foregroundStyle(Theme.chromeIcon)
+                .accessibilityHidden(true)
         case .project(let project):
             ProjectTile(project: project, size: 16)
         case .status(let row):
@@ -396,10 +406,12 @@ private struct PaletteRow: View {
                 Image(systemName: glyph.symbol)
                     .font(.system(size: 12))
                     .foregroundStyle(glyph.tint)
+                    .accessibilityLabel(glyph.title)
             } else {
                 Image(systemName: "bubble.left")
                     .font(.system(size: 12, weight: .light))
                     .foregroundStyle(Theme.chromeIcon)
+                    .accessibilityHidden(true)
             }
         }
     }

@@ -159,6 +159,8 @@ struct StudioCommands: Commands {
         }
         Button("Rename…") { store.shell.headerRenaming = true }
             .disabled(row == nil)
+        Button("Regenerate Title") { if let id { store.inbox.regenerateTitles([id]) } }
+            .disabled(row == nil)
         Button(row?.unread == true ? "Mark as Read" : "Mark as Unread") { if let row { store.inbox.markUnread([row.id], !row.unread) } }
             .disabled(row == nil)
         Button("Archive") { if let id { store.archive([id]) } }

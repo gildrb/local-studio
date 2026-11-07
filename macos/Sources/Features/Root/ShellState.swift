@@ -34,6 +34,7 @@ final class ShellState {
     var snoozeTargets: [String] = []
     var commitProject: String?
     var pullRequestProject: String?
+    var publishProject: String?
 
     private(set) var back: [String?] = []
     private(set) var forward: [String?] = []

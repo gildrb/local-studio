@@ -25,6 +25,25 @@ extension SnapshotCatalog {
                 store.inbox.query = "sidebar"
                 return AnyView(SidebarView(store: store))
             },
+            SnapshotEntry(name: "shell-sidebar-search-messages", size: CGSize(width: 288, height: 560), focus: "t-active-1", updates: ShellFixtures.updates) { store in
+                store.inbox.query = "sidebar"
+                store.inbox.searchMessages()
+                if let request = store.inbox.searchRequest {
+                    store.receive([.threadSearch(request: request, hits: ShellFixtures.messageHits)])
+                }
+                return AnyView(SidebarView(store: store))
+            },
+            SnapshotEntry(name: "shell-header-sync", size: CGSize(width: 980, height: 52), focus: "t-pinned", updates: ShellFixtures.updates + ShellFixtures.focusedBehind) { store in
+                AnyView(ThreadHeaderBar(store: store, leadingInset: 16, trailingInset: Theme.Metrics.trailingChromeInset)
+                    .overlay(alignment: .trailing) { PanelToggles(store: store) })
+            },
+            SnapshotEntry(name: "shell-header-publish", size: CGSize(width: 980, height: 52), focus: "t-pinned", updates: ShellFixtures.updates + ShellFixtures.focusedNoRemote) { store in
+                AnyView(ThreadHeaderBar(store: store, leadingInset: 16, trailingInset: Theme.Metrics.trailingChromeInset)
+                    .overlay(alignment: .trailing) { PanelToggles(store: store) })
+            },
+            SnapshotEntry(name: "shell-publish-sheet", size: CGSize(width: 440, height: 260), updates: ShellFixtures.updates) { store in
+                AnyView(PublishRepositorySheet(store: store, project: "/Users/demo/local-studio").background(Theme.overlay))
+            },
             SnapshotEntry(name: "shell-sidebar-filtered", size: CGSize(width: 288, height: 560), focus: "t-active-1", updates: ShellFixtures.updates) { store in
                 store.inbox.projectFilter = "/Users/demo/eukhe"
                 return AnyView(SidebarView(store: store))
@@ -136,7 +155,7 @@ enum ShellFixtures {
         )),
         .gitStatus(project: projects[0].id, status: GitStatus(
             branch: "swift/s1", upstream: "origin/swift/s1", ahead: 2, behind: 0, dirty: true,
-            defaultBranch: "main", pullRequest: nil, isRepo: true, changedFiles: 7
+            defaultBranch: "main", pullRequest: nil, isRepo: true, changedFiles: 7, hasRemote: true
         )),
     ]
 
@@ -144,7 +163,26 @@ enum ShellFixtures {
         .gitStatus(project: projects[0].id, status: GitStatus(
             branch: "core/eukhe", upstream: "origin/core/eukhe", ahead: 0, behind: 0, dirty: false, defaultBranch: "main",
             pullRequest: PullRequest(number: 412, title: "Native shell", url: "https://github.com/demo/local-studio/pull/412", state: "OPEN", checks: "passing", head: "core/eukhe", base: "main"),
-            isRepo: true, changedFiles: 0
+            isRepo: true, changedFiles: 0, hasRemote: true
         )),
+    ]
+
+    static let focusedBehind: [Update] = [
+        .gitStatus(project: projects[0].id, status: GitStatus(
+            branch: "core/eukhe", upstream: "origin/core/eukhe", ahead: 1, behind: 3, dirty: false, defaultBranch: "main",
+            pullRequest: nil, isRepo: true, changedFiles: 0, hasRemote: true
+        )),
+    ]
+
+    static let focusedNoRemote: [Update] = [
+        .gitStatus(project: projects[0].id, status: GitStatus(
+            branch: "main", upstream: nil, ahead: 0, behind: 0, dirty: false, defaultBranch: nil,
+            pullRequest: nil, isRepo: true, changedFiles: 0, hasRemote: false
+        )),
+    ]
+
+    static let messageHits = [
+        ThreadSearchHit(thread: "t-active-2", title: "Approve the daemon socket migration", snippet: "We should move the sidebar socket path under the data root so the daemon and the app agree on it.", project: projects[1].id),
+        ThreadSearchHit(thread: "t-settled-4", title: "Settled thread number 4", snippet: "Collapsed shelves keep their state; the sidebar remembers which ones you folded across launches.", project: projects[1].id),
     ]
 }

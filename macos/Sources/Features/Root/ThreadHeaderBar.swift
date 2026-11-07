@@ -35,6 +35,9 @@ struct ThreadHeaderBar: View {
         .sheet(item: sheetBinding(\.pullRequestProject)) { item in
             PullRequestSheet(store: store, project: item.id, suggestedTitle: store.conversation.info?.title ?? store.focusedRow?.title ?? "")
         }
+        .sheet(item: sheetBinding(\.publishProject)) { item in
+            PublishRepositorySheet(store: store, project: item.id)
+        }
     }
 
     @ViewBuilder private var breadcrumb: some View {
@@ -43,6 +46,7 @@ struct ThreadHeaderBar: View {
                 Image(systemName: store.shell.route.symbol)
                     .font(.system(size: 13, weight: .light))
                     .foregroundStyle(Theme.chromeIcon)
+                    .accessibilityHidden(true)
                 Text(store.shell.route.title)
                     .font(.system(size: 13, weight: .medium))
             }
@@ -61,8 +65,11 @@ struct ThreadHeaderBar: View {
                 }
                 .buttonStyle(.plain)
                 .help("New thread in \(projectName)")
+                .accessibilityLabel(projectName)
+                .accessibilityHint("Starts a new thread in this project")
                 Text("/")
                     .foregroundStyle(Theme.tertiaryText)
+                    .accessibilityHidden(true)
                 title
             }
             .font(.system(size: 13))
@@ -88,6 +95,7 @@ struct ThreadHeaderBar: View {
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Theme.secondaryText)
                         .opacity(hoveringTitle ? 1 : 0)
+                        .accessibilityHidden(true)
                 }
                 .padding(.horizontal, 5)
                 .padding(.vertical, 3)
@@ -96,18 +104,24 @@ struct ThreadHeaderBar: View {
                 .contentShape(Rectangle())
                 .onHover { hoveringTitle = $0 }
                 .onTapGesture(count: 2) { store.shell.headerRenaming = true }
-                .onTapGesture {
-                    var nodes = ThreadActions.menu(store, for: thread, includeRename: false)
-                    nodes.insert(.action("Rename Thread", symbol: "pencil") { store.shell.headerRenaming = true }, at: min(4, nodes.count))
-                    NativeMenu.popUp(nodes, below: titleAnchor.view)
-                }
+                .onTapGesture { showThreadMenu(thread) }
+                .accessibilityElement(children: .ignore)
                 .accessibilityAddTraits(.isButton)
-                .accessibilityLabel("Thread actions for \(titleText)")
+                .accessibilityLabel(titleText)
+                .accessibilityHint("Shows thread actions")
+                .accessibilityAction { showThreadMenu(thread) }
+                .accessibilityAction(named: "Rename") { store.shell.headerRenaming = true }
             }
         } else {
             Text("New thread")
                 .fontWeight(.medium)
         }
+    }
+
+    private func showThreadMenu(_ thread: String) {
+        var nodes = ThreadActions.menu(store, for: thread, includeRename: false)
+        nodes.insert(.action("Rename Thread", symbol: "pencil") { store.shell.headerRenaming = true }, at: min(4, nodes.count))
+        NativeMenu.popUp(nodes, below: titleAnchor.view)
     }
 
     private var projectID: String? {

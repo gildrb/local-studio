@@ -68,6 +68,7 @@ enum ThreadActions {
         if includeRename {
             nodes.append(.action("Rename Thread", symbol: "pencil") { store.inbox.renaming = id })
         }
+        nodes.append(.action("Regenerate Title", symbol: "sparkles") { store.inbox.regenerateTitles([id]) })
         nodes.append(.action(row.unread ? "Mark as Read" : "Mark as Unread", symbol: "circle.fill") { store.inbox.markUnread([id], !row.unread) })
         if let project = row.project {
             if store.inbox.projectFilter == project {
@@ -78,6 +79,10 @@ enum ThreadActions {
                 })
             }
         }
+        nodes.append(.submenu("Auto-settle", symbol: "checkmark.circle", [
+            .action("Enabled", checked: row.autoSettle) { store.inbox.setAutoSettle(id, true) },
+            .action("Disabled", checked: !row.autoSettle) { store.inbox.setAutoSettle(id, false) },
+        ]))
         nodes.append(.divider("copy"))
         var copies: [MenuNode] = []
         if let path = store.workspacePath(for: row) {
@@ -113,6 +118,7 @@ enum ThreadActions {
         nodes.append(.divider("read"))
         nodes.append(.action("Mark as Unread", symbol: "circle.fill") { store.inbox.markUnread(ids, true) })
         nodes.append(.action("Mark as Read", symbol: "circle") { store.inbox.markUnread(ids, false) })
+        nodes.append(.action("Regenerate Titles", symbol: "sparkles") { store.inbox.regenerateTitles(ids) })
         nodes.append(.divider("danger"))
         nodes.append(.action("Archive \(count)", symbol: "archivebox") { store.archive(ids) })
         nodes.append(.action("Delete \(count)…", symbol: "trash", destructive: true) { store.requestDelete(ids) })
