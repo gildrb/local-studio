@@ -11,13 +11,12 @@ struct ArchivePage: View {
     private var pages: PagesStore { store.pages }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if !embedded {
-                PageHeader("Archive", subtitle: pages.archiveLoaded ? countLabel : nil, leadingInset: leadingInset)
+        content
+            .pageHeader {
+                if !embedded {
+                    PageHeader("Archive", subtitle: pages.archiveLoaded ? countLabel : nil, leadingInset: leadingInset)
+                }
             }
-            content
-        }
-        .background(Theme.canvas)
         .onAppear { pages.loadArchived() }
         .confirmationDialog(
             "Delete “\(pendingDelete?.title ?? "")”?",

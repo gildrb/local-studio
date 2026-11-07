@@ -46,6 +46,14 @@ extension PageHeader where Trailing == EmptyView {
     }
 }
 
+extension View {
+    func pageHeader<Header: View>(@ViewBuilder _ header: () -> Header) -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity)
+            .safeAreaInset(edge: .top, spacing: 0, content: header)
+            .background(Theme.canvas)
+    }
+}
+
 struct PageEmptyState: View {
     let symbol: String
     let title: String
@@ -107,6 +115,21 @@ enum PageFormat {
     static func gigabytes(_ bytes: UInt64) -> String {
         let value = Double(bytes) / 1_073_741_824
         return value >= 100 ? String(format: "%.0f GB", value) : String(format: "%.1f GB", value)
+    }
+
+    static func ago(_ milliseconds: Int64) -> String {
+        let age = relative(milliseconds)
+        return age == "now" ? "just now" : "\(age) ago"
+    }
+
+    static func until(_ milliseconds: Int64, now: Date = .now) -> String {
+        let seconds = Date(timeIntervalSince1970: TimeInterval(milliseconds) / 1000).timeIntervalSince(now)
+        switch seconds {
+        case ..<60: return "in under a minute"
+        case ..<3600: return "in \(Int(seconds / 60))m"
+        case ..<86_400: return "in \(Int(seconds / 3600))h \(Int(seconds.truncatingRemainder(dividingBy: 3600) / 60))m"
+        default: return "in \(Int(seconds / 86_400))d"
+        }
     }
 
     static func relative(_ milliseconds: Int64, now: Date = .now) -> String {

@@ -8,12 +8,12 @@ struct LocalPage: View {
     var initiallyOpen: [String] = []
 
     var body: some View {
-        VStack(spacing: 0) {
+        SettingsForm {
+            LocalFleetSections(store: store, initiallyOpen: initiallyOpen)
+        }
+        .pageHeader {
             PageHeader("Local", subtitle: subtitle, leadingInset: leadingInset) {
                 ChromeIconButton("Refresh", symbol: "arrow.clockwise") { store.pages.refreshLocal() }
-            }
-            SettingsForm {
-                LocalFleetSections(store: store, initiallyOpen: initiallyOpen)
             }
         }
         .background(Theme.canvas)
