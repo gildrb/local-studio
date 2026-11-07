@@ -21,6 +21,11 @@ extension SnapshotCatalog {
                 store.inbox.collapsed = [.snoozed]
                 return AnyView(SidebarView(store: store))
             },
+            SnapshotEntry(name: "shell-sidebar-keyboard-focus", size: CGSize(width: 288, height: 560), focus: "t-active-1", updates: ShellFixtures.updates) { store in
+                store.shell.region = .sidebar
+                store.shell.sidebarCursor = "t-active-2"
+                return AnyView(SidebarView(store: store))
+            },
             SnapshotEntry(name: "shell-sidebar-search", size: CGSize(width: 288, height: 560), focus: "t-active-1", updates: ShellFixtures.updates) { store in
                 store.inbox.query = "sidebar"
                 return AnyView(SidebarView(store: store))

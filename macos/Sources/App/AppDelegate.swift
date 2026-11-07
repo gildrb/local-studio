@@ -125,13 +125,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             self?.cancelCommandHold()
+            return self?.route(event) == true ? nil : event
+        }
+        let clicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+            if let window = event.window {
+                self?.store.noteClick(at: event.locationInWindow, in: window)
+            }
             return event
         }
-        monitors = [flags, keys].compactMap(\.self)
+        monitors = [flags, keys, clicks].compactMap(\.self)
+    }
+
+    private func route(_ event: NSEvent) -> Bool {
+        guard let window = event.window, window === store.mainWindow, window.attachedSheet == nil,
+              store.shell.palette == nil, let input = NavInput(event) else { return false }
+        return store.routeKey(input, responder: window.firstResponder)
     }
 
     private func flagsChanged(_ flags: NSEvent.ModifierFlags) {
         let relevant = flags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        if !relevant.contains(.control) {
+            store.endRecentCycle()
+        }
         guard relevant == .command else {
             cancelCommandHold()
             return

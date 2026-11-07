@@ -202,8 +202,23 @@ struct CommandPalette: View {
                 }
             }
             result += threads.filter { matches($0.title) }.prefix(20).map { threadItem($0, group: "Threads") }
+            result += commandItems.filter { matches($0.title) }
         }
         return result
+    }
+
+    private var commandItems: [PaletteItem] {
+        let vim = store.pages.settings?.vimMode == true
+        let toggle = PaletteItem(id: "vim", group: "Commands", title: vim ? "Turn Off Vim Keys" : "Turn On Vim Keys", icon: .symbol("keyboard")) {
+            store.shell.palette = nil
+            store.setVimMode(!vim)
+        }
+        return [toggle] + store.pages.keybindings.filter { store.canDispatch($0.command) }.map { binding in
+            PaletteItem(id: "command-\(binding.command)", group: "Commands", title: binding.title, icon: .symbol("command"), shortcut: CoreShortcut.display(binding.shortcut)) {
+                store.shell.palette = nil
+                store.dispatch(binding.command)
+            }
+        }
     }
 
     private var actions: [PaletteItem] {

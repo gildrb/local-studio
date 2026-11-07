@@ -208,6 +208,12 @@ extension StudioStore {
         core.run { $0.updateSettings(settings: settings) }
     }
 
+    func setVimMode(_ on: Bool) {
+        guard var settings = pages.settings else { return }
+        settings.vimMode = on
+        core.run { $0.updateSettings(settings: settings) }
+    }
+
     func cycleColorScheme() {
         switch pages.settings?.colorScheme ?? .system {
         case .system: setColorScheme(.light)

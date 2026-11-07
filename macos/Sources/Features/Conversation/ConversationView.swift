@@ -71,6 +71,7 @@ private struct DraftHero: View {
                     .padding(.bottom, 8)
                 }
                 ComposerView(store: store)
+                    .focusRegionFrame(.composer, in: store.shell)
                 ThreadContextStrip(store: store)
             }
             .frame(maxWidth: 720)
@@ -147,6 +148,7 @@ private struct ConversationColumn: View {
                 VStack(spacing: 8) {
                     ApprovalCard(store: store)
                     ComposerView(store: store)
+                        .focusRegionFrame(.composer, in: store.shell)
                     ThreadContextStrip(store: store)
                         .padding(.top, -4)
                 }
@@ -203,6 +205,7 @@ private struct TimelineScroll: View {
                 LoadingPlaceholder(conversation: conversation)
                 ForEach(conversation.rows) { row in
                     TimelineRowView(row: row, store: store)
+                        .keyboardFocusRing(store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
                 }
                 TimelineFooter(store: store)
             }
@@ -244,6 +247,11 @@ private struct TimelineScroll: View {
         }
         .onChange(of: conversation.endRequest) {
             position.scrollTo(edge: .bottom)
+        }
+        .onChange(of: store.shell.timelineCursor) { _, cursor in
+            guard let cursor, store.shell.region == .timeline else { return }
+            follow(cursor == conversation.rows.last?.id)
+            position.scrollTo(id: cursor)
         }
         .onScrollTargetVisibilityChange(idType: UInt64.self, threshold: 0.3) { ids in
             updateCurrentAnchor(visible: ids)

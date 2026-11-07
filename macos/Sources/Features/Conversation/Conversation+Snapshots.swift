@@ -392,6 +392,21 @@ extension SnapshotCatalog {
                 view: thread
             ),
             SnapshotEntry(
+                name: "conversation-timeline-focus",
+                size: CGSize(width: 980, height: 640),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: fixtures.settled)),
+                ],
+                view: { store in
+                    store.shell.region = .timeline
+                    store.shell.timelineCursor = store.conversation.rows.dropLast().last?.id
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
                 name: "picker-access",
                 size: CGSize(width: 300, height: 250),
                 updates: [],

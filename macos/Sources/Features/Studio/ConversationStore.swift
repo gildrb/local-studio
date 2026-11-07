@@ -456,6 +456,10 @@ final class ConversationStore {
         rebuildRows()
     }
 
+    func requestFocus() {
+        focusRequest += 1
+    }
+
     func scrollToEnd() {
         followsEnd = true
         endRequest += 1

@@ -304,9 +304,19 @@ struct CoreShortcut {
         case "space": return .space
         case "delete", "backspace": return .delete
         default:
+            if name.count > 1, name.first == "f", let number = Int(name.dropFirst()), (1...12).contains(number),
+               let scalar = UnicodeScalar(NSF1FunctionKey + number - 1) {
+                return KeyEquivalent(Character(scalar))
+            }
             guard name.count == 1, let character = name.first else { return nil }
             return KeyEquivalent(character)
         }
+    }
+
+    private static func functionKeyName(_ key: KeyEquivalent) -> String? {
+        guard let scalar = key.character.unicodeScalars.first else { return nil }
+        let offset = Int(scalar.value) - NSF1FunctionKey
+        return (0..<12).contains(offset) ? "F\(offset + 1)" : nil
     }
 
     private static func glyph(_ key: KeyEquivalent) -> String {
@@ -320,7 +330,7 @@ struct CoreShortcut {
         case .tab: "⇥"
         case .space: "Space"
         case .delete: "⌫"
-        default: String(key.character).uppercased()
+        default: functionKeyName(key) ?? String(key.character).uppercased()
         }
     }
 }

@@ -18,6 +18,7 @@ struct RootView: View {
                 .allowsHitTesting(shell.sidebarVisible)
                 .accessibilityHidden(!shell.sidebarVisible)
                 .background(Theme.sidebar)
+                .focusRegionFrame(.sidebar, in: shell)
             if shell.sidebarVisible {
                 Rectangle()
                     .fill(Theme.hairline)
@@ -99,8 +100,10 @@ struct RootView: View {
                         ThreadHeaderBar(store: store, leadingInset: leading, trailingInset: panels.rightPanelOpen ? 10 : Theme.Metrics.trailingChromeInset)
                             .zIndex(1)
                         ThreadView(store: store, leadingInset: 0)
+                            .focusRegionFrame(.timeline, in: shell)
                         if panels.terminalOpen {
                             TerminalDrawerSeam(store: store)
+                                .focusRegionFrame(.terminal, in: shell)
                         }
                     }
                     .overlay { PreviewMiniPlayerView(store: store) }
@@ -108,6 +111,7 @@ struct RootView: View {
                 }
                 if panels.rightPanelOpen {
                     RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? WindowChrome.collapsedInset : 0)
+                        .focusRegionFrame(.rightPanel, in: shell)
                 }
             }
         } else {

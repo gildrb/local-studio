@@ -21,6 +21,14 @@ enum ShellConfirmation: Equatable {
     }
 }
 
+enum FocusRegion: CaseIterable {
+    case sidebar
+    case timeline
+    case composer
+    case rightPanel
+    case terminal
+}
+
 @MainActor
 @Observable
 final class ShellState {
@@ -40,6 +48,19 @@ final class ShellState {
     var cloneShown = false
     var settingsRequest: SettingsPane?
     var settingsProject: String?
+    var region = FocusRegion.composer
+    var sidebarCursor: String?
+    var timelineCursor: UInt64?
+    var searchFocusRequest = 0
+    @ObservationIgnored let keys = KeyState()
+    @ObservationIgnored private(set) var recent: [String] = []
+
+    func touchRecent(_ thread: String?) {
+        guard let thread, keys.recentCycle == nil else { return }
+        recent.removeAll { $0 == thread }
+        recent.insert(thread, at: 0)
+        if recent.count > 30 { recent.removeLast() }
+    }
 
     private(set) var back: [String?] = []
     private(set) var forward: [String?] = []
