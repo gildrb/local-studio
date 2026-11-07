@@ -48,15 +48,20 @@ final class ConversationSmoke {
             move(to: .project, "connected")
             store.inbox.addProject(path: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory())
             conversation.loadModels()
+            conversation.loadCommands(project: nil)
         case .project:
             guard let project = store.inbox.currentProject, !store.inbox.projects.isEmpty, conversation.modelsLoaded else { return }
             guard !conversation.providerUnavailable, let model = conversation.currentModel(settings: store.pages.settings) else {
                 finish(passed: false, "the draft composer found no default model in \(conversation.models.count) models")
                 return
             }
+            if let failure = composerChecks(project: project) {
+                finish(passed: false, failure)
+                return
+            }
             conversation.newThread.access = .supervised
             conversation.composer(project: project).text = Self.prompt
-            conversation.submit(project: project, steer: false, settings: store.pages.settings)
+            conversation.submit(project: project, alternate: false, settings: store.pages.settings)
             move(to: .opening, "composer started a supervised thread in \(project) with default model \(model.provider)/\(model.id)")
         case .opening:
             guard let thread = conversation.thread else { return }
@@ -67,7 +72,7 @@ final class ConversationSmoke {
             print("     approval \(approval.command) \(approval.effects)")
             for text in [Self.followUp, Self.cancelled] {
                 conversation.composer(project: nil).text = text
-                conversation.submit(project: nil, steer: false, settings: nil)
+                conversation.submit(project: nil, alternate: false, settings: nil)
             }
             move(to: .queued, "approval card pending while the turn runs; queued two follow-ups")
         case .queued:
@@ -76,10 +81,13 @@ final class ConversationSmoke {
             move(to: .cancelled, "queue shows both messages; cancelled one")
         case .cancelled:
             guard conversation.queued.count == 1, conversation.composer(project: nil).text == Self.cancelled,
-                  let queued = conversation.queued.first, queued.text == Self.followUp else { return }
+                  conversation.queued.first?.text == Self.followUp else { return }
             conversation.composer(project: nil).text = ""
-            conversation.sendNow(queued)
-            move(to: .steering, "cancelled message returned to the composer; sent the other now")
+            guard conversation.steerQueuedMessage() else {
+                finish(passed: false, "⌘⇧Enter found no queued message to steer")
+                return
+            }
+            move(to: .steering, "cancelled message returned to the composer; ⌘⇧Enter steered the other")
         case .steering:
             guard conversation.queued.allSatisfy({ $0.steering || $0.sending }), let approval = conversation.approvals.first else { return }
             conversation.answer(approval, .approve)
@@ -110,6 +118,51 @@ final class ConversationSmoke {
         case .finished:
             return
         }
+    }
+
+    private func composerChecks(project: String) -> String? {
+        let conversation = store.conversation
+        let draft = conversation.composer(project: project)
+        draft.text = "stash me"
+        let key = conversation.stashKey(project: project)
+        guard conversation.stashPrompt(project: project), draft.isEmpty, let parked = conversation.stash.list(key).first, parked.text == "stash me" else {
+            return "⌘S did not park the draft"
+        }
+        conversation.restoreStash(parked, project: project)
+        guard draft.text == "stash me", conversation.stash.list(key).isEmpty else { return "restoring the stash did not refill the composer" }
+        draft.clear()
+        print("ok   ⌘S parked the draft and the stash menu restored it")
+        let kinds: [(String, Bool, ComposerTrigger.Kind?)] = [
+            ("/mo", true, .command), ("$sk", true, .skill), ("@src", true, .mention), ("#12", true, .pullRequest),
+            ("#12", false, nil), ("say /mo", true, nil), ("$", false, .skill),
+        ]
+        for (text, hasProject, expected) in kinds {
+            let found = ComposerTrigger.detect(in: text, caret: (text as NSString).length, project: hasProject)?.kind
+            guard found == expected else { return "trigger for “\(text)” was \(String(describing: found))" }
+        }
+        let commands = ComposerSuggestionSource(store: store).items(for: ComposerTrigger(kind: .command, query: "mo", start: 0, end: 3))
+        guard commands.first?.title == "/model", commands.first?.badge == "Built-in" else { return "the / menu lost /model" }
+        let skills = ComposerSuggestionSource(store: store).items(for: ComposerTrigger(kind: .skill, query: "", start: 0, end: 1))
+        print("ok   triggers / $ @ # detected; / menu \(commands.count) items, $ menu \(skills.count) skills (\(conversation.commands.count) commands loaded)")
+        let intents: [(Bool, Bool, Bool, SendShortcut, String, SubmitIntent?)] = [
+            (false, false, false, .enter, "a", .send), (true, false, false, .enter, "a", nil),
+            (false, true, true, .enter, "a", .alternate), (false, false, false, .modEnter, "a", nil),
+            (false, true, false, .modEnter, "a", .send), (false, false, false, .modEnterMultiline, "a\nb", nil),
+            (false, false, false, .modEnterMultiline, "a", .send), (true, true, true, .modEnter, "a", .alternate),
+        ]
+        for (shift, command, running, shortcut, text, expected) in intents {
+            let intent = SubmitIntent.resolve(shift: shift, command: command, running: running, shortcut: shortcut, text: text)
+            guard intent == expected else { return "send shortcut \(shortcut) shift=\(shift) cmd=\(command) running=\(running) gave \(String(describing: intent))" }
+        }
+        guard StreamingText.visible("one\n\ntwo", streaming: true, mode: .paragraph) == "one",
+              StreamingText.visible("one", streaming: true, mode: .turn) == nil else { return "response streaming modes render the wrong text" }
+        print("ok   send shortcuts and response streaming modes match main")
+        conversation.draftProject = project
+        conversation.attachContext(text: "$ make\nok\n", source: "Terminal")
+        guard draft.contexts.count == 1, draft.promptText.contains("Terminal:\n```\n$ make\nok\n```") else { return "attachContext did not add a terminal chip" }
+        draft.clear()
+        print("ok   attachContext(text:source:) added a terminal context chip")
+        return nil
     }
 
     private func move(to next: Phase, _ detail: String) {

@@ -210,6 +210,109 @@ extension SnapshotCatalog {
                     return thread(store)
                 }
             ),
+            SnapshotEntry(
+                name: "conversation-composer-stash-context",
+                size: CGSize(width: 980, height: 560),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: Array(fixtures.changedFiles.prefix(1)))),
+                ],
+                view: { store in
+                    let conversation = store.conversation
+                    conversation.stash.park(StashedPrompt(text: "Refactor the diff panel toolbar", files: [], contexts: []), project: "")
+                    conversation.stash.park(StashedPrompt(text: "Write release notes for 0.4", files: [], contexts: []), project: "")
+                    conversation.draftProject = nil
+                    conversation.attachContext(text: "$ swift build\nerror: missing return\n1 error", source: "Terminal")
+                    let draft = conversation.composer(project: nil)
+                    conversation.attachPullRequest(fixtures.pulls[0], to: draft)
+                    draft.text = "Fix the build error from the terminal and update #482 "
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-slash-kinds",
+                size: CGSize(width: 980, height: 620),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: Array(fixtures.compaction.suffix(2)))),
+                ],
+                view: { store in
+                    fixtures.loadCommands(store)
+                    store.conversation.composer(project: nil).text = "/"
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-skill-menu",
+                size: CGSize(width: 980, height: 560),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: Array(fixtures.compaction.suffix(2)))),
+                ],
+                view: { store in
+                    fixtures.loadCommands(store)
+                    store.conversation.composer(project: nil).text = "Review the diff with $"
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-pull-request-menu",
+                size: CGSize(width: 980, height: 560),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .thread(thread: "t1", info: fixtures.projectInfo),
+                    .transcript(thread: "t1", op: .reset(items: Array(fixtures.compaction.suffix(2)))),
+                ],
+                view: { store in
+                    store.conversation.loadPullRequests(project: fixtures.project.id)
+                    if let request = store.conversation.pullsRequest {
+                        store.receive([.pullRequests(request: request, pulls: fixtures.pulls)])
+                    }
+                    store.conversation.composer(project: fixtures.project.id).text = "Rebase onto #4"
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-resting-composer",
+                size: CGSize(width: 980, height: 620),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .settings(settings: fixtures.settings { $0.collapseComposerOnScroll = true }),
+                    .thread(thread: "t1", info: fixtures.info(busy: false)),
+                    .transcript(thread: "t1", op: .reset(items: fixtures.settled)),
+                ],
+                view: { store in
+                    store.conversation.followsEnd = false
+                    return thread(store)
+                }
+            ),
+            SnapshotEntry(
+                name: "conversation-streaming-paragraph",
+                size: CGSize(width: 980, height: 560),
+                focus: "t1",
+                updates: [
+                    fixtures.modelsUpdate,
+                    .settings(settings: fixtures.settings { $0.timeFormat = .twentyFourHour }),
+                    .thread(thread: "t1", info: fixtures.info(busy: true)),
+                    .transcript(thread: "t1", op: .reset(items: [
+                        fixtures.user(1, turn: 1, "Explain the fold rules."),
+                        fixtures.assistant(2, turn: 1, [.text(text: """
+                        A settled turn folds its work behind a **Worked for** row.
+
+                        Thinking blocks fold with the turn, while a single trailing tool call joins the fo
+                        """)], streaming: true),
+                    ])),
+                ],
+                view: thread
+            ),
         ]
     }
 }
@@ -233,6 +336,48 @@ enum ConversationFixtures {
     ]
 
     static let modelsUpdate = Update.models(models: models, favorites: [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")], hidden: [])
+
+    static let pulls: [PullRequest] = [
+        PullRequest(
+            number: 482, title: "Composer stash and triggers", url: "https://github.com/gildrb/local-studio/pull/482",
+            state: "OPEN", checks: "passing", head: "swift/s2", base: "main"
+        ),
+        PullRequest(
+            number: 479, title: "Right panel tabs", url: "https://github.com/gildrb/local-studio/pull/479",
+            state: "MERGED", checks: "passing", head: "swift/s3", base: "main"
+        ),
+        PullRequest(
+            number: 455, title: "Settings window", url: "https://github.com/gildrb/local-studio/pull/455",
+            state: "CLOSED", checks: "failing", head: "swift/s4", base: "main"
+        ),
+    ]
+
+    static let commands: [SlashCommand] = [
+        SlashCommand(name: "review", description: "Review the current diff", source: "prompt"),
+        SlashCommand(name: "skill:release-notes", description: "Draft release notes from merged PRs", source: "skill"),
+        SlashCommand(name: "skill:swift-lint", description: "Fix SwiftLint violations", source: "skill"),
+        SlashCommand(name: "todo", description: "Track tasks for this thread", source: "extension"),
+    ]
+
+    static var projectInfo: ThreadInfo {
+        var info = info(busy: false)
+        info.project = project.id
+        return info
+    }
+
+    static func settings(_ change: (inout LocalStudioKit.Settings) -> Void) -> LocalStudioKit.Settings {
+        var settings = PagesFixtures.settings
+        change(&settings)
+        return settings
+    }
+
+    @MainActor
+    static func loadCommands(_ store: StudioStore) {
+        store.conversation.loadCommands(project: nil)
+        if let request = store.conversation.commandsRequest {
+            store.receive([.commands(request: request, commands: commands)])
+        }
+    }
 
     static let pickerModelsUpdate = Update.models(
         models: models + [
