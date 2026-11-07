@@ -227,7 +227,7 @@ private struct TimelineScroll: View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 22) {
                 LoadingPlaceholder(conversation: conversation)
-                ForEach(conversation.rows) { row in
+                ForEach(current ? conversation.rows : []) { row in
                     TimelineRowView(row: row, store: store)
                         .keyboardFocusRing(store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
                 }
@@ -251,10 +251,12 @@ private struct TimelineScroll: View {
             }
         }
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height, 0)
-        } action: { _, distance in
-            guard current else { return }
+            let distance = max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.visibleRect.maxY, 0)
             tracker.distance = distance
+            return distance
+        } action: { _, _ in
+            guard current else { return }
+            let distance = tracker.distance
             let previous = store.shell.probe.scroll
             store.shell.probe.scroll = ScrollProbe(thread: thread, distance: distance, top: previous?.thread == thread ? previous?.top : nil)
             if tracker.userDriven {
