@@ -4,6 +4,160 @@ import SwiftUI
 
 extension SnapshotCatalog {
     @MainActor static var pages: [SnapshotEntry] {
-        []
+        settingsEntries + liveEntries + [
+            SnapshotEntry(
+                name: "pages-settings-search",
+                size: settingsSize,
+                updates: PagesFixtures.base,
+                view: { store in AnyView(SettingsView(store: store, pane: .general, query: "diff")) }
+            ),
+            SnapshotEntry(
+                name: "pages-settings-loading",
+                size: settingsSize,
+                updates: [],
+                view: { store in AnyView(SettingsView(store: store, pane: .general)) }
+            ),
+            SnapshotEntry(
+                name: "pages-settings-providers-expanded",
+                size: CGSize(width: 640, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(ProvidersSettings(store: store, expanded: ["anthropic"])) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-populated",
+                size: CGSize(width: 1000, height: 1500),
+                updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.localSnapshot)],
+                view: { store in AnyView(LocalPage(store: store, initiallyOpen: [PagesFixtures.studio.url, PagesFixtures.laptop.url])) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-collapsed",
+                size: CGSize(width: 1000, height: 760),
+                updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.localSnapshot)],
+                view: { store in AnyView(LocalPage(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-offline",
+                size: CGSize(width: 1000, height: 760),
+                updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.offlineSnapshot)],
+                view: { store in AnyView(LocalPage(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-loading",
+                size: CGSize(width: 1000, height: 560),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(LocalPage(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-usage",
+                size: CGSize(width: 1100, height: 820),
+                updates: PagesFixtures.base,
+                view: { store in
+                    store.pages.loadUsage(.month)
+                    store.receive([.usage(request: "fixture", report: PagesFixtures.usage)])
+                    return AnyView(UsagePage(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-usage-loading",
+                size: CGSize(width: 1100, height: 400),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(UsagePage(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-pull-requests",
+                size: CGSize(width: 1100, height: 600),
+                updates: PagesFixtures.base + [.pullRequests(request: "fixture", pulls: PagesFixtures.pulls)],
+                view: { store in
+                    store.pages.showPullRequests(project: PagesFixtures.projects[0].id, request: "fixture")
+                    return AnyView(PullRequestsPage(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-pull-requests-empty",
+                size: CGSize(width: 1100, height: 420),
+                updates: PagesFixtures.base + [.pullRequests(request: "fixture", pulls: [])],
+                view: { store in
+                    store.pages.showPullRequests(project: PagesFixtures.projects[0].id, request: "fixture")
+                    return AnyView(PullRequestsPage(store: store))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-archive",
+                size: CGSize(width: 900, height: 560),
+                updates: PagesFixtures.base + [.archivedThreads(request: "fixture", threads: PagesFixtures.archived)],
+                view: { store in AnyView(ArchivePage(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-archive-empty",
+                size: CGSize(width: 900, height: 360),
+                updates: PagesFixtures.base + [.archivedThreads(request: "fixture", threads: [])],
+                view: { store in AnyView(ArchivePage(store: store)) }
+            ),
+        ]
+    }
+
+    private static let settingsSize = CGSize(width: 860, height: 680)
+
+    @MainActor private static var settingsEntries: [SnapshotEntry] {
+        SettingsPane.allCases.map { pane in
+            var updates = PagesFixtures.base
+            switch pane {
+            case .archive:
+                updates.append(.archivedThreads(request: "fixture", threads: PagesFixtures.archived))
+            case .local:
+                updates.append(.local(request: "fixture", snapshot: PagesFixtures.localSnapshot))
+            default:
+                break
+            }
+            return SnapshotEntry(
+                name: "pages-settings-\(pane.rawValue)",
+                size: settingsSize,
+                updates: updates,
+                view: { store in AnyView(SettingsView(store: store, pane: pane)) }
+            )
+        }
+    }
+}
+
+extension SnapshotCatalog {
+    @MainActor fileprivate static var liveEntries: [SnapshotEntry] {
+        guard ProcessInfo.processInfo.environment["LOCAL_STUDIO_SNAPSHOT_LIVE"] == "1" else { return [] }
+        return [
+            SnapshotEntry(
+                name: "pages-local-live",
+                size: CGSize(width: 1000, height: 1200),
+                updates: [],
+                view: { store in
+                    captureLiveLocal(store)
+                    let open = store.pages.local?.controllers.filter(\.reachable).map(\.url) ?? []
+                    return AnyView(LocalPage(store: store, initiallyOpen: open))
+                }
+            ),
+        ]
+    }
+
+    @MainActor private static func captureLiveLocal(_ store: StudioStore) {
+        guard store.core.studio == nil else { return }
+        do {
+            try store.start()
+        } catch {
+            print("live snapshot: \(error.localizedDescription)")
+            return
+        }
+        let pump: (TimeInterval, () -> Bool) -> Void = { timeout, done in
+            let deadline = Date().addingTimeInterval(timeout)
+            while Date() < deadline, !done() {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            }
+        }
+        store.pages.refreshLocal()
+        pump(90) { store.pages.local != nil || store.pages.localError != nil }
+        let registryReady = { store.pages.local?.registry.map { $0.error != "loading" } ?? false }
+        for _ in 0..<8 where !registryReady() {
+            pump(3) { false }
+            store.pages.refreshLocal()
+            pump(10, registryReady)
+        }
+        store.stop()
     }
 }
