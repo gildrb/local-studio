@@ -9,7 +9,7 @@ import { LocalJob, type LocalRunRequest } from "./contracts.ts";
 import { type Config, exec, fail, fetchJson, home, lastLine, now, readJson, writeJson } from "./core.ts";
 import { archivedReason, type Catalog, dockerFlags, type Entry, launchBlock, weightsOf } from "./registry.ts";
 
-const LABEL = "local-studio-t3";
+const LABEL = "local-studio-controller";
 const ACTIVE = new Set(["pending", "pulling", "downloading", "starting", "ready"]);
 const PORTS: [number, number] = [18100, 18299];
 const jobsPath = join(home, "jobs.json");

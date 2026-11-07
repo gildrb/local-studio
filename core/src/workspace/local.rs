@@ -587,9 +587,9 @@ impl Local {
         command
             .arg(&script)
             .current_dir(script.parent().unwrap_or(Path::new("/")))
-            .env("LOCAL_STUDIO_T3_HOME", &self.data_root)
-            .env("LOCAL_STUDIO_T3_PORT", port.to_string())
-            .env("LOCAL_STUDIO_T3_HOST", "127.0.0.1")
+            .env("LOCAL_STUDIO_CONTROLLER_HOME", &self.data_root)
+            .env("LOCAL_STUDIO_CONTROLLER_PORT", port.to_string())
+            .env("LOCAL_STUDIO_CONTROLLER_HOST", "127.0.0.1")
             .stdin(Stdio::null())
             .stdout(log)
             .stderr(log_err);

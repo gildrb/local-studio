@@ -219,7 +219,7 @@ const handle = async (req: Request): Promise<Response> => {
   return json({ error: { code: "NOT_FOUND", message: `${req.method} ${p}` } }, 404);
 };
 
-const host = process.env.LOCAL_STUDIO_T3_HOST ?? "127.0.0.1";
+const host = process.env.LOCAL_STUDIO_CONTROLLER_HOST ?? "127.0.0.1";
 Bun.serve({
   port,
   hostname: host,

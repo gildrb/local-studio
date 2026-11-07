@@ -137,9 +137,9 @@ try {
     );
     const env = {
       ...process.env,
-      LOCAL_STUDIO_T3_HOME: home,
-      LOCAL_STUDIO_T3_PORT: String(port),
-      LOCAL_STUDIO_T3_HOST: "127.0.0.1",
+      LOCAL_STUDIO_CONTROLLER_HOME: home,
+      LOCAL_STUDIO_CONTROLLER_PORT: String(port),
+      LOCAL_STUDIO_CONTROLLER_HOST: "127.0.0.1",
     };
     const child = spawn("bun", [new URL("../src/main.ts", import.meta.url).pathname], {
       env,
