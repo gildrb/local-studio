@@ -72,6 +72,7 @@ enum SettingsGroup: Hashable {
     case shortcuts
     case providerList
     case providerSignIn
+    case hiddenModels
     case git
     case writing
     case worktrees
@@ -98,6 +99,7 @@ enum SettingsGroup: Hashable {
         case .shortcuts: "Shortcuts"
         case .providerList: "Providers"
         case .providerSignIn: "Signing In"
+        case .hiddenModels: "Hidden Models"
         case .git: "Git"
         case .writing: "Commit and Pull Request Writing"
         case .worktrees: "Worktree Cleanup"
@@ -115,7 +117,7 @@ enum SettingsGroup: Hashable {
         case .projectDefaults, .organization, .behavior, .confirmations, .textGeneration, .about, .diagnostics, .legacy: .general
         case .theme, .interface, .typography: .appearance
         case .shortcuts: .keybindings
-        case .providerList, .providerSignIn: .providers
+        case .providerList, .providerSignIn, .hiddenModels: .providers
         case .git, .writing: .sourceControl
         case .worktrees, .data: .storage
         case .controller, .fleet: .local
@@ -142,7 +144,7 @@ enum SettingKey: CaseIterable {
     case colorScheme
     case contrast, diffColors, chatWidth, openLinks
     case interfaceFont, promptFont, codeFont, terminalFont, fontSmoothing, wordWrap
-    case providers, favorites, signIn
+    case providers, favorites, signIn, hiddenModels
     case autoPull, fetchInterval, mergeMethod
     case writingStyle, customInstructions, followTemplates, writerModel
     case cleanupAfter, cleanupOnMerge, cleanupOnDelete, cleanupUnchanged
@@ -168,6 +170,7 @@ enum SettingKey: CaseIterable {
         case .interfaceFont, .promptFont, .codeFont, .terminalFont, .fontSmoothing, .wordWrap: .typography
         case .providers, .favorites: .providerList
         case .signIn: .providerSignIn
+        case .hiddenModels: .hiddenModels
         case .autoPull, .fetchInterval, .mergeMethod: .git
         case .writingStyle, .customInstructions, .followTemplates, .writerModel: .writing
         case .cleanupAfter, .cleanupOnMerge, .cleanupOnDelete, .cleanupUnchanged: .worktrees
@@ -228,6 +231,7 @@ enum SettingKey: CaseIterable {
         case .providers: "Providers"
         case .favorites: "Favorite models"
         case .signIn: "Sign in to a provider"
+        case .hiddenModels: "Hidden models"
         case .autoPull: "Automatically pull"
         case .fetchInterval: "Git fetch interval"
         case .mergeMethod: "Default merge method"
@@ -291,6 +295,7 @@ enum SettingKey: CaseIterable {
         case .providers: "auth api key configured"
         case .favorites: "models star"
         case .signIn: "login auth eukhe"
+        case .hiddenModels: "hide unhide picker models"
         case .autoPull: "fast-forward"
         case .fetchInterval: "background refresh"
         case .mergeMethod: "squash rebase"
