@@ -53,7 +53,7 @@ impl Terminals {
         cwd: &Path,
         cols: u16,
         rows: u16,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         let pair = native_pty_system()
             .openpty(size(cols, rows))
             .map_err(|error| format!("could not open a terminal: {error}"))?;
@@ -121,6 +121,7 @@ impl Terminals {
             .insert(id.clone(), Terminal { master: pair.master, input, killer });
         mailbox.push(Update::TerminalOpened { request, terminal: id.clone() });
         let mailbox = Arc::clone(mailbox);
+        let opened = id.clone();
         runtime.spawn(async move {
             let mut exit: Option<Option<i32>> = None;
             while let Some(event) = received.recv().await {
@@ -149,7 +150,7 @@ impl Terminals {
             }
             mailbox.push(Update::TerminalExited { terminal: id, code: exit.flatten() });
         });
-        Ok(())
+        Ok(opened)
     }
 
     pub(crate) fn write(&self, terminal: String, data: Vec<u8>) -> Result<(), String> {

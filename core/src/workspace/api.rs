@@ -1,4 +1,4 @@
-use super::model::{DiffScope, LocalAction, Settings, UsagePeriod};
+use super::model::{DiffScope, LocalAction, MergeMethod, ProjectScript, ProjectSettings, Settings, UsagePeriod};
 use crate::studio::Studio;
 
 #[cfg_attr(feature = "ffi", uniffi::export)]
@@ -114,5 +114,49 @@ impl Studio {
 
     pub fn set_keybinding(&self, command: String, shortcut: Option<String>) {
         self.workspace.set_keybinding(command, shortcut);
+    }
+
+    pub fn load_project_settings(&self, project: String) {
+        self.workspace.load_project_settings(project);
+    }
+
+    pub fn set_project_scripts(&self, project: String, scripts: Vec<ProjectScript>) {
+        self.workspace.set_project_scripts(project, scripts);
+    }
+
+    pub fn import_project_scripts(&self, request: String, project: String) {
+        self.workspace.import_project_scripts(request, project);
+    }
+
+    pub fn run_project_script(&self, request: String, project: String, script: String) {
+        self.workspace.run_project_script(request, project, script);
+    }
+
+    pub fn update_project_settings(&self, project: String, settings: ProjectSettings) {
+        self.workspace.update_project_settings(project, settings);
+    }
+
+    pub fn cancel_worktree_setup(&self, thread: String) {
+        self.workspace.cancel_worktree_setup(thread);
+    }
+
+    pub fn skip_worktree_setup(&self, thread: String) {
+        self.workspace.skip_worktree_setup(thread);
+    }
+
+    pub fn checkout_pull_request(&self, request: String, project: String, number: u64) {
+        self.workspace.checkout_pull_request(request, project, number);
+    }
+
+    pub fn clone_project(&self, request: String, url: String, parent_dir: String) {
+        self.workspace.clone_project(request, url, parent_dir);
+    }
+
+    pub fn merge_pull_request(&self, request: String, project: String, number: u64, method: Option<MergeMethod>) {
+        self.workspace.merge_pull_request(request, project, number, method);
+    }
+
+    pub fn cleanup_worktrees(&self, request: String) {
+        self.workspace.cleanup_worktrees(request);
     }
 }

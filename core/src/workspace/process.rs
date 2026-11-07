@@ -31,14 +31,18 @@ impl Output {
     }
 }
 
-fn signal_group(signal: &str, child: &std::process::Child) {
-    let group = format!("-{}", child.id());
+pub(crate) fn signal_pid_group(signal: &str, pid: u32) {
+    let group = format!("-{pid}");
     let _ = std::process::Command::new("/bin/kill")
         .args([signal, "--", &group])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+fn signal_group(signal: &str, child: &std::process::Child) {
+    signal_pid_group(signal, child.id());
 }
 
 pub(crate) fn stop_group(child: &mut std::process::Child, grace: Duration) {

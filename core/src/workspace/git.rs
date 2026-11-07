@@ -6,12 +6,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use super::diff;
-use super::model::{Branch, FileDiff, GitStatus, PullRequest, WritingStyle};
+use super::model::{Branch, FileDiff, GitStatus, MergeMethod, PullRequest, WritingStyle};
 use super::process::{self, run, run_ok};
 
 const QUICK: Duration = Duration::from_secs(15);
 const SLOW: Duration = Duration::from_secs(60);
 const NETWORK: Duration = Duration::from_secs(120);
+const CLONE: Duration = Duration::from_mins(15);
 const MAX_UNTRACKED_DIFFS: usize = 200;
 const MAX_UNTRACKED_BYTES: u64 = 2 * 1024 * 1024;
 
@@ -629,4 +630,221 @@ pub(crate) async fn publish_repository(project: &Path, name: &str, private: bool
     .await?;
     let url = out.lines().map(str::trim).rfind(|line| line.starts_with("http")).unwrap_or(name).to_string();
     Ok(format!("Published {url}"))
+}
+
+pub(crate) async fn origin_base(project: &Path) -> Option<String> {
+    let _ = git(project, &["fetch", "--quiet", "origin"], NETWORK).await;
+    let name = default_branch(project).await?;
+    let remote = format!("refs/remotes/origin/{name}");
+    git(project, &["show-ref", "--verify", "--quiet", &remote], QUICK).await.ok()?;
+    Some(format!("origin/{name}"))
+}
+
+pub(crate) async fn remove_worktree(project: &Path, worktree: &Path) -> Result<(), String> {
+    let path = worktree.to_string_lossy().into_owned();
+    git(project, &["worktree", "remove", "--force", "--", &path], SLOW).await?;
+    let _ = git(project, &["worktree", "prune"], QUICK).await;
+    Ok(())
+}
+
+pub(crate) async fn branch_pull_request_list(dir: &Path, branch: &str) -> Result<Option<PullRequest>, String> {
+    let out = run_ok(
+        "gh",
+        ["pr", "list", "--head", branch, "--state", "all", "--limit", "1", "--json", PR_FIELDS],
+        dir,
+        SLOW,
+    )
+    .await?;
+    let pulls: Vec<GhPull> = serde_json::from_str(&out).map_err(|error| format!("unexpected gh output: {error}"))?;
+    Ok(pulls.into_iter().next().map(GhPull::into_pull))
+}
+
+pub(crate) async fn merge_pull_request(project: &Path, number: u64, method: MergeMethod) -> Result<String, String> {
+    let flag = match method {
+        MergeMethod::Merge => "--merge",
+        MergeMethod::Squash => "--squash",
+        MergeMethod::Rebase => "--rebase",
+        MergeMethod::RepositoryDefault => {
+            let out = run_ok(
+                "gh",
+                ["repo", "view", "--json", "mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed"],
+                project,
+                SLOW,
+            )
+            .await?;
+            let allowed: Value =
+                serde_json::from_str(&out).map_err(|error| format!("unexpected gh output: {error}"))?;
+            let on = |key: &str| allowed.get(key).and_then(Value::as_bool).unwrap_or(false);
+            if on("mergeCommitAllowed") {
+                "--merge"
+            } else if on("squashMergeAllowed") {
+                "--squash"
+            } else if on("rebaseMergeAllowed") {
+                "--rebase"
+            } else {
+                return Err("The repository allows no merge method.".to_string());
+            }
+        }
+    };
+    let number = number.to_string();
+    run_ok("gh", ["pr", "merge", number.as_str(), flag], project, NETWORK).await?;
+    Ok(format!("Merged #{number} ({})", flag.trim_start_matches('-')))
+}
+
+pub(crate) async fn checkout_pull_request(project: &Path, root: &Path, number: u64) -> Result<PathBuf, String> {
+    let number_text = number.to_string();
+    let view = run_ok("gh", ["pr", "view", number_text.as_str(), "--json", "headRefName"], project, SLOW).await?;
+    let head: Value = serde_json::from_str(&view).map_err(|error| format!("unexpected gh output: {error}"))?;
+    let branch = head.get("headRefName").and_then(Value::as_str).unwrap_or_default();
+    let toplevel = PathBuf::from(git(project, &["rev-parse", "--show-toplevel"], QUICK).await?.trim());
+    let name = toplevel.file_name().map_or_else(|| "project".to_string(), |name| slug(&name.to_string_lossy()));
+    let parent = root.join(name);
+    std::fs::create_dir_all(&parent).map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    let stem = format!("pr-{number}-{}", slug(branch));
+    let mut path = parent.join(&stem);
+    let mut suffix = 2;
+    while path.exists() {
+        path = parent.join(format!("{stem}-{suffix}"));
+        suffix += 1;
+    }
+    let path_text = path.to_string_lossy().into_owned();
+    git(project, &["worktree", "add", "--detach", "--", &path_text], SLOW).await?;
+    if let Err(error) = run_ok("gh", ["pr", "checkout", number_text.as_str()], &path, NETWORK).await {
+        let _ = remove_worktree(project, &path).await;
+        return Err(error);
+    }
+    Ok(path)
+}
+
+pub(crate) fn clone_name(url: &str) -> Option<String> {
+    let trimmed = url.trim().trim_end_matches('/');
+    let last = trimmed.rsplit(['/', ':']).next()?;
+    let name = last.strip_suffix(".git").unwrap_or(last);
+    let valid = !name.is_empty()
+        && name != "."
+        && name != ".."
+        && name.chars().all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.'));
+    valid.then(|| name.to_string())
+}
+
+pub(crate) async fn clone_project(url: &str, parent: &Path) -> Result<PathBuf, String> {
+    let url = url.trim();
+    if url.is_empty() || url.starts_with('-') {
+        return Err("Enter a repository URL or owner/name.".to_string());
+    }
+    let name = clone_name(url).ok_or_else(|| format!("Cannot derive a folder name from `{url}`."))?;
+    std::fs::create_dir_all(parent).map_err(|error| format!("could not create {}: {error}", parent.display()))?;
+    let destination = parent.join(&name);
+    if destination.exists() {
+        return Err(format!("{} already exists.", destination.display()));
+    }
+    let destination_text = destination.to_string_lossy().into_owned();
+    let shorthand =
+        !url.contains("://") && !url.contains('@') && !Path::new(url).exists() && url.matches('/').count() == 1;
+    let github = shorthand || url.contains("github.com");
+    if github && process::which("gh").is_some() {
+        run_ok("gh", ["repo", "clone", url, destination_text.as_str()], parent, CLONE).await?;
+    } else {
+        run_ok("git", ["clone", "--quiet", "--", url, destination_text.as_str()], parent, CLONE).await?;
+    }
+    destination.canonicalize().map_err(|error| error.to_string())
+}
+
+pub(crate) async fn worktree_main(worktree: &Path) -> Option<PathBuf> {
+    let common = git(worktree, &["rev-parse", "--path-format=absolute", "--git-common-dir"], QUICK).await.ok()?;
+    let common = PathBuf::from(common.trim());
+    (common.file_name()? == ".git").then(|| common.parent().map(Path::to_path_buf)).flatten()
+}
+
+pub(crate) async fn is_clean(worktree: &Path) -> bool {
+    git(worktree, &["status", "--porcelain", "--untracked-files=normal"], QUICK)
+        .await
+        .is_ok_and(|out| out.trim().is_empty())
+}
+
+pub(crate) async fn head_is_merged_into_default(worktree: &Path) -> bool {
+    let Some(name) = default_branch(worktree).await else { return false };
+    let remote = format!("origin/{name}");
+    let target =
+        if git(worktree, &["rev-parse", "--verify", "--quiet", &remote], QUICK).await.is_ok() { remote } else { name };
+    git(worktree, &["merge-base", "--is-ancestor", "HEAD", &target], QUICK).await.is_ok()
+}
+
+pub(crate) async fn last_activity_ms(worktree: &Path) -> Option<i64> {
+    let commit = git(worktree, &["log", "-1", "--format=%ct"], QUICK).await.ok()?.trim().parse::<i64>().ok()? * 1000;
+    let touched = std::fs::metadata(worktree)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|elapsed| i64::try_from(elapsed.as_millis()).ok())
+        .unwrap_or(0);
+    Some(commit.max(touched))
+}
+
+pub(crate) async fn current_branch(worktree: &Path) -> Option<String> {
+    let out = git(worktree, &["symbolic-ref", "--quiet", "--short", "HEAD"], QUICK).await.ok()?;
+    Some(out.trim().to_string()).filter(|branch| !branch.is_empty())
+}
+
+pub(crate) async fn remove_clean_worktree(main: &Path, worktree: &Path) -> Result<(), String> {
+    let path = worktree.to_string_lossy().into_owned();
+    git(main, &["worktree", "remove", "--", &path], SLOW).await?;
+    let _ = git(main, &["worktree", "prune"], QUICK).await;
+    Ok(())
+}
+
+const CONTEXT_CHARS: usize = 12_000;
+
+fn clip(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let end = (0..=limit).rev().find(|index| text.is_char_boundary(*index)).unwrap_or(0);
+    format!("{}\n… (truncated)", &text[..end])
+}
+
+pub(crate) async fn stage_all(project: &Path) -> Result<(), String> {
+    git(project, &["add", "-A"], SLOW).await.map(drop)
+}
+
+pub(crate) async fn staged_summary(project: &Path) -> Result<String, String> {
+    let stat = git(project, &["diff", "--cached", "--stat"], QUICK).await?;
+    let patch = git(project, &["diff", "--cached", "--no-color", "--no-ext-diff"], SLOW).await?;
+    Ok(format!("{}\n{}", stat.trim(), clip(&patch, CONTEXT_CHARS)))
+}
+
+pub(crate) async fn recent_subjects(project: &Path) -> Vec<String> {
+    git(project, &["log", "-15", "--format=%s"], QUICK)
+        .await
+        .map(|log| log.lines().map(str::to_string).filter(|line| !line.trim().is_empty()).collect())
+        .unwrap_or_default()
+}
+
+pub(crate) async fn branch_summary(project: &Path) -> (String, Option<String>) {
+    let (log, stat) = match merge_base(project, None).await {
+        Ok(base) => {
+            let range = format!("{base}..HEAD");
+            (
+                git(project, &["log", "--format=- %s%n%b", &range], QUICK).await.unwrap_or_default(),
+                git(project, &["diff", "--stat", &range], QUICK).await.unwrap_or_default(),
+            )
+        }
+        Err(_) => (git(project, &["log", "-20", "--format=- %s%n%b"], QUICK).await.unwrap_or_default(), String::new()),
+    };
+    let last = git(project, &["log", "-1", "--format=%s"], QUICK).await.ok().map(|line| line.trim().to_string());
+    (clip(&format!("{}\n\n{}", log.trim(), stat.trim()), CONTEXT_CHARS), last.filter(|line| !line.is_empty()))
+}
+
+pub(crate) fn pull_request_template(project: &Path) -> Option<String> {
+    [
+        ".github/pull_request_template.md",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        "docs/pull_request_template.md",
+        "pull_request_template.md",
+        "PULL_REQUEST_TEMPLATE.md",
+    ]
+    .iter()
+    .find_map(|relative| std::fs::read_to_string(project.join(relative)).ok())
+    .map(|template| template.trim().to_string())
+    .filter(|template| !template.is_empty())
 }

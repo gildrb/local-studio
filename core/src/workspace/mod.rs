@@ -1,18 +1,25 @@
 mod api;
+mod cleanup;
 mod devices;
 mod diff;
 mod files;
 mod forge;
 mod git;
+mod links;
 mod local;
 pub mod model;
 mod process;
+mod projects;
 mod providers;
 mod settings;
+mod setup;
 mod terminal;
 mod time;
 mod usage;
 mod watch;
+mod writer;
+
+pub(crate) use self::setup::PreparedWorktree;
 
 use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
@@ -25,15 +32,21 @@ use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch as channel};
 
 use self::devices::Devices;
+use self::links::Links;
 use self::local::Local;
-use self::model::{DiffScope, LocalAction, PullRequest, Settings, UsagePeriod};
+use self::model::{DiffScope, LocalAction, MergeMethod, PullRequest, Settings, UsagePeriod};
+use self::projects::ProjectFile;
+use self::setup::Setups;
 use self::terminal::Terminals;
 use self::watch::GitWatcher;
 use crate::daemon::DaemonQuery;
 use crate::model::{ModelOption, NoticeLevel, Update};
+use crate::oneshot::TextGen;
 use crate::studio::Mailbox;
 
 const PULL_REQUEST_TTL: Duration = Duration::from_secs(60);
+
+type ProjectAdder = Arc<dyn Fn(String) + Send + Sync>;
 
 type CachedPullRequest = (Instant, Option<PullRequest>);
 
@@ -55,6 +68,12 @@ struct Inner {
     pull_requests: Mutex<HashMap<(String, String), CachedPullRequest>>,
     providers: Mutex<Option<Vec<model::ProviderStatus>>>,
     stopped: AtomicBool,
+    project_file: Mutex<ProjectFile>,
+    setups: Setups,
+    links: Links,
+    protected: Mutex<Vec<PathBuf>>,
+    project_adder: Mutex<Option<ProjectAdder>>,
+    text: TextGen,
 }
 
 #[derive(Clone)]
@@ -69,6 +88,7 @@ impl Workspace {
         data_dir: PathBuf,
         daemon: DaemonQuery,
         controller_main: Option<PathBuf>,
+        text: TextGen,
     ) -> Self {
         let (loaded, settings_error) = settings::load_json::<Settings>(&data_dir.join("settings.json"));
         let (overrides, keybindings_error) =
@@ -77,6 +97,11 @@ impl Workspace {
             mailbox.notice(NoticeLevel::Warning, error);
         }
         let loaded = settings::sanitize(loaded);
+        let (project_file, projects_error) =
+            settings::load_json::<ProjectFile>(&data_dir.join("project-workspace.json"));
+        if let Some(error) = projects_error {
+            mailbox.notice(NoticeLevel::Warning, error);
+        }
         mailbox.push(Update::Settings { settings: loaded.clone() });
         mailbox.push(Update::Keybindings { bindings: settings::keybindings(&overrides) });
         let (notify, notifications) = mpsc::unbounded_channel();
@@ -98,12 +123,20 @@ impl Workspace {
             pull_requests: Mutex::new(HashMap::new()),
             providers: Mutex::new(None),
             stopped: AtomicBool::new(false),
+            project_file: Mutex::new(project_file),
+            setups: Setups::default(),
+            links: Links::default(),
+            protected: Mutex::new(Vec::new()),
+            project_adder: Mutex::new(None),
+            text,
         });
         let workspace = Self { inner };
         let refresher = workspace.clone();
         workspace.inner.runtime.spawn(watch::debounce(notifications, move |project| refresher.git_status(project)));
         let fetcher = workspace.clone();
         workspace.inner.runtime.spawn(async move { fetcher.fetch_loop().await });
+        let sweeper = workspace.clone();
+        workspace.inner.runtime.spawn(async move { sweeper.cleanup_loop().await });
         workspace
     }
 
@@ -163,6 +196,7 @@ impl Workspace {
         self.inner.watcher.stop();
         self.inner.local.shutdown();
         self.inner.devices.shutdown_all();
+        self.inner.setups.stop_all();
     }
 
     fn push(&self, update: Update) {
@@ -204,6 +238,7 @@ impl Workspace {
         if let Some(branch) = status.branch.clone().filter(|_| status.upstream.is_some()) {
             status.pull_request = self.pull_request_for(project, &branch).await;
         }
+        self.refresh_links_for(project);
         Ok(Update::GitStatus { project: project.to_string(), status })
     }
 
@@ -337,6 +372,10 @@ impl Workspace {
         let reply = request.clone();
         self.answer(request, async move {
             let style = workspace.current_settings().writing_style;
+            let message = match message.filter(|text| !text.trim().is_empty()) {
+                Some(message) => Some(message),
+                None => workspace.generated_commit_message(Path::new(&project)).await,
+            };
             let done = git::commit(Path::new(&project), message, style).await?;
             let status = workspace.status_update(&project).await?;
             Ok(vec![status, Update::RequestDone { request: reply, message: done }])
@@ -365,10 +404,52 @@ impl Workspace {
         let workspace = self.clone();
         let reply = request.clone();
         self.answer(request, async move {
+            let (title, body) = workspace.pull_request_text(Path::new(&project), &title, &body).await;
             let pull = git::create_pull_request(Path::new(&project), &title, &body, draft).await?;
             workspace.forget_pull_requests(&project);
             let status = workspace.status_update(&project).await?;
             Ok(vec![status, Update::PullRequests { request: reply, pulls: vec![pull] }])
+        });
+    }
+
+    pub(crate) fn checkout_pull_request(&self, request: String, project: String, number: u64) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let root = workspace.inner.data_dir.join("worktrees");
+            let path = git::checkout_pull_request(Path::new(&project), &root, number).await?;
+            let path = path.to_string_lossy().into_owned();
+            let status = workspace.status_update(&path).await?;
+            Ok(vec![status, Update::RequestDone { request: reply, message: path }])
+        });
+    }
+
+    pub(crate) fn clone_project(&self, request: String, url: String, parent_dir: String) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let path = git::clone_project(&url, Path::new(&parent_dir)).await?;
+            let path = path.to_string_lossy().into_owned();
+            workspace.add_project_path(path.clone());
+            Ok(vec![Update::RequestDone { request: reply, message: path }])
+        });
+    }
+
+    pub(crate) fn merge_pull_request(
+        &self,
+        request: String,
+        project: String,
+        number: u64,
+        method: Option<MergeMethod>,
+    ) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let method = method.unwrap_or_else(|| workspace.current_settings().merge_method);
+            let done = git::merge_pull_request(Path::new(&project), number, method).await?;
+            workspace.forget_pull_requests(&project);
+            let status = workspace.status_update(&project).await?;
+            Ok(vec![status, Update::RequestDone { request: reply, message: done }])
         });
     }
 
@@ -552,6 +633,7 @@ impl Workspace {
             }
             workspace.inner.settings.send_replace(settings.clone());
             workspace.push(Update::Settings { settings });
+            workspace.push_overridden_projects();
         });
     }
 
