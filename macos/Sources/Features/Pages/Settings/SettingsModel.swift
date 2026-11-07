@@ -6,6 +6,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
     case general
     case appearance
     case keybindings
+    case snapshots
     case providers
     case sourceControl
     case storage
@@ -21,6 +22,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
         case .general: "General"
         case .appearance: "Appearance"
         case .keybindings: "Keybindings"
+        case .snapshots: "SnapShots"
         case .providers: "Providers"
         case .sourceControl: "Source Control"
         case .storage: "Storage"
@@ -36,6 +38,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
         case .general: "gearshape"
         case .appearance: "circle.lefthalf.filled"
         case .keybindings: "keyboard"
+        case .snapshots: "camera"
         case .providers: "sparkles"
         case .sourceControl: "arrow.triangle.branch"
         case .storage: "internaldrive"
@@ -51,6 +54,7 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
         case .general: .gray
         case .appearance: .indigo
         case .keybindings: .gray
+        case .snapshots: .pink
         case .providers: .purple
         case .sourceControl: .orange
         case .storage: .gray
@@ -74,6 +78,8 @@ enum SettingsGroup: Hashable {
     case interface
     case typography
     case shortcuts
+    case snapshotCapture
+    case snapshotFeedback
     case providerList
     case providerSignIn
     case hiddenModels
@@ -101,6 +107,8 @@ enum SettingsGroup: Hashable {
         case .interface: "Interface"
         case .typography: "Typography"
         case .shortcuts: "Shortcuts"
+        case .snapshotCapture: "Capture"
+        case .snapshotFeedback: "Feedback"
         case .providerList: "Providers"
         case .providerSignIn: "Signing In"
         case .hiddenModels: "Hidden Models"
@@ -121,6 +129,7 @@ enum SettingsGroup: Hashable {
         case .projectDefaults, .organization, .behavior, .confirmations, .textGeneration, .about, .diagnostics, .legacy: .general
         case .theme, .interface, .typography: .appearance
         case .shortcuts: .keybindings
+        case .snapshotCapture, .snapshotFeedback: .snapshots
         case .providerList, .providerSignIn, .hiddenModels: .providers
         case .git, .writing: .sourceControl
         case .worktrees, .data: .storage
@@ -145,8 +154,8 @@ enum SettingKey: CaseIterable {
     case version
     case dataFolder
     case contextMeter
-    case colorScheme
-    case contrast, diffColors, chatWidth, openLinks
+    case colorScheme, themes
+    case contrast, glassOpacity, diffColors, chatWidth, openLinks
     case interfaceFont, promptFont, codeFont, terminalFont, fontSmoothing, wordWrap
     case providers, favorites, signIn, hiddenModels
     case autoPull, fetchInterval, mergeMethod
@@ -157,6 +166,8 @@ enum SettingKey: CaseIterable {
     case machines, registry, localUsage
     case daemonStatus, remoteEnvironments
     case archivedThreads
+    case snapshotEnabled, snapshotShortcut, snapshotIncludeText, snapshotPermission
+    case snapshotSound, snapshotFlash, snapshotAnimations
 
     var group: SettingsGroup {
         switch self {
@@ -169,8 +180,8 @@ enum SettingKey: CaseIterable {
         case .version: .about
         case .dataFolder: .diagnostics
         case .contextMeter: .legacy
-        case .colorScheme: .theme
-        case .contrast, .diffColors, .chatWidth, .openLinks: .interface
+        case .colorScheme, .themes: .theme
+        case .contrast, .glassOpacity, .diffColors, .chatWidth, .openLinks: .interface
         case .interfaceFont, .promptFont, .codeFont, .terminalFont, .fontSmoothing, .wordWrap: .typography
         case .providers, .favorites: .providerList
         case .signIn: .providerSignIn
@@ -184,6 +195,8 @@ enum SettingKey: CaseIterable {
         case .daemonStatus: .daemon
         case .remoteEnvironments: .unsupported
         case .archivedThreads: .archived
+        case .snapshotEnabled, .snapshotShortcut, .snapshotIncludeText, .snapshotPermission: .snapshotCapture
+        case .snapshotSound, .snapshotFlash, .snapshotAnimations: .snapshotFeedback
         }
     }
 
@@ -222,7 +235,9 @@ enum SettingKey: CaseIterable {
         case .dataFolder: "Data folder"
         case .contextMeter: "Context window indicator"
         case .colorScheme: "Appearance"
+        case .themes: "Themes"
         case .contrast: "Contrast"
+        case .glassOpacity: "Glass opacity"
         case .diffColors: "Diff colors"
         case .chatWidth: "Chat width"
         case .openLinks: "Open links in"
@@ -257,6 +272,13 @@ enum SettingKey: CaseIterable {
         case .daemonStatus: "Eukhe daemon"
         case .remoteEnvironments: "Remote environments"
         case .archivedThreads: "Archived threads"
+        case .snapshotEnabled: "Enable SnapShots"
+        case .snapshotShortcut: "Capture shortcut"
+        case .snapshotIncludeText: "Include app text"
+        case .snapshotPermission: "Screen Recording access"
+        case .snapshotSound: "Play a sound"
+        case .snapshotFlash: "Flash the captured window"
+        case .snapshotAnimations: "Animations"
         }
     }
 
@@ -289,7 +311,9 @@ enum SettingKey: CaseIterable {
         case .dataFolder, .dataLocation: "logs finder reveal storage"
         case .contextMeter: "legacy tokens"
         case .colorScheme: "dark light system mode"
+        case .themes: "theme palette colors import vs code editor"
         case .contrast: "accessibility"
+        case .glassOpacity: "translucent transparency floating"
         case .diffColors: "colorblind red green blue orange"
         case .chatWidth: "wide full column"
         case .openLinks: "browser"
@@ -317,6 +341,9 @@ enum SettingKey: CaseIterable {
         case .daemonStatus: "socket connection"
         case .remoteEnvironments: "ssh pairing connections"
         case .archivedThreads: "unarchive restore"
+        case .snapshotEnabled, .snapshotShortcut, .snapshotPermission: "screenshot capture window screen recording"
+        case .snapshotIncludeText: "accessibility text context"
+        case .snapshotSound, .snapshotFlash, .snapshotAnimations: "screenshot feedback"
         }
     }
 

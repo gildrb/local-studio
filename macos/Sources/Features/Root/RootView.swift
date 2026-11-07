@@ -76,14 +76,8 @@ struct RootView: View {
             store.panels.focus(thread)
             shell.headerRenaming = false
         }
-        .onChange(of: store.pages.settings?.colorScheme, initial: true) { _, scheme in
-            guard let scheme else { return }
-            switch scheme {
-            case .system: NSApp.appearance = nil
-            case .light: NSApp.appearance = NSAppearance(named: .aqua)
-            case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
-            }
-        }
+        .themeRoot()
+        .onAppear { PageCommands.install(store) }
         .transaction { $0.disablesAnimations = true }
     }
 

@@ -1,0 +1,297 @@
+import AppKit
+import LocalStudioKit
+import Observation
+import SwiftUI
+import Synchronization
+
+enum ThemeToken: String, CaseIterable, Sendable {
+    case canvas, sidebar, card, primary, hairline, input, hover, selection, selectionStroke, message
+    case text, secondaryText, chromeIcon, tertiaryText, success, warning, danger, working, woke, overlay, shadow
+
+    var role: String? {
+        switch self {
+        case .canvas: "canvas"
+        case .sidebar: "sidebar"
+        case .card: "surface"
+        case .primary: "accent"
+        case .hairline: "border"
+        case .input: "input"
+        case .hover: "sidebarRowHover"
+        case .selection: "sidebarRowActive"
+        case .message: "messageSurface"
+        case .text: "text"
+        case .secondaryText: "textMuted"
+        case .chromeIcon: "iconMuted"
+        case .tertiaryText: "placeholder"
+        case .warning: "warningForeground"
+        case .danger: "errorForeground"
+        case .overlay: "surfaceOverlay"
+        case .selectionStroke, .success, .working, .woke, .shadow: nil
+        }
+    }
+
+    var isText: Bool {
+        switch self {
+        case .text, .secondaryText, .chromeIcon, .tertiaryText: true
+        default: false
+        }
+    }
+
+    var isBorder: Bool {
+        switch self {
+        case .hairline, .input, .selectionStroke: true
+        default: false
+        }
+    }
+}
+
+struct ThemePalette: Equatable, Sendable {
+    var colors: [ThemeToken: RGBA]
+
+    subscript(_ token: ThemeToken) -> RGBA {
+        colors[token] ?? RGBA(red: 0, green: 0, blue: 0, alpha: 0)
+    }
+}
+
+enum LegacyPalette {
+    private static func gray(_ value: Double, _ alpha: Double = 1) -> RGBA { RGBA(red: value, green: value, blue: value, alpha: alpha) }
+    private static func rgb(_ red: Double, _ green: Double, _ blue: Double) -> RGBA { RGBA(red: red, green: green, blue: blue) }
+
+    static let dark = ThemePalette(colors: [
+        .canvas: gray(0.0392), .sidebar: gray(0.068), .card: gray(0.068), .primary: rgb(0.2044, 0.4198, 0.9449),
+        .hairline: gray(1, 0.06), .input: gray(1, 0.08), .hover: gray(1, 0.04), .selection: gray(1, 0.07),
+        .selectionStroke: gray(1, 0.09), .message: gray(1, 0.06), .text: gray(1, 0.85), .secondaryText: gray(0.5059),
+        .chromeIcon: gray(1, 0.6), .tertiaryText: gray(0.36), .success: rgb(0.204, 0.827, 0.6), .warning: rgb(0.984, 0.749, 0.141),
+        .danger: rgb(0.973, 0.443, 0.443), .working: rgb(0.22, 0.741, 0.973), .woke: rgb(0.984, 0.573, 0.235),
+        .overlay: gray(0.086), .shadow: gray(0, 0.5),
+    ])
+
+    static let light = ThemePalette(colors: [
+        .canvas: gray(0.9895), .sidebar: gray(0.98), .card: gray(1), .primary: rgb(0.1043, 0.3071, 0.8463),
+        .hairline: rgb(0.894, 0.894, 0.906), .input: rgb(0.831, 0.831, 0.847), .hover: rgb(0.957, 0.957, 0.961),
+        .selection: rgb(0.937, 0.937, 0.945), .selectionStroke: rgb(0.894, 0.894, 0.906), .message: rgb(0.957, 0.957, 0.961),
+        .text: gray(0, 0.85), .secondaryText: rgb(0.443, 0.443, 0.478), .chromeIcon: gray(0, 0.55),
+        .tertiaryText: rgb(0.62, 0.62, 0.65), .success: rgb(0.02, 0.588, 0.412), .warning: rgb(0.851, 0.467, 0.024),
+        .danger: rgb(0.863, 0.149, 0.149), .working: rgb(0.008, 0.518, 0.78), .woke: rgb(0.918, 0.345, 0.047),
+        .overlay: gray(1), .shadow: gray(0, 0.14),
+    ])
+
+    static func palette(_ appearance: ThemeAppearance) -> ThemePalette {
+        appearance == .dark ? dark : light
+    }
+}
+
+struct ThemeSettingsSnapshot: Equatable {
+    var themeId: String
+    var custom: String
+    var contrast: UInt32
+    var glass: UInt32
+    var scheme: LocalStudioKit.ColorScheme
+    var interfaceFont: String
+    var interfaceFontSize: UInt32
+    var smoothing: Bool
+}
+
+@Observable
+final class ThemeTokens: @unchecked Sendable {
+    static let shared = ThemeTokens()
+
+    private(set) var revision = 0
+    @ObservationIgnored private let cache = Mutex<[ThemeToken: Color]>([:])
+
+    private init() {
+        cache.withLock { $0 = Self.colors([.dark: LegacyPalette.dark, .light: LegacyPalette.light]) }
+    }
+
+    func color(_ token: ThemeToken) -> Color {
+        _ = revision
+        return cache.withLock { $0[token] } ?? .clear
+    }
+
+    @MainActor func publish(_ palettes: [ThemeAppearance: ThemePalette]) {
+        let colors = Self.colors(palettes)
+        cache.withLock { $0 = colors }
+        revision += 1
+    }
+
+    private static func colors(_ palettes: [ThemeAppearance: ThemePalette]) -> [ThemeToken: Color] {
+        var colors: [ThemeToken: Color] = [:]
+        for token in ThemeToken.allCases {
+            let dark = palettes[.dark]?[token].nsColor ?? .clear
+            let light = palettes[.light]?[token].nsColor ?? .clear
+            colors[token] = Color(nsColor: NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+            })
+        }
+        return colors
+    }
+}
+
+@MainActor
+@Observable
+final class ThemeStore {
+    static let shared = ThemeStore()
+
+    private(set) var custom: [ThemeDefinition] = []
+    private(set) var activeId = ThemeLibrary.defaultId
+    private(set) var contrast: UInt32 = 100
+    private(set) var glass: UInt32 = 80
+    private(set) var interfaceFont: Font?
+    private(set) var editorOpen = false
+    var preview: ThemeDefinition? {
+        didSet { if preview != oldValue { rebuild() } }
+    }
+
+    @ObservationIgnored private(set) var palettes: [ThemeAppearance: ThemePalette] = [.dark: LegacyPalette.dark, .light: LegacyPalette.light]
+    @ObservationIgnored private var snapshot: ThemeSettingsSnapshot?
+    @ObservationIgnored let builtIns = ThemeLibrary.builtIns
+
+    private init() {
+        rebuild()
+    }
+
+    var themes: [ThemeDefinition] {
+        builtIns + custom
+    }
+
+    var active: ThemeDefinition {
+        themes.first { $0.id == activeId } ?? ThemeLibrary.standard
+    }
+
+    func isCustom(_ id: String) -> Bool {
+        custom.contains { $0.id == id }
+    }
+
+    func apply(_ settings: LocalStudioKit.Settings) {
+        let next = ThemeSettingsSnapshot(
+            themeId: settings.theme ?? ThemeLibrary.defaultId, custom: settings.customThemes, contrast: settings.contrast,
+            glass: settings.glassOpacity, scheme: settings.colorScheme, interfaceFont: settings.interfaceFont,
+            interfaceFontSize: settings.interfaceFontSize, smoothing: settings.fontSmoothing
+        )
+        if !editorOpen, preview != nil { preview = nil }
+        guard next != snapshot else { return }
+        let previous = snapshot
+        snapshot = next
+        if previous?.custom != next.custom {
+            custom = ThemeLibrary.decodeCustom(next.custom)
+        }
+        activeId = themes.contains { $0.id == next.themeId } ? next.themeId : ThemeLibrary.defaultId
+        contrast = next.contrast
+        glass = next.glass
+        let size = CGFloat(next.interfaceFontSize)
+        if next.interfaceFont.isEmpty {
+            interfaceFont = size == 13 ? nil : .system(size: size)
+        } else {
+            interfaceFont = .custom(next.interfaceFont, size: size)
+        }
+        if previous?.smoothing != next.smoothing {
+            if next.smoothing {
+                UserDefaults.standard.removeObject(forKey: "AppleFontSmoothing")
+            } else {
+                UserDefaults.standard.set(0, forKey: "AppleFontSmoothing")
+            }
+        }
+        rebuild()
+        applyAppearance(next.scheme)
+    }
+
+    func setEditorOpen(_ open: Bool) {
+        editorOpen = open
+    }
+
+    func resolvedAppearance(for scheme: LocalStudioKit.ColorScheme) -> NSAppearance.Name? {
+        let modes = (preview ?? active).modes
+        if modes.count == 1, let only = modes.first {
+            return only == .dark ? .darkAqua : .aqua
+        }
+        switch scheme {
+        case .system: return nil
+        case .light: return .aqua
+        case .dark: return .darkAqua
+        }
+    }
+
+    private func applyAppearance(_ scheme: LocalStudioKit.ColorScheme) {
+        let name = resolvedAppearance(for: scheme)
+        let target = name.flatMap(NSAppearance.init(named:))
+        if NSApp?.appearance?.name != target?.name {
+            NSApp?.appearance = target
+        }
+    }
+
+    private func rebuild() {
+        let theme = preview ?? active
+        var next: [ThemeAppearance: ThemePalette] = [:]
+        for appearance in ThemeAppearance.allCases {
+            var palette = theme.id == ThemeLibrary.defaultId && preview == nil
+                ? LegacyPalette.palette(appearance)
+                : Self.resolve(theme, appearance)
+            palette = Self.adjust(palette, contrast: Double(contrast), appearance: appearance)
+            palette.colors[.overlay]?.alpha = 0.7 + 0.3 * Double(min(glass, 100)) / 100
+            next[appearance] = palette
+        }
+        palettes = next
+        ThemeTokens.shared.publish(next)
+        if let scheme = snapshot?.scheme { applyAppearance(scheme) }
+    }
+
+    static func resolve(_ theme: ThemeDefinition, _ appearance: ThemeAppearance) -> ThemePalette {
+        let legacy = LegacyPalette.palette(appearance)
+        let source = theme.colors(for: appearance) ?? theme.colors(for: theme.appearance) ?? [:]
+        let standard = ThemeLibrary.bundle?.standard[appearance.rawValue] ?? [:]
+        func role(_ name: String) -> RGBA? {
+            (source[name] ?? standard[name]).flatMap(ThemeColorParser.parse)
+        }
+        var colors = legacy.colors
+        for token in ThemeToken.allCases {
+            if let name = token.role, let value = role(name) { colors[token] = value }
+        }
+        let text = colors[.text] ?? legacy[.text]
+        let canvas = colors[.canvas] ?? legacy[.canvas]
+        colors[.selectionStroke] = (colors[.input] ?? legacy[.input]).mixed(with: text, amount: 0.06)
+        colors[.tertiaryText] = (colors[.tertiaryText] ?? legacy[.tertiaryText]).mixed(with: canvas, amount: 0.3)
+        return ThemePalette(colors: colors)
+    }
+
+    static func adjust(_ palette: ThemePalette, contrast: Double, appearance: ThemeAppearance) -> ThemePalette {
+        guard contrast != 100 else { return palette }
+        let base = min(contrast, 100) / 100
+        let boost = max(contrast - 100, 0) / 100
+        let borderBoost = boost / 4
+        let target = appearance == .dark ? RGBA(red: 1, green: 1, blue: 1) : RGBA(red: 0, green: 0, blue: 0)
+        let background = palette[.canvas]
+        let text = palette[.text]
+        var colors = palette.colors
+        for token in ThemeToken.allCases {
+            guard var value = colors[token] else { continue }
+            if token.isText {
+                let alpha = value.alpha
+                value = value.mixed(with: background, amount: 1 - base).mixed(with: target, amount: boost)
+                value.alpha = alpha
+            } else if token.isBorder {
+                value.alpha *= base
+                value = value.mixed(with: RGBA(red: text.red, green: text.green, blue: text.blue, alpha: value.alpha), amount: borderBoost)
+            } else {
+                continue
+            }
+            colors[token] = value
+        }
+        return ThemePalette(colors: colors)
+    }
+}
+
+struct ThemeRoot: ViewModifier {
+    func body(content: Content) -> some View {
+        let store = ThemeStore.shared
+        content
+            .font(store.interfaceFont)
+            .foregroundStyle(Theme.text)
+            .tint(Theme.primary)
+    }
+}
+
+extension View {
+    func themeRoot() -> some View {
+        modifier(ThemeRoot())
+    }
+}

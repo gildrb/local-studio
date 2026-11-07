@@ -5,7 +5,6 @@ struct UsagePage: View {
     let store: StudioStore
     var leadingInset: CGFloat = 0
     @State private var mode: UsageMode
-    @FocusState private var focused: Bool
 
     init(store: StudioStore, leadingInset: CGFloat = 0, mode: UsageMode = .tokens) {
         self.store = store
@@ -39,22 +38,14 @@ struct UsagePage: View {
                     .disabled(mode == .limits)
                 }
             }
-            .background { shortcuts }
-            .focusable()
-            .focusEffectDisabled()
-            .focused($focused)
-            .onKeyPress(phases: .down) { press in
-                guard press.modifiers.isEmpty else { return .ignored }
-                for candidate in UsageMode.allCases where matches(press, command: candidate.command) {
-                    mode = candidate
-                    return .handled
-                }
-                return .ignored
-            }
-            .onAppear {
-                focused = true
-                pages.loadUsage(pages.usagePeriod)
-            }
+            .studioCommand("usage.cost", in: store) { mode = .cost }
+            .studioCommand("usage.tokens", in: store) { mode = .tokens }
+            .studioCommand("usage.limits", in: store) { mode = .limits }
+            .studioCommand("usage.period.day", in: store) { pages.loadUsage(.day) }
+            .studioCommand("usage.period.week", in: store) { pages.loadUsage(.week) }
+            .studioCommand("usage.period.month", in: store) { pages.loadUsage(.month) }
+            .studioCommand("usage.period.quarter", in: store) { pages.loadUsage(.quarter) }
+            .onAppear { pages.loadUsage(pages.usagePeriod) }
     }
 
     @ViewBuilder private var content: some View {
@@ -109,29 +100,6 @@ struct UsagePage: View {
             UsageTotal(label: "Requests", value: PageFormat.count(report.requests))
         }
     }
-
-    private var shortcuts: some View {
-        ZStack {
-            ForEach(UsagePeriods.all, id: \.self) { period in
-                if let shortcut = shortcut(for: UsagePeriods.command(period)) {
-                    Button(UsagePeriods.title(period)) { pages.loadUsage(period) }
-                        .keyboardShortcut(shortcut)
-                }
-            }
-        }
-        .opacity(0)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-
-    private func shortcut(for command: String) -> KeyboardShortcut? {
-        ShortcutFormat.keyboardShortcut(pages.keybindings.first { $0.command == command }?.shortcut)
-    }
-
-    private func matches(_ press: KeyPress, command: String) -> Bool {
-        guard let shortcut = pages.keybindings.first(where: { $0.command == command })?.shortcut else { return false }
-        return shortcut == press.characters.lowercased()
-    }
 }
 
 enum UsagePeriods {
@@ -143,15 +111,6 @@ enum UsagePeriods {
         case .week: "7 days"
         case .month: "30 days"
         case .quarter: "90 days"
-        }
-    }
-
-    static func command(_ period: UsagePeriod) -> String {
-        switch period {
-        case .day: "usage.period.day"
-        case .week: "usage.period.week"
-        case .month: "usage.period.month"
-        case .quarter: "usage.period.quarter"
         }
     }
 }
@@ -271,14 +230,6 @@ enum UsageMode: CaseIterable {
         case .cost: "Cost"
         case .tokens: "Tokens"
         case .limits: "Limits"
-        }
-    }
-
-    var command: String {
-        switch self {
-        case .cost: "usage.cost"
-        case .tokens: "usage.tokens"
-        case .limits: "usage.limits"
         }
     }
 }
