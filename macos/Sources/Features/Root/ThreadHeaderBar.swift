@@ -33,6 +33,7 @@ struct ThreadHeaderBar: View {
         .padding(.trailing, trailingInset)
         .frame(height: Theme.Metrics.titlebarHeight)
         .background(TitlebarDragArea())
+        .background(Theme.canvas)
         .sheet(item: sheetBinding(\.commitProject)) { item in
             CommitSheet(store: store, project: item.id)
         }

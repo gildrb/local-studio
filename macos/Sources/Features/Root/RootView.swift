@@ -97,6 +97,7 @@ struct RootView: View {
                 if !(panels.rightPanelOpen && panels.rightPanelMaximized) {
                     VStack(spacing: 0) {
                         ThreadHeaderBar(store: store, leadingInset: leading, trailingInset: panels.rightPanelOpen ? 10 : Theme.Metrics.trailingChromeInset)
+                            .zIndex(1)
                         ThreadView(store: store, leadingInset: 0)
                         if panels.terminalOpen {
                             TerminalDrawerSeam(store: store)
