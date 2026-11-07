@@ -28,6 +28,7 @@ final class StudioStore {
         workspace = WorkspaceStore(core: core, requests: requests)
         pages = PagesStore(core: core, requests: requests)
         workspace.panels.bind(conversation: conversation, inbox: inbox, pages: pages)
+        conversation.notify = { [weak self] level, text in self?.post(level, text) }
     }
 
     func start() throws {

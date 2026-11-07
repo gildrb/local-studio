@@ -8,7 +8,7 @@ struct ThreadView: View {
 
     var body: some View {
         Group {
-            if store.conversation.thread != nil {
+            if store.conversation.showsThread {
                 ConversationColumn(store: store)
             } else {
                 DraftHero(store: store)
