@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use gtk::gdk;
 
 const BASE: &str = r"
@@ -88,6 +90,27 @@ window, dialog { font-size: 13px; }
 .ls-branchbar dropdown > button, .ls-branchbar menubutton > button { min-height: 26px; padding: 0 8px; font-size: 12px; font-weight: normal; }
 .ls-branchbar label { font-weight: normal; }
 .ls-search-hit .title { font-family: monospace; font-size: 12px; }
+.ls-drawer { border-top: 1px solid var(--border-color); background: #0d0d0d; }
+.ls-drawer-bar { padding: 2px 6px 2px 12px; border-bottom: 1px solid var(--border-color); }
+.ls-drawer-bar button { min-width: 26px; min-height: 26px; padding: 0; }
+.ls-terminal { padding: 4px 6px; }
+.ls-panel-bar { padding: 6px 6px 6px 8px; }
+.ls-panel-bar button { min-width: 28px; min-height: 28px; }
+.ls-tab { border-radius: 8px; padding: 2px 4px 2px 8px; min-height: 26px; }
+.ls-tab:hover { background: alpha(currentColor, 0.05); }
+.ls-tab.active { background: alpha(currentColor, 0.10); }
+.ls-tab label { font-size: 12px; }
+.ls-tab-close { min-width: 18px; min-height: 18px; padding: 0; }
+.ls-launcher button { padding: 6px 10px; border-radius: 8px; }
+.ls-launcher button label { font-weight: normal; }
+.ls-keycap { font-family: monospace; font-size: 11px; padding: 0 6px; border-radius: 5px; border: 1px solid alpha(currentColor, 0.2); color: alpha(currentColor, 0.7); }
+.ls-badge { background: var(--accent-bg-color); color: white; border-radius: 999px; font-size: 9px; font-weight: 700; min-width: 14px; min-height: 14px; padding: 0 3px; margin: 2px; }
+.ls-scroll-pill { padding: 4px 14px; }
+.ls-minimap { opacity: 0.55; }
+.ls-minimap:hover { opacity: 1; }
+.ls-minimap-button { min-width: 18px; min-height: 18px; padding: 0; }
+.ls-small-toggle { font-size: 12px; font-weight: normal; min-height: 24px; padding: 0 8px; }
+.ls-setup { background: var(--card-bg-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 10px 12px; }
 ";
 
 const DARK: &str = r"
@@ -149,4 +172,86 @@ pub fn color_scheme(scheme: local_studio_core::ColorScheme) {
         local_studio_core::ColorScheme::Light => adw::ColorScheme::ForceLight,
         local_studio_core::ColorScheme::Dark => adw::ColorScheme::ForceDark,
     });
+}
+
+thread_local! {
+    static DYNAMIC: gtk::CssProvider = gtk::CssProvider::new();
+    static INSTALLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LAST: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+}
+
+pub fn preview(theme: &crate::themes::Theme) {
+    adw::StyleManager::default().set_color_scheme(if theme.dark {
+        adw::ColorScheme::ForceDark
+    } else {
+        adw::ColorScheme::ForceLight
+    });
+    let css = LAST.with(|last| format!("{}{}", last.borrow(), theme.css()));
+    DYNAMIC.with(|provider| provider.load_from_string(&css));
+}
+
+pub fn apply(settings: &local_studio_core::Settings) {
+    let theme = crate::themes::find(settings);
+    if let Some(theme) = &theme {
+        adw::StyleManager::default().set_color_scheme(if theme.dark {
+            adw::ColorScheme::ForceDark
+        } else {
+            adw::ColorScheme::ForceLight
+        });
+    }
+    let mut css = settings_css(settings);
+    if let Some(theme) = &theme {
+        css.push_str(&theme.css());
+    }
+    write!(
+        css,
+        ".ls-composer {{ background: alpha(var(--card-bg-color), {:.2}); }}\n.ls-flash {{ opacity: 0.6; }}\n",
+        0.4 + f64::from(settings.glass_opacity.min(100)) / 100.0 * 0.6
+    )
+    .ok();
+    LAST.with(|last| last.replace(settings_css(settings)));
+    DYNAMIC.with(|provider| {
+        provider.load_from_string(&css);
+        if !INSTALLED.with(|installed| installed.replace(true)) {
+            if let Some(display) = gdk::Display::default() {
+                gtk::style_context_add_provider_for_display(
+                    &display,
+                    provider,
+                    gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
+                );
+            }
+        }
+    });
+    if let Some(gtk_settings) = gtk::Settings::default() {
+        gtk_settings.set_gtk_xft_antialias(i32::from(settings.font_smoothing));
+        gtk_settings.set_gtk_hint_font_metrics(!settings.font_smoothing);
+    }
+}
+
+fn family(font: &str) -> String {
+    let font = font.trim().replace(['"', ';', '{', '}'], "");
+    if font.is_empty() {
+        String::new()
+    } else {
+        format!("font-family: \"{font}\";")
+    }
+}
+
+fn settings_css(settings: &local_studio_core::Settings) -> String {
+    let contrast = f64::from(settings.contrast.clamp(50, 200)) / 100.0;
+    let hairline = (0.06 * contrast).min(0.3);
+    let meta = (0.55 * contrast.sqrt()).min(0.9);
+    format!(
+        "window, dialog {{ {interface} font-size: {interface_size}px; }}\n\
+         .ls-composer textview, .ls-composer textview text {{ {prompt} font-size: {prompt_size}px; }}\n\
+         .ls-mono, .ls-code label, .ls-diff, .ls-diff text, .ls-tool-detail label {{ {code} font-size: {code_size}px; }}\n\
+         :root {{ --border-color: alpha(currentColor, {hairline:.3}); }}\n\
+         .ls-meta {{ color: alpha(currentColor, {meta:.3}); }}\n",
+        interface = family(&settings.interface_font),
+        interface_size = settings.interface_font_size.clamp(9, 24),
+        prompt = family(&settings.prompt_font),
+        prompt_size = settings.prompt_font_size.clamp(9, 24),
+        code = family(&settings.code_font),
+        code_size = settings.code_font_size.clamp(9, 24),
+    )
 }

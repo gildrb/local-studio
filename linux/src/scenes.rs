@@ -15,6 +15,7 @@ use crate::state::Page;
 
 const MINUTE: i64 = 60_000;
 
+#[allow(clippy::too_many_lines)]
 pub fn stage(app: &Rc<App>, scene: &str) {
     match scene {
         "16-composer-commands" => {
@@ -97,10 +98,110 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             app.open_page(Page::PullRequests);
             app.pulls.set_fixture(&pulls(), &pull_detail());
         }
+        "28-panel-launcher" => {
+            conversation(app, false);
+            app.panel.toggle_panel();
+        }
+        "29-diff-split" => {
+            conversation(app, false);
+            app.panel.show("files");
+            app.panel.show("diff");
+            app.panel.diff.set_fixture(&crate::fixtures::diff_files_public(), true);
+            app.set_panel_maximized(true);
+        }
+        "30-go-to-file" => {
+            conversation(app, false);
+            app.goto.present(app);
+            app.goto.set_fixture("side", &mentions());
+        }
+        "31-composer-meter-stash" => {
+            conversation(app, false);
+            let settings =
+                local_studio_core::Settings { context_window_meter: true, ..app.state.borrow().settings.clone() };
+            app.apply(vec![Update::Settings { settings }]);
+            app.composer.tools.set_fixture(&[
+                "Refactor the drawer so splits remember their sizes",
+                "Write the release notes for 0.5\n\n- drawer\n- launcher",
+            ]);
+            app.composer.extras.add_context(
+                "Terminal",
+                "$ cargo test -p local-studio-core\nrunning 42 tests\ntest result: ok. 42 passed",
+            );
+            app.composer.set_text("Why did the second run take longer?");
+        }
+        "32-pull-request-trigger" => {
+            conversation(app, false);
+            app.composer.type_text(app, "Follow up on #4");
+            app.composer.extras.pulls_loaded(&pulls());
+        }
+        "33-onboarding" => {
+            app.apply(vec![
+                Update::Connection { state: local_studio_core::Connection::Ready },
+                Update::Settings { settings: local_studio_core::Settings::default() },
+            ]);
+            crate::wizard::present(app);
+        }
+        "34-project-settings" => {
+            app.apply(base());
+            crate::project::present(app, &project_id("local-studio"));
+        }
+        "35-theme-editor" => {
+            conversation(app, false);
+            crate::themes::editor(app);
+        }
+        "36-theme-midnight" => {
+            conversation(app, false);
+            let settings = local_studio_core::Settings {
+                theme: Some("Midnight".to_string()),
+                ..app.state.borrow().settings.clone()
+            };
+            app.apply(vec![Update::Settings { settings }]);
+        }
+        "37-scroll-pill-minimap" => {
+            conversation(app, true);
+            app.timeline.scroll_to_start();
+        }
         "27-project-search" => {
             conversation(app, false);
             app.search.present(app);
             app.search.set_fixture("Shelf::", &project_hits());
+        }
+        "38-worktree-setup-scripts" => {
+            conversation(app, false);
+            let project = project_id("local-studio");
+            let stage = |name: &str, state, output_tail: &str| local_studio_core::SetupStage {
+                name: name.to_string(),
+                state,
+                output_tail: output_tail.to_string(),
+            };
+            let script = |id: &str, name: &str, command: &str, setup: bool| local_studio_core::ProjectScript {
+                id: id.to_string(),
+                name: name.to_string(),
+                command: command.to_string(),
+                run_on_worktree_setup: setup,
+                ..local_studio_core::ProjectScript::default()
+            };
+            app.apply(vec![
+                Update::ProjectScripts {
+                    project: project.clone(),
+                    scripts: vec![
+                        script("install", "Install", "npm install", true),
+                        script("dev", "Dev server", "npm run dev", false),
+                        script("check", "Check", "cargo clippy --workspace -- -D warnings", false),
+                    ],
+                },
+                Update::WorktreeSetup {
+                    thread: FOCUSED.to_string(),
+                    stages: vec![
+                        stage("Create worktree", local_studio_core::SetupStageState::Done, ""),
+                        stage("Copy environment files", local_studio_core::SetupStageState::Done, ""),
+                        stage("Install", local_studio_core::SetupStageState::Running, "added 1204 packages in 18s"),
+                        stage("Dev server", local_studio_core::SetupStageState::Pending, ""),
+                    ],
+                    done: false,
+                    error: None,
+                },
+            ]);
         }
         _ => {}
     }

@@ -21,6 +21,7 @@ adw = { package = "libadwaita", version = "0.9", features = ["v1_9"] }
 vte = { package = "vte4", version = "0.10", features = ["v0_84"] }
 webkit = { package = "webkit6", version = "0.6" }
 async-channel = "2"
+serde_json = "1"
 
 [lints.rust]
 unsafe_code = "deny"

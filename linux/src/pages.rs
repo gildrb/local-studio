@@ -654,7 +654,7 @@ fn usage_group(usage: Option<&LocalUsage>) -> adw::PreferencesGroup {
         &format!("{} measured", format::tokens(usage.measured_requests)),
     ));
     group.add(&metrics);
-    let chart = chart_card("Daily processed tokens", &usage.daily);
+    let chart = chart_card("Daily processed tokens", &usage.daily, false);
     chart.set_margin_top(10);
     group.add(&chart);
     let list = gtk::ListBox::new();
@@ -683,6 +683,7 @@ fn usage_group(usage: Option<&LocalUsage>) -> adw::PreferencesGroup {
 pub struct UsagePage {
     pub root: gtk::ScrolledWindow,
     periods: adw::ToggleGroup,
+    modes: adw::ToggleGroup,
     body: adw::Bin,
 }
 
@@ -698,19 +699,54 @@ impl UsagePage {
             periods.add(adw::Toggle::builder().name(name).label(label).build());
         }
         periods.set_active_name(Some("week"));
-        periods.set_halign(gtk::Align::Start);
+        let modes = adw::ToggleGroup::new();
+        for (name, label) in [("tokens", "Tokens"), ("cost", "Cost"), ("limits", "Limits")] {
+            modes.add(
+                adw::Toggle::builder().name(name).label(label).tooltip(format!("{label} ({})", &name[..1])).build(),
+            );
+        }
+        modes.set_active_name(Some("tokens"));
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+        bar.append(&periods);
+        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        spacer.set_hexpand(true);
+        bar.append(&spacer);
+        bar.append(&modes);
         let body = adw::Bin::new();
-        content.append(&periods);
+        content.append(&bar);
         content.append(&body);
         let clamp = adw::Clamp::builder().maximum_size(860).child(&content).build();
         let root = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&clamp).build();
-        let weak = app;
+        let weak = app.clone();
         periods.connect_active_name_notify(move |_| {
             if let Some(app) = weak.upgrade() {
                 app.usage.refresh(&app);
             }
         });
-        Self { root, periods, body }
+        modes.connect_active_name_notify(move |_| {
+            if let Some(app) = app.upgrade() {
+                app.usage.render(&app.state.borrow());
+            }
+        });
+        Self { root, periods, modes, body }
+    }
+
+    pub fn set_mode(&self, mode: &str) {
+        self.modes.set_active_name(Some(mode));
+    }
+
+    pub fn set_period(&self, app: &Rc<App>, period: UsagePeriod) {
+        let name = match period {
+            UsagePeriod::Day => "day",
+            UsagePeriod::Week => "week",
+            UsagePeriod::Month => "month",
+            UsagePeriod::Quarter => "quarter",
+        };
+        if self.periods.active_name().as_deref() == Some(name) {
+            self.refresh(app);
+        } else {
+            self.periods.set_active_name(Some(name));
+        }
     }
 
     fn period(&self) -> UsagePeriod {
@@ -731,7 +767,7 @@ impl UsagePage {
 
     pub fn render(&self, state: &State) {
         let child = if let Some(report) = &state.usage {
-            report_view(report)
+            report_view(report, self.modes.active_name().as_deref().unwrap_or("tokens"))
         } else {
             let label = gtk::Label::new(Some("Loading usage…"));
             label.add_css_class("dim-label");
@@ -741,7 +777,7 @@ impl UsagePage {
     }
 }
 
-fn report_view(report: &UsageReport) -> gtk::Widget {
+fn report_view(report: &UsageReport, mode: &str) -> gtk::Widget {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 20);
     let metrics = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     metrics.set_homogeneous(true);
@@ -753,7 +789,12 @@ fn report_view(report: &UsageReport) -> gtk::Widget {
     ));
     metrics.append(&metric("Sessions", &report.requests.to_string(), "with usage"));
     column.append(&metrics);
-    if !report.limits.is_empty() {
+    if mode == "limits" && report.limits.is_empty() {
+        let empty = gtk::Label::new(Some("No provider rate windows reported for this period."));
+        empty.add_css_class("dim-label");
+        column.append(&empty);
+    }
+    if !report.limits.is_empty() && mode == "limits" {
         let limits = adw::PreferencesGroup::builder()
             .title("Limits")
             .description("Provider rate windows reported by the Eukhe daemon")
@@ -784,12 +825,20 @@ fn report_view(report: &UsageReport) -> gtk::Widget {
         }
         column.append(&limits);
     }
-    column.append(&chart_card("Daily tokens", &report.daily));
+    if mode == "limits" {
+        return column.upcast();
+    }
+    let cost = mode == "cost";
+    column.append(&chart_card(if cost { "Daily cost" } else { "Daily tokens" }, &report.daily, cost));
     let group = adw::PreferencesGroup::builder().title("By model").build();
     if report.by_model.is_empty() {
         group.add(&adw::ActionRow::builder().title("No usage in this period").build());
     }
-    for model in &report.by_model {
+    let mut models: Vec<_> = report.by_model.iter().collect();
+    if cost {
+        models.sort_by(|left, right| right.cost_usd.total_cmp(&left.cost_usd));
+    }
+    for model in models {
         let row = adw::ActionRow::builder()
             .title(format::escape(&model.model))
             .subtitle(format::escape(&format!("{} · {} sessions", model.provider, model.requests)))
@@ -820,7 +869,7 @@ fn metric(title: &str, value: &str, caption: &str) -> gtk::Box {
     card
 }
 
-fn chart_card(title: &str, days: &[UsageDay]) -> gtk::Box {
+fn chart_card(title: &str, days: &[UsageDay], cost: bool) -> gtk::Box {
     let card = gtk::Box::new(gtk::Orientation::Vertical, 8);
     card.add_css_class("ls-metric");
     let label = gtk::Label::new(Some(title));
@@ -828,7 +877,7 @@ fn chart_card(title: &str, days: &[UsageDay]) -> gtk::Box {
     label.set_xalign(0.0);
     card.append(&label);
     #[allow(clippy::cast_precision_loss)]
-    let values: Vec<f64> = days.iter().map(|day| day.tokens as f64).collect();
+    let values: Vec<f64> = days.iter().map(|day| if cost { day.cost_usd } else { day.tokens as f64 }).collect();
     let first = days.first().map(|day| day.day.clone()).unwrap_or_default();
     let last = days.last().map(|day| day.day.clone()).unwrap_or_default();
     let area = gtk::DrawingArea::new();

@@ -1,27 +1,40 @@
 mod actions;
 mod app;
+mod bindings;
 mod branches;
 mod commands;
 mod composer;
 mod core;
+mod diffview;
+mod drawer;
+mod editor;
 mod extras;
 mod fixtures;
 mod format;
+mod goto;
 mod header;
 mod pages;
 mod palette;
 mod panels;
+mod prefs;
+mod project;
 mod pulls;
 mod scenes;
 mod search;
 mod settings;
+mod setup;
 mod sidebar;
 mod smoke;
 mod snapshot;
+mod sound;
 mod state;
 mod surfaces;
 mod theme;
+mod themes;
 mod timeline;
+mod tools;
+mod wizard;
+mod workbench;
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -80,6 +93,7 @@ fn main() -> glib::ExitCode {
         activation.replace(Some(Rc::clone(&app)));
         match &mode {
             Mode::App => {
+                app.interactive.set(true);
                 app.start_core();
                 app.window.present();
             }

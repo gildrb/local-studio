@@ -7,6 +7,7 @@ pub struct Header {
     pub bar: adw::HeaderBar,
     toggle: gtk::ToggleButton,
     new_thread: gtk::Button,
+    back: gtk::Button,
     crumb: gtk::MenuButton,
     project: gtk::Label,
     slash: gtk::Label,
@@ -14,13 +15,17 @@ pub struct Header {
     chevron: gtk::Image,
     page_title: gtk::Label,
     branch: gtk::Label,
-    diff: gtk::Button,
+    panel: gtk::Overlay,
+    badge: gtk::Label,
     terminal: gtk::Button,
     git: adw::SplitButton,
+    open: adw::SplitButton,
+    scripts: gtk::MenuButton,
 }
 
 impl Header {
-    pub fn build() -> Self {
+    #[allow(clippy::too_many_lines)]
+    pub fn build(editors: &gtk::gio::Menu) -> Self {
         let bar = adw::HeaderBar::new();
         let toggle = gtk::ToggleButton::builder()
             .icon_name("sidebar-show-symbolic")
@@ -33,6 +38,13 @@ impl Header {
             .build();
         bar.pack_start(&toggle);
         bar.pack_start(&new_thread);
+        let back = gtk::Button::builder()
+            .icon_name("go-previous-symbolic")
+            .tooltip_text("Back to Threads")
+            .action_name("win.back-to-thread")
+            .visible(false)
+            .build();
+        bar.pack_start(&back);
         let project = gtk::Label::new(None);
         project.add_css_class("ls-crumb-project");
         let slash = gtk::Label::new(Some("/"));
@@ -62,10 +74,25 @@ impl Header {
             .tooltip_text("Terminal (Ctrl+J)")
             .action_name("win.toggle-terminal")
             .build();
-        let diff = gtk::Button::builder()
+        let panel_button = gtk::Button::builder()
             .icon_name("sidebar-show-right-symbolic")
-            .tooltip_text("Diff (Ctrl+D)")
-            .action_name("win.toggle-diff")
+            .tooltip_text("Right Panel (Ctrl+Alt+B)")
+            .action_name("win.toggle-panel")
+            .build();
+        let badge = gtk::Label::new(None);
+        badge.add_css_class("ls-badge");
+        badge.set_halign(gtk::Align::End);
+        badge.set_valign(gtk::Align::Start);
+        badge.set_can_target(false);
+        badge.set_visible(false);
+        let panel = gtk::Overlay::new();
+        panel.set_child(Some(&panel_button));
+        panel.add_overlay(&badge);
+        let open = adw::SplitButton::builder()
+            .label("Open")
+            .tooltip_text("Open in Editor (Ctrl+O)")
+            .action_name("win.open-editor")
+            .menu_model(editors)
             .build();
         let branch = gtk::Label::new(None);
         branch.add_css_class("ls-pill");
@@ -79,11 +106,41 @@ impl Header {
         menu.append(Some("Publish Repository…"), Some("win.git-publish"));
         let git = adw::SplitButton::builder().label("Commit").menu_model(&menu).build();
         git.set_visible(false);
-        bar.pack_end(&diff);
+        bar.pack_end(&panel);
         bar.pack_end(&terminal);
         bar.pack_end(&git);
+        let scripts = gtk::MenuButton::builder()
+            .icon_name("media-playback-start-symbolic")
+            .tooltip_text("Run Project Script")
+            .visible(false)
+            .build();
+        bar.pack_end(&scripts);
+        bar.pack_end(&open);
         bar.pack_end(&branch);
-        Self { bar, toggle, new_thread, crumb, project, slash, title, chevron, page_title, branch, diff, terminal, git }
+        Self {
+            bar,
+            toggle,
+            new_thread,
+            back,
+            crumb,
+            project,
+            slash,
+            title,
+            chevron,
+            page_title,
+            branch,
+            panel,
+            badge,
+            terminal,
+            git,
+            open,
+            scripts,
+        }
+    }
+
+    pub fn set_agents(&self, running: usize) {
+        self.badge.set_visible(running > 0);
+        self.badge.set_label(&running.to_string());
     }
 
     pub fn bind_split(&self, split: &adw::OverlaySplitView) {
@@ -93,13 +150,29 @@ impl Header {
         }
     }
 
+    fn render_scripts(&self, state: &State, project: Option<&str>, workspace: bool) {
+        let scripts = project.and_then(|project| state.scripts.get(project)).filter(|scripts| !scripts.is_empty());
+        self.scripts.set_visible(workspace && scripts.is_some());
+        if let Some(scripts) = scripts {
+            let menu = gtk::gio::Menu::new();
+            for script in scripts {
+                let item = gtk::gio::MenuItem::new(Some(&script.name), None);
+                item.set_action_and_target_value(Some("win.run-script"), Some(&script.id.to_variant()));
+                menu.append_item(&item);
+            }
+            self.scripts.set_menu_model(Some(&menu));
+        }
+    }
+
     pub fn render(&self, state: &State) {
         let on_thread = state.page == Page::Thread;
         self.crumb.set_visible(on_thread);
         self.page_title.set_visible(!on_thread);
+        self.back.set_visible(!on_thread);
         let workspace = on_thread && state.workspace_dir().is_some();
-        self.diff.set_visible(workspace);
+        self.panel.set_visible(on_thread);
         self.terminal.set_visible(workspace);
+        self.open.set_visible(workspace);
         self.page_title.set_label(match state.page {
             Page::Thread => "",
             Page::Local => "Local",
@@ -116,8 +189,9 @@ impl Header {
         };
         let project_name = state.project_name(project.as_deref());
         self.project.set_label(project_name.as_deref().unwrap_or_default());
-        self.project.set_visible(project_name.is_some());
         self.slash.set_visible(project_name.is_some());
+        self.render_scripts(state, project.as_deref(), workspace);
+        self.project.set_visible(project_name.is_some());
         let title = match &state.selected {
             Some(thread) => state
                 .info

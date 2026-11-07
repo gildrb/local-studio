@@ -10,23 +10,6 @@ use crate::state::Page;
 type AppAction = fn(&Rc<App>);
 type ThreadAction = fn(&Rc<App>, String);
 
-const BINDINGS: [(&str, &str); 14] = [
-    ("sidebar.toggle", "win.toggle-sidebar"),
-    ("chat.new", "win.new-thread"),
-    ("chat.newWithoutProject", "win.new-thread-without-project"),
-    ("commandPalette.toggle", "win.palette"),
-    ("terminal.toggle", "win.toggle-terminal"),
-    ("diff.toggle", "win.toggle-diff"),
-    ("rightPanel.toggle", "win.toggle-panel"),
-    ("usage.open", "win.usage"),
-    ("projectSearch.toggle", "win.project-search"),
-    ("thread.settle", "win.current-settle"),
-    ("thread.pin", "win.current-pin"),
-    ("thread.previous", "win.thread-previous"),
-    ("thread.next", "win.thread-next"),
-    ("thread.undo", "win.undo"),
-];
-
 pub fn install(app: &Rc<App>) {
     let plain: [(&str, AppAction); 16] = [
         ("undo", |app| {
@@ -59,7 +42,7 @@ pub fn install(app: &Rc<App>) {
         ("thread-next", |app| step(app, 1)),
         ("project-search", |app| app.search.present(app)),
         ("pull-requests", |app| app.open_page(Page::PullRequests)),
-        ("toggle-panel", |app| app.panel.root.set_visible(!app.panel.root.is_visible())),
+        ("toggle-panel", |app| app.panel.toggle_panel()),
         ("git-pull", |app| git(app, "Pulling…", local_studio_core::Studio::pull)),
         ("git-publish", publish),
     ];
@@ -158,18 +141,6 @@ fn install_keys(app: &Rc<App>) {
         }
     });
     app.window.add_controller(focus);
-}
-
-pub fn apply_keybindings(app: &App) {
-    let bindings = app.state.borrow().keybindings.clone();
-    for binding in &bindings {
-        let action = BINDINGS.iter().find(|(command, _)| *command == binding.command).map(|(_, action)| *action);
-        let jump = binding.command.strip_prefix("thread.jump.").map(|index| format!("win.thread-jump({index})"));
-        let Some(action) = action.map(str::to_string).or(jump) else { continue };
-        let accel = binding.shortcut.as_deref().map(crate::format::accelerator);
-        let accels: Vec<&str> = accel.iter().map(String::as_str).collect();
-        app.application.set_accels_for_action(&action, &accels);
-    }
 }
 
 pub fn bulk_menu() -> gio::Menu {

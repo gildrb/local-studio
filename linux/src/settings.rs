@@ -11,7 +11,6 @@ use local_studio_core::{
 use crate::app::App;
 use crate::format;
 use crate::state::{short_path, Page, State};
-use crate::theme;
 
 const CLEANUP_DAYS: [Option<u32>; 6] = [None, Some(1), Some(3), Some(7), Some(14), Some(30)];
 
@@ -107,6 +106,23 @@ impl SettingsDialog {
             }
         });
         group.set_header_suffix(Some(&refresh));
+        if let Some(daemon) = &state.daemon {
+            let mut parts = Vec::new();
+            parts.extend(daemon.version.as_ref().map(|version| format!("Version {version}")));
+            parts.extend(daemon.pid.map(|pid| format!("Supervisor PID {pid}")));
+            parts.push(daemon.socket.clone());
+            let row = adw::ActionRow::builder()
+                .title("Eukhe daemon")
+                .subtitle(format::escape(&parts.join(" · ")))
+                .subtitle_selectable(true)
+                .build();
+            let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+            dot.add_css_class("ls-dot");
+            dot.add_css_class("serving");
+            dot.set_valign(gtk::Align::Center);
+            row.add_prefix(&dot);
+            group.add(&row);
+        }
         if state.providers.is_empty() {
             group.add(
                 &adw::ActionRow::builder()
@@ -269,17 +285,21 @@ fn group(page: &adw::PreferencesPage, title: &str) -> adw::PreferencesGroup {
     group
 }
 
-fn update(app: &Weak<App>, change: impl FnOnce(&mut Settings)) {
+fn update(app: &Weak<App>, edit: impl FnOnce(&mut Settings)) {
     let Some(app) = app.upgrade() else { return };
     if app.syncing.get() {
         return;
     }
+    change(&app, edit);
+}
+
+pub fn change(app: &Rc<App>, edit: impl FnOnce(&mut Settings)) {
     let settings = {
         let mut state = app.state.borrow_mut();
-        change(&mut state.settings);
+        edit(&mut state.settings);
         state.settings.clone()
     };
-    theme::color_scheme(settings.color_scheme);
+    app.apply_settings(&settings);
     app.render(crate::app::Dirty { composer: true, sidebar: true, ..crate::app::Dirty::default() });
     app.core.run(|studio| studio.update_settings(settings));
 }
@@ -777,6 +797,35 @@ fn general_page(app: &Weak<App>, state: &State) -> adw::PreferencesPage {
 #[allow(clippy::too_many_lines)]
 fn appearance_page(app: &Weak<App>) -> adw::PreferencesPage {
     let page = page("appearance", "Appearance", "applications-graphics-symbolic");
+    let themes = group(&page, "Theme");
+    let names: Vec<String> = crate::themes::all(&current(app)).into_iter().map(|theme| theme.name).collect();
+    let mut labels = vec!["Default (follows color scheme)".to_string()];
+    labels.extend(names.iter().cloned());
+    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let lookup = names.clone();
+    combo(
+        &themes,
+        app,
+        "Theme",
+        "Colors for the whole window",
+        &refs,
+        move |settings| {
+            settings
+                .theme
+                .as_ref()
+                .and_then(|theme| lookup.iter().position(|name| name == theme))
+                .map_or(0, |index| index + 1)
+        },
+        move |settings, index| settings.theme = index.checked_sub(1).and_then(|index| names.get(index).cloned()),
+    );
+    let actions =
+        adw::ActionRow::builder().title("Custom themes").subtitle("Import a VS Code theme or edit your own").build();
+    for (label, action) in [("Import…", "win.theme-import"), ("Edit…", "win.theme-editor")] {
+        let button = gtk::Button::builder().label(label).action_name(action).valign(gtk::Align::Center).build();
+        button.add_css_class("flat");
+        actions.add_suffix(&button);
+    }
+    themes.add(&actions);
     let interface = group(&page, "Interface");
     combo(
         &interface,
@@ -832,6 +881,59 @@ fn appearance_page(app: &Weak<App>) -> adw::PreferencesPage {
                 2 => ChatWidth::Full,
                 _ => ChatWidth::Normal,
             };
+        },
+    );
+    spin(
+        &interface,
+        app,
+        "Glass opacity",
+        "Composer surface, percent",
+        (0, 100, 5),
+        |settings| settings.glass_opacity,
+        |settings, value| {
+            settings.glass_opacity = value;
+        },
+    );
+    let snapshots = group(&page, "SnapShots");
+    snapshots.set_description(Some("Ctrl+Alt+Shift+S captures this window into the composer."));
+    switch(
+        &snapshots,
+        app,
+        "Enable SnapShots",
+        "",
+        |settings| settings.snapshot_enabled,
+        |settings, value| {
+            settings.snapshot_enabled = value;
+        },
+    );
+    switch(
+        &snapshots,
+        app,
+        "Include conversation text",
+        "",
+        |settings| settings.snapshot_include_text,
+        |settings, value| {
+            settings.snapshot_include_text = value;
+        },
+    );
+    switch(
+        &snapshots,
+        app,
+        "Play a sound",
+        "",
+        |settings| settings.snapshot_play_sound,
+        |settings, value| {
+            settings.snapshot_play_sound = value;
+        },
+    );
+    switch(
+        &snapshots,
+        app,
+        "Flash the window",
+        "",
+        |settings| settings.snapshot_flash,
+        |settings, value| {
+            settings.snapshot_flash = value;
         },
     );
     let typography = group(&page, "Typography");

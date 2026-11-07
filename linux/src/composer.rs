@@ -36,6 +36,8 @@ pub struct Composer {
     shortcut: Cell<SendShortcut>,
     app: Weak<App>,
     pub extras: Extras,
+    pub tools: crate::tools::Tools,
+    setup: crate::setup::SetupCard,
 }
 
 impl Composer {
@@ -81,7 +83,11 @@ impl Composer {
         decline.add_css_class("flat");
         let approve = gtk::Button::with_label("Approve");
         approve.add_css_class("suggested-action");
+        let always = gtk::Button::with_label("Always Allow");
+        always.add_css_class("flat");
+        always.set_tooltip_text(Some("Approve and allow these effects for the rest of this session"));
         approval_buttons.append(&decline);
+        approval_buttons.append(&always);
         approval_buttons.append(&approve);
         approval.append(&approval_top);
         approval.append(&approval_command);
@@ -135,11 +141,15 @@ impl Composer {
         send.add_css_class("ls-send");
         send.add_css_class("suggested-action");
         let extras = Extras::new(app.clone());
+        let tools = crate::tools::Tools::new(&app);
+        let setup = crate::setup::SetupCard::new();
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         footer.append(&extras.attach);
         footer.append(&model);
         footer.append(&thinking);
         footer.append(&access);
+        footer.append(&tools.meter);
+        footer.append(&tools.stash);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         spacer.set_hexpand(true);
         footer.append(&spacer);
@@ -154,6 +164,7 @@ impl Composer {
         card.append(&overlay);
         card.append(&footer);
         column.append(&working);
+        column.append(&setup.root);
         column.append(&queue);
         column.append(&card);
         let root = adw::Clamp::builder().maximum_size(820).tightening_threshold(640).child(&column).build();
@@ -229,7 +240,11 @@ impl Composer {
                 app.core.run(|studio| studio.abort(thread));
             }
         });
-        for (button, answer) in [(&approve, ApprovalAnswer::Approve), (&decline, ApprovalAnswer::Deny)] {
+        for (button, answer) in [
+            (&approve, ApprovalAnswer::Approve),
+            (&always, ApprovalAnswer::AlwaysAllowSession),
+            (&decline, ApprovalAnswer::Deny),
+        ] {
             let weak = app.clone();
             button.connect_clicked(move |_| {
                 let Some(app) = weak.upgrade() else { return };
@@ -336,6 +351,8 @@ impl Composer {
             shortcut: Cell::new(SendShortcut::Enter),
             app,
             extras,
+            tools,
+            setup,
         }
     }
 
@@ -364,6 +381,23 @@ impl Composer {
         self.extras.changed(app, &self.view);
     }
 
+    pub fn open_picker(&self, which: &str) {
+        let dropdown = match which {
+            "model" => &self.model,
+            "thinking" => &self.thinking,
+            _ => &self.access,
+        };
+        if dropdown.is_visible() {
+            dropdown.activate();
+        }
+    }
+
+    pub fn submit_steer(&self, app: &std::rc::Rc<App>) {
+        app.force_steer.set(true);
+        self.submit(app);
+        app.force_steer.set(false);
+    }
+
     pub fn focus(&self) {
         self.view.grab_focus();
     }
@@ -376,15 +410,22 @@ impl Composer {
         if text.is_empty() && !self.extras.has_attachments() {
             return;
         }
-        let (images, files) = self.extras.take();
+        let (images, files, contexts) = self.extras.take();
         self.extras.remember(&text);
         self.set_text("");
-        app.send(PromptDraft { text, images, files });
+        let mut prompt: Vec<String> =
+            contexts.iter().map(|(label, body)| format!("{label} output:\n```\n{body}\n```")).collect();
+        if !text.is_empty() {
+            prompt.push(text);
+        }
+        app.send(PromptDraft { text: prompt.join("\n\n"), images, files });
     }
 
     #[allow(clippy::too_many_lines)]
     pub fn render(&self, state: &State) {
         self.shortcut.set(state.settings.send_shortcut);
+        self.tools.render(state);
+        self.setup.render(state);
         let info = state.selected.as_ref().and(state.info.as_ref());
         let busy = info.is_some_and(|info| info.busy);
         self.stop.set_visible(busy);

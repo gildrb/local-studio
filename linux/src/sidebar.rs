@@ -508,6 +508,9 @@ impl Sidebar {
                 let item = gio::MenuItem::new(Some("Remove Project"), None);
                 item.set_action_and_target_value(Some("win.project-remove"), Some(&id.to_variant()));
                 menu.append_item(&item);
+                let item = gio::MenuItem::new(Some("Project Settings…"), None);
+                item.set_action_and_target_value(Some("win.project-settings"), Some(&id.to_variant()));
+                menu.append_item(&item);
                 let more = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).build();
                 more.add_css_class("flat");
                 more.set_valign(gtk::Align::Center);
@@ -877,7 +880,12 @@ fn rename_entry(app: &Weak<App>, row: &ThreadRow) -> gtk::Widget {
                 let id = id.clone();
                 app.core.run(|studio| studio.rename_thread(id, title));
             }
-            app.render(Dirty { sidebar: true, ..Dirty::default() });
+            let weak = Rc::downgrade(&app);
+            glib::idle_add_local_once(move || {
+                if let Some(app) = weak.upgrade() {
+                    app.render(Dirty { sidebar: true, ..Dirty::default() });
+                }
+            });
         }
     };
     let on_activate = finish.clone();
