@@ -146,6 +146,9 @@ impl DiffView {
             app: app.clone(),
         };
         diff.install_tags(DiffColors::RedGreen);
+        for view in [&diff.stacked, &diff.left, &diff.right] {
+            crate::highlight::ensure_tags(&view.buffer());
+        }
         diff.connect(app);
         diff
     }
@@ -486,32 +489,64 @@ impl DiffView {
                 }
                 continue;
             }
+            let mut sides = self.sides(file);
             for hunk in &file.hunks {
                 if split {
                     push(&self.left, &format!("{}\n", hunk.header), Some("hunk"));
                     push(&self.right, &format!("{}\n", hunk.header), Some("hunk"));
-                    self.split_lines(&hunk.lines);
+                    self.split_lines(&hunk.lines, &mut sides);
                 } else {
                     push(&self.stacked, &format!("{}\n", hunk.header), Some("hunk"));
                     for line in &hunk.lines {
-                        let (prefix, tag) = match line.kind {
-                            DiffLineKind::Added => ("+", Some("add")),
-                            DiffLineKind::Removed => ("-", Some("del")),
-                            DiffLineKind::Context => (" ", None),
+                        let (prefix, tag, segments) = match line.kind {
+                            DiffLineKind::Added => ("+", Some("add"), sides.next_new()),
+                            DiffLineKind::Removed => ("-", Some("del"), sides.next_old()),
+                            DiffLineKind::Context => {
+                                sides.next_old();
+                                (" ", None, sides.next_new())
+                            }
                         };
-                        push(&self.stacked, &format!("{prefix}{}\n", line.text), tag);
+                        push_code(&self.stacked, prefix, &line.text, segments.as_deref(), tag);
                     }
                 }
             }
         }
     }
 
-    fn split_lines(&self, lines: &[DiffLine]) {
+    fn sides(&self, file: &FileDiff) -> Sides {
+        let lines = |keep: DiffLineKind| -> Vec<String> {
+            file.hunks
+                .iter()
+                .flat_map(|hunk| hunk.lines.iter())
+                .filter(|line| line.kind == DiffLineKind::Context || line.kind == keep)
+                .map(|line| line.text.clone())
+                .collect()
+        };
+        let refresh = || {
+            let weak = self.app.clone();
+            move |_: crate::highlight::Lines| {
+                if let Some(app) = weak.upgrade() {
+                    app.panel.diff.render();
+                }
+            }
+        };
+        let path = Some(file.path.as_str());
+        Sides {
+            old: crate::highlight::lines(&lines(DiffLineKind::Removed), None, path, refresh()),
+            new: crate::highlight::lines(&lines(DiffLineKind::Added), None, path, refresh()),
+            old_index: 0,
+            new_index: 0,
+        }
+    }
+
+    fn split_lines(&self, lines: &[DiffLine], sides: &mut Sides) {
         let mut index = 0;
         while index < lines.len() {
             if lines[index].kind == DiffLineKind::Context {
-                push(&self.left, &format!(" {}\n", lines[index].text), None);
-                push(&self.right, &format!(" {}\n", lines[index].text), None);
+                let old = sides.next_old();
+                let new = sides.next_new();
+                push_code(&self.left, " ", &lines[index].text, old.as_deref(), None);
+                push_code(&self.right, " ", &lines[index].text, new.as_deref(), None);
                 index += 1;
                 continue;
             }
@@ -523,11 +558,17 @@ impl DiffView {
             index += added.len();
             for row in 0..removed.len().max(added.len()) {
                 match removed.get(row) {
-                    Some(line) => push(&self.left, &format!("-{}\n", line.text), Some("del")),
+                    Some(line) => {
+                        let segments = sides.next_old();
+                        push_code(&self.left, "-", &line.text, segments.as_deref(), Some("del"));
+                    }
                     None => push(&self.left, "\n", Some("blank")),
                 }
                 match added.get(row) {
-                    Some(line) => push(&self.right, &format!("+{}\n", line.text), Some("add")),
+                    Some(line) => {
+                        let segments = sides.next_new();
+                        push_code(&self.right, "+", &line.text, segments.as_deref(), Some("add"));
+                    }
                     None => push(&self.right, "\n", Some("blank")),
                 }
             }
@@ -542,6 +583,42 @@ impl DiffView {
         self.request.replace(Some("fixture".to_string()));
         self.show(files);
     }
+}
+
+struct Sides {
+    old: Option<crate::highlight::Lines>,
+    new: Option<crate::highlight::Lines>,
+    old_index: usize,
+    new_index: usize,
+}
+
+impl Sides {
+    fn next_old(&mut self) -> Option<Vec<local_studio_core::CodeSegment>> {
+        let found = self.old.as_ref().and_then(|lines| lines.get(self.old_index).cloned());
+        self.old_index += 1;
+        found
+    }
+
+    fn next_new(&mut self) -> Option<Vec<local_studio_core::CodeSegment>> {
+        let found = self.new.as_ref().and_then(|lines| lines.get(self.new_index).cloned());
+        self.new_index += 1;
+        found
+    }
+}
+
+fn push_code(
+    view: &gtk::TextView,
+    prefix: &str,
+    text: &str,
+    segments: Option<&[local_studio_core::CodeSegment]>,
+    tag: Option<&str>,
+) {
+    push(view, prefix, tag);
+    match segments {
+        Some(segments) => crate::highlight::insert(&view.buffer(), segments, tag),
+        None => push(view, text, tag),
+    }
+    push(view, "\n", tag);
 }
 
 fn push(view: &gtk::TextView, text: &str, tag: Option<&str>) {

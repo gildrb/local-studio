@@ -306,6 +306,10 @@ fn files() -> Vec<FileEntry> {
 
 const PREVIEW: &str = "use local_studio_core::{Branch, WorktreeChoice};\n\npub fn choice(worktree: bool, pick: Option<Branch>) -> WorktreeChoice {\n    match (worktree, pick) {\n        (false, _) => WorktreeChoice::Local,\n        (true, Some(branch)) => match branch.worktree {\n            Some(path) => WorktreeChoice::Existing { path },\n            None => WorktreeChoice::NewWorktree { branch: branch.name, base: None },\n        },\n        (true, None) => WorktreeChoice::NewWorktree { branch: \"local-studio/draft\".to_string(), base: None },\n    }\n}\n";
 
+pub fn preview_sample() -> String {
+    PREVIEW.repeat(4)
+}
+
 fn pulls() -> Vec<PullRequest> {
     [
         (412, "Linux client on GTK4 and libadwaita", "OPEN", "passing", "linux/gtk"),

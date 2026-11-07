@@ -1,243 +1,240 @@
+use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+use std::hash::{Hash, Hasher};
+use std::rc::Rc;
+
+use gtk::prelude::*;
+use gtk::{gio, glib};
+use local_studio_core::{CodeSegment, SyntaxKind};
 
 use crate::colors::Syntax;
 use crate::format;
 
-const KEYWORDS: [&str; 74] = [
-    "as",
-    "async",
-    "await",
-    "break",
-    "case",
-    "catch",
-    "class",
-    "const",
-    "continue",
-    "crate",
-    "def",
-    "default",
-    "defer",
-    "del",
-    "do",
-    "elif",
-    "else",
-    "enum",
-    "except",
-    "export",
-    "extends",
-    "extern",
-    "finally",
-    "fn",
-    "for",
-    "from",
-    "func",
-    "function",
-    "go",
-    "guard",
-    "if",
-    "impl",
-    "import",
-    "in",
-    "interface",
-    "is",
-    "lambda",
-    "let",
-    "loop",
-    "match",
-    "mod",
-    "module",
-    "move",
-    "mut",
-    "new",
-    "package",
-    "pass",
-    "private",
-    "protected",
-    "pub",
-    "public",
-    "raise",
-    "ref",
-    "return",
-    "static",
-    "struct",
-    "super",
-    "switch",
-    "throw",
-    "trait",
-    "try",
-    "type",
-    "typeof",
-    "unsafe",
-    "use",
-    "var",
-    "where",
-    "while",
-    "with",
-    "yield",
-    "then",
-    "fi",
-    "done",
-    "esac",
+const ASYNC_BYTES: usize = 2 * 1024;
+const CACHE_LIMIT: usize = 256;
+
+pub type Segments = Rc<Vec<CodeSegment>>;
+pub type Lines = Rc<Vec<Vec<CodeSegment>>>;
+
+const KINDS: [SyntaxKind; 14] = [
+    SyntaxKind::Plain,
+    SyntaxKind::Comment,
+    SyntaxKind::Keyword,
+    SyntaxKind::Operator,
+    SyntaxKind::String,
+    SyntaxKind::Function,
+    SyntaxKind::Type,
+    SyntaxKind::Property,
+    SyntaxKind::Constant,
+    SyntaxKind::Number,
+    SyntaxKind::Parameter,
+    SyntaxKind::Builtin,
+    SyntaxKind::Punctuation,
+    SyntaxKind::Variable,
 ];
 
-const BUILTINS: [&str; 16] = [
-    "true",
-    "false",
-    "null",
-    "nil",
-    "None",
-    "True",
-    "False",
-    "self",
-    "Self",
-    "this",
-    "undefined",
-    "Some",
-    "Ok",
-    "Err",
-    "echo",
-    "print",
-];
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Plain,
-    Keyword,
-    Operator,
-    Str,
-    Function,
-    Type,
-    Property,
-    Constant,
-    Number,
-    Builtin,
-    Parameter,
-    Comment,
-    Punctuation,
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct Key {
+    hash: u64,
+    language: Option<String>,
+    path: Option<String>,
 }
 
-fn hash_comments(language: Option<&str>) -> bool {
-    matches!(
-        language.map(str::to_ascii_lowercase).as_deref(),
-        Some(
-            "sh" | "bash"
-                | "zsh"
-                | "fish"
-                | "shell"
-                | "console"
-                | "py"
-                | "python"
-                | "rb"
-                | "ruby"
-                | "yaml"
-                | "yml"
-                | "toml"
-                | "nix"
-                | "make"
-                | "makefile"
-                | "dockerfile"
-                | "conf"
-                | "ini"
-        )
-    )
+#[derive(Default)]
+struct Store {
+    segments: HashMap<Key, Segments>,
+    lines: HashMap<Key, Lines>,
+    pending: HashSet<Key>,
+    buffers: Vec<glib::WeakRef<gtk::TextBuffer>>,
 }
 
-pub fn markup(code: &str, language: Option<&str>, syntax: &Syntax) -> String {
-    let hashes = hash_comments(language);
-    let chars: Vec<char> = code.chars().collect();
+thread_local! {
+    static STORE: RefCell<Store> = RefCell::new(Store::default());
+}
+
+fn key(text: &impl Hash, language: Option<&str>, path: Option<&str>) -> Key {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    Key { hash: hasher.finish(), language: language.map(str::to_string), path: path.map(str::to_string) }
+}
+
+pub fn color(kind: SyntaxKind, syntax: &Syntax) -> &'static str {
+    match kind {
+        SyntaxKind::Plain | SyntaxKind::Variable => syntax.default,
+        SyntaxKind::Comment => syntax.comment,
+        SyntaxKind::Keyword => syntax.keyword,
+        SyntaxKind::Operator => syntax.operator,
+        SyntaxKind::String => syntax.string,
+        SyntaxKind::Function => syntax.function,
+        SyntaxKind::Type => syntax.types,
+        SyntaxKind::Property => syntax.property,
+        SyntaxKind::Constant => syntax.constant,
+        SyntaxKind::Number => syntax.number,
+        SyntaxKind::Parameter => syntax.parameter,
+        SyntaxKind::Builtin => syntax.builtin,
+        SyntaxKind::Punctuation => syntax.punctuation,
+    }
+}
+
+fn tag_name(kind: SyntaxKind) -> String {
+    format!("syntax-{kind:?}")
+}
+
+pub fn markup(segments: &[CodeSegment], syntax: &Syntax) -> String {
     let mut out = String::new();
-    let mut index = 0;
-    let mut depth = 0_i32;
-    let mut previous_dot = false;
-    while index < chars.len() {
-        let ch = chars[index];
-        let start = index;
-        let kind = if (ch == '/' && chars.get(index + 1) == Some(&'/')) || (ch == '#' && hashes) {
-            while index < chars.len() && chars[index] != '\n' {
-                index += 1;
-            }
-            Kind::Comment
-        } else if ch == '/' && chars.get(index + 1) == Some(&'*') {
-            index += 2;
-            while index < chars.len() && !(chars[index] == '*' && chars.get(index + 1) == Some(&'/')) {
-                index += 1;
-            }
-            index = (index + 2).min(chars.len());
-            Kind::Comment
-        } else if matches!(ch, '"' | '\'' | '`') {
-            index += 1;
-            while index < chars.len() && chars[index] != ch && chars[index] != '\n' {
-                if chars[index] == '\\' {
-                    index += 1;
-                }
-                index += 1;
-            }
-            index = (index + 1).min(chars.len());
-            Kind::Str
-        } else if ch.is_ascii_digit() {
-            while index < chars.len() && (chars[index].is_ascii_alphanumeric() || matches!(chars[index], '.' | '_')) {
-                index += 1;
-            }
-            Kind::Number
-        } else if ch.is_alphabetic() || ch == '_' {
-            while index < chars.len() && (chars[index].is_alphanumeric() || chars[index] == '_') {
-                index += 1;
-            }
-            let word: String = chars[start..index].iter().collect();
-            let next = chars[index..].iter().find(|next| !next.is_whitespace());
-            if KEYWORDS.contains(&word.as_str()) {
-                Kind::Keyword
-            } else if BUILTINS.contains(&word.as_str()) {
-                Kind::Builtin
-            } else if next == Some(&'(') || next == Some(&'!') {
-                Kind::Function
-            } else if previous_dot {
-                Kind::Property
-            } else if depth > 0 && next == Some(&':') && chars.get(index + 1) != Some(&':') {
-                Kind::Parameter
-            } else if word.chars().all(|ch| ch.is_uppercase() || ch == '_' || ch.is_ascii_digit()) && word.len() > 1 {
-                Kind::Constant
-            } else if word.chars().next().is_some_and(char::is_uppercase) {
-                Kind::Type
-            } else {
-                Kind::Plain
-            }
-        } else if matches!(ch, '=' | '+' | '-' | '*' | '/' | '<' | '>' | '!' | '&' | '|' | '%' | '^' | '?' | '~') {
-            index += 1;
-            Kind::Operator
-        } else if matches!(ch, '(' | ')' | '{' | '}' | '[' | ']' | ',' | ';' | ':' | '.') {
-            depth += match ch {
-                '(' => 1,
-                ')' => -1,
-                _ => 0,
-            };
-            index += 1;
-            Kind::Punctuation
-        } else {
-            index += 1;
-            Kind::Plain
-        };
-        if !ch.is_whitespace() {
-            previous_dot = ch == '.';
-        }
-        let text: String = chars[start..index].iter().collect();
-        let color = match kind {
-            Kind::Plain => syntax.default,
-            Kind::Keyword => syntax.keyword,
-            Kind::Operator => syntax.operator,
-            Kind::Str => syntax.string,
-            Kind::Function => syntax.function,
-            Kind::Type => syntax.types,
-            Kind::Property => syntax.property,
-            Kind::Constant => syntax.constant,
-            Kind::Number => syntax.number,
-            Kind::Parameter => syntax.parameter,
-            Kind::Builtin => syntax.builtin,
-            Kind::Comment => syntax.comment,
-            Kind::Punctuation => syntax.punctuation,
-        };
-        let style = if kind == Kind::Comment { " style=\"italic\"" } else { "" };
-        write!(out, "<span foreground=\"{color}\"{style}>{}</span>", format::escape(&text)).ok();
+    for segment in segments {
+        let style = if segment.kind == SyntaxKind::Comment { " style=\"italic\"" } else { "" };
+        write!(
+            out,
+            "<span foreground=\"{}\"{style}>{}</span>",
+            color(segment.kind, syntax),
+            format::escape(&segment.text)
+        )
+        .ok();
     }
     out
+}
+
+pub fn plain(text: &str, syntax: &Syntax) -> String {
+    format!("<span foreground=\"{}\">{}</span>", syntax.default, format::escape(text))
+}
+
+pub fn segments(
+    code: &str,
+    language: Option<&str>,
+    path: Option<&str>,
+    ready: impl FnOnce(Segments) + 'static,
+) -> Option<Segments> {
+    let key = key(&code, language, path);
+    if let Some(found) = STORE.with(|store| store.borrow().segments.get(&key).cloned()) {
+        return Some(found);
+    }
+    let (code, language, path) = (code.to_string(), language.map(str::to_string), path.map(str::to_string));
+    if code.len() <= ASYNC_BYTES {
+        let found = Rc::new(local_studio_core::highlight(code, language, path));
+        remember_segments(key, &found);
+        return Some(found);
+    }
+    if !STORE.with(|store| store.borrow_mut().pending.insert(key.clone())) {
+        return None;
+    }
+    let handle = gio::spawn_blocking(move || local_studio_core::highlight(code, language, path));
+    glib::MainContext::default().spawn_local(async move {
+        let result = handle.await;
+        STORE.with(|store| store.borrow_mut().pending.remove(&key));
+        if let Ok(found) = result {
+            let found = Rc::new(found);
+            remember_segments(key, &found);
+            ready(found);
+        }
+    });
+    None
+}
+
+pub fn lines(
+    lines: &[String],
+    language: Option<&str>,
+    path: Option<&str>,
+    ready: impl FnOnce(Lines) + 'static,
+) -> Option<Lines> {
+    let key = key(&lines, language, path);
+    if let Some(found) = STORE.with(|store| store.borrow().lines.get(&key).cloned()) {
+        return Some(found);
+    }
+    let bytes: usize = lines.iter().map(String::len).sum();
+    let (owned, language, path) = (lines.to_vec(), language.map(str::to_string), path.map(str::to_string));
+    if bytes <= ASYNC_BYTES {
+        let found = Rc::new(local_studio_core::highlight_lines(owned, language, path));
+        remember_lines(key, &found);
+        return Some(found);
+    }
+    if !STORE.with(|store| store.borrow_mut().pending.insert(key.clone())) {
+        return None;
+    }
+    let handle = gio::spawn_blocking(move || local_studio_core::highlight_lines(owned, language, path));
+    glib::MainContext::default().spawn_local(async move {
+        let result = handle.await;
+        STORE.with(|store| store.borrow_mut().pending.remove(&key));
+        if let Ok(found) = result {
+            let found = Rc::new(found);
+            remember_lines(key, &found);
+            ready(found);
+        }
+    });
+    None
+}
+
+fn remember_segments(key: Key, found: &Segments) {
+    STORE.with(|store| {
+        let mut store = store.borrow_mut();
+        if store.segments.len() >= CACHE_LIMIT {
+            store.segments.clear();
+        }
+        store.segments.insert(key, Rc::clone(found));
+    });
+}
+
+fn remember_lines(key: Key, found: &Lines) {
+    STORE.with(|store| {
+        let mut store = store.borrow_mut();
+        if store.lines.len() >= CACHE_LIMIT {
+            store.lines.clear();
+        }
+        store.lines.insert(key, Rc::clone(found));
+    });
+}
+
+pub fn ensure_tags(buffer: &gtk::TextBuffer) {
+    let table = buffer.tag_table();
+    if table.lookup(&tag_name(SyntaxKind::Plain)).is_none() {
+        for kind in KINDS {
+            let tag = gtk::TextTag::new(Some(&tag_name(kind)));
+            if kind == SyntaxKind::Comment {
+                tag.set_style(gtk::pango::Style::Italic);
+            }
+            table.add(&tag);
+        }
+        STORE.with(|store| {
+            let mut store = store.borrow_mut();
+            store.buffers.retain(|weak| weak.upgrade().is_some());
+            store.buffers.push(buffer.downgrade());
+        });
+    }
+    paint(buffer, &crate::colors::current().syntax);
+}
+
+fn paint(buffer: &gtk::TextBuffer, syntax: &Syntax) {
+    let table = buffer.tag_table();
+    for kind in KINDS {
+        if let Some(tag) = table.lookup(&tag_name(kind)) {
+            tag.set_foreground(Some(color(kind, syntax)));
+        }
+    }
+}
+
+pub fn recolor(syntax: &Syntax) {
+    let buffers: Vec<gtk::TextBuffer> =
+        STORE.with(|store| store.borrow().buffers.iter().filter_map(glib::WeakRef::upgrade).collect());
+    for buffer in buffers {
+        paint(&buffer, syntax);
+    }
+}
+
+pub fn insert(buffer: &gtk::TextBuffer, segments: &[CodeSegment], extra: Option<&str>) {
+    for segment in segments {
+        let mut end = buffer.end_iter();
+        let name = tag_name(segment.kind);
+        match extra {
+            Some(extra) => buffer.insert_with_tags_by_name(&mut end, &segment.text, &[extra, &name]),
+            None => buffer.insert_with_tags_by_name(&mut end, &segment.text, &[&name]),
+        }
+    }
+}
+
+pub fn fill(buffer: &gtk::TextBuffer, segments: &[CodeSegment]) {
+    ensure_tags(buffer);
+    buffer.set_text("");
+    insert(buffer, segments, None);
 }

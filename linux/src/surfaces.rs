@@ -197,7 +197,17 @@ impl FilesSurface {
                     .bottom_margin(10)
                     .build();
                 view.add_css_class("ls-diff");
-                view.buffer().set_text(text);
+                let buffer = view.buffer();
+                buffer.set_text(text);
+                let weak = buffer.downgrade();
+                let ready = move |segments: crate::highlight::Segments| {
+                    if let Some(buffer) = weak.upgrade() {
+                        crate::highlight::fill(&buffer, &segments);
+                    }
+                };
+                if let Some(segments) = crate::highlight::segments(text, language.as_deref(), Some(path), ready) {
+                    crate::highlight::fill(&buffer, &segments);
+                }
                 view.set_tooltip_text(language.as_deref());
                 gtk::ScrolledWindow::builder().vexpand(true).child(&view).build().upcast()
             }

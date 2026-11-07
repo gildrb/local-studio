@@ -111,6 +111,24 @@ pub fn stage(app: &Rc<App>, scene: &str) {
         }
         "52-theme-gildrb" => gildrb(app, local_studio_core::ColorScheme::Dark),
         "53-theme-gildrb-light" => gildrb(app, local_studio_core::ColorScheme::Light),
+        "54-gildrb-file-preview-light" => {
+            gildrb(app, local_studio_core::ColorScheme::Light);
+            app.drawer.reset();
+            app.panel.show("files");
+            app.panel.files.preview(
+                "linux/src/branches.rs",
+                &local_studio_core::FileContent::Text {
+                    text: crate::scenes::preview_sample(),
+                    language: Some("rust".to_string()),
+                },
+            );
+        }
+        "55-gildrb-diff-split" => {
+            gildrb(app, local_studio_core::ColorScheme::Dark);
+            app.drawer.reset();
+            app.panel.diff.set_fixture(&crate::fixtures::diff_files_public(), true);
+            app.set_panel_maximized(true);
+        }
         "51-palette-grouped" => {
             conversation(app, false);
             crate::palette::open(app);

@@ -273,6 +273,7 @@ impl App {
         theme::on_colors(move |colors| {
             if let Some(app) = weak.upgrade() {
                 app.drawer.set_colors(colors);
+                crate::highlight::recolor(&colors.syntax);
                 app.panel.diff.set_colors();
                 app.timeline.recolor();
             }

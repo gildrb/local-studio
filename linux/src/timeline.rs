@@ -534,7 +534,17 @@ pub fn markdown_widget(block: Markdown) -> gtk::Widget {
                 frame.append(&label);
             }
             let label = gtk::Label::new(None);
-            label.set_markup(&crate::highlight::markup(&code, language.as_deref(), &crate::colors::current().syntax));
+            let syntax = crate::colors::current().syntax;
+            let weak = label.downgrade();
+            let ready = move |segments: crate::highlight::Segments| {
+                if let Some(label) = weak.upgrade() {
+                    label.set_markup(&crate::highlight::markup(&segments, &crate::colors::current().syntax));
+                }
+            };
+            match crate::highlight::segments(&code, language.as_deref(), None, ready) {
+                Some(segments) => label.set_markup(&crate::highlight::markup(&segments, &syntax)),
+                None => label.set_markup(&crate::highlight::plain(&code, &syntax)),
+            }
             label.set_xalign(0.0);
             label.set_selectable(true);
             label.add_css_class("ls-mono");
