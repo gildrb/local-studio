@@ -34,13 +34,19 @@ final class FrameMonitor: NSObject {
 
     func start(window: NSWindow) {
         origin = ProcessInfo.processInfo.systemUptime
-        let link = window.displayLink(target: self, selector: #selector(tick(_:)))
-        link.add(to: .main, forMode: .common)
-        self.link = link
+        attach(window: window)
         watchdog.start { [weak self] posted, latency in
             guard let self, recording, latency > Self.stallThreshold else { return }
             stalls.append(Stall(at: posted - origin, duration: latency, context: context))
         }
+    }
+
+    func attach(window: NSWindow) {
+        link?.invalidate()
+        last = nil
+        let link = window.displayLink(target: self, selector: #selector(tick(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
     }
 
     func stop() {
@@ -99,7 +105,7 @@ final class Watchdog: Sendable {
                     DispatchQueue.main.async {
                         let latency = ProcessInfo.processInfo.systemUptime - posted
                         state.withLock { $0.outstanding = false }
-                        MainActor.assumeIsolated { report(posted, latency) }
+                        report(posted, latency)
                     }
                 }
                 Thread.sleep(forTimeInterval: 0.005)

@@ -152,3 +152,20 @@ func until(_ label: String, _ timeout: TimeInterval, _ condition: () -> Bool) as
         try await Task.sleep(for: .milliseconds(20))
     }
 }
+
+@MainActor
+func presentMainWindow(_ store: StudioStore) async throws -> NSWindow {
+    let visible = { store.mainWindow.flatMap { $0.isVisible ? $0 : nil } }
+    if visible() == nil {
+        let reopen = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
+            targetDescriptor: NSAppleEventDescriptor(processIdentifier: ProcessInfo.processInfo.processIdentifier),
+            returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID)
+        )
+        _ = try? reopen.sendEvent(options: [.noReply], timeout: 2)
+    }
+    try await until("the main window", 20) { visible() != nil }
+    guard let window = visible() else { throw StressFailure("no main window") }
+    window.orderFront(nil)
+    return window
+}

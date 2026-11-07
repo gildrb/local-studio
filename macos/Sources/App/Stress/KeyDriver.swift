@@ -112,8 +112,10 @@ enum KeyDriver {
             window.sendEvent(event)
         case .keyDown:
             if keyMonitor?(event) == true { return }
-            if window.performKeyEquivalent(with: event) { return }
-            if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
+            if !event.modifierFlags.isDisjoint(with: [.command, .control]) {
+                if window.performKeyEquivalent(with: event) { return }
+                if NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
+            }
             window.sendEvent(event)
         default:
             window.sendEvent(event)
@@ -165,6 +167,23 @@ enum KeyDriver {
             guard let event = NSEvent(cgEvent: cgEvent) else { continue }
             window.sendEvent(event)
         }
+    }
+
+    static func click(at point: NSPoint, in window: NSWindow) {
+        let timestamp = ProcessInfo.processInfo.systemUptime
+        let events = [NSEvent.EventType.leftMouseDown, .leftMouseUp].compactMap { type in
+            NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: timestamp, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0
+            )
+        }
+        guard events.count == 2 else { return }
+        if window.isKeyWindow, NSApp.isActive {
+            native += 1
+        } else {
+            emulated += 1
+        }
+        events.forEach { NSApp.postEvent($0, atStart: false) }
     }
 
     private static func send(_ type: NSEvent.EventType, _ chord: KeyChord, in window: NSWindow) {

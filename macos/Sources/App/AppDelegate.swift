@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelSmoke: PanelSmoke?
     private var stress: StressHarness?
     private var providersSmoke: ProvidersSmoke?
+    private var keys: KeysHarness?
 
     override init() {
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
@@ -29,8 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         SyntaxHighlighter.shared.warm()
         let stressFlag = arguments.firstIndex(of: "+stress")
+        let keysFlag = arguments.contains("+keys")
         if stressFlag != nil {
             StressHarness.prepare()
+        } else if keysFlag {
+            KeysHarness.prepare()
         }
         configureNotifier()
         installKeyMonitors()
@@ -74,10 +78,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             smoke.start()
             providersSmoke = smoke
         }
+        if keysFlag {
+            let harness = KeysHarness(store: store)
+            harness.start()
+            keys = harness
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -99,7 +108,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var automated: Bool {
-        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil || stress != nil
+        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil || stress != nil || keys != nil
     }
 
     private static func quitShortcutPressed() -> Bool {

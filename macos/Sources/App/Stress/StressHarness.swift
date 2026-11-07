@@ -3,7 +3,7 @@ import Foundation
 import LocalStudioKit
 
 @MainActor
-final class StressHarness {
+final class StressHarness: NSObject {
     private struct Violation {
         let at: TimeInterval
         let kind: String
@@ -14,19 +14,21 @@ final class StressHarness {
         let text: String
         let project: String?
         let at: TimeInterval
-        let sidebarCount: Int
-        var thread: String?
+        let failing: Bool
         var shown: TimeInterval?
         var listed: TimeInterval?
     }
 
     private enum Action: String, CaseIterable {
         case jump = "⌘1–9"
+        case burst = "⌘1–9 burst"
         case recent = "⌃Tab"
         case back = "⌘["
         case forward = "⌘]"
         case step = "⌘⇧[ / ⌘⇧]"
         case newThread = "⌘T+type+send"
+        case failedStart = "send → failed start"
+        case pendingAction = "Retry/Edit"
         case close = "⌘W"
         case focus = "F6"
         case palette = "⌘K"
@@ -35,26 +37,37 @@ final class StressHarness {
         case sidebar = "⌘B"
         case escape = "Esc"
         case scroll = "scroll"
+        case click = "click"
+        case settings = "Settings window"
+        case keyWindow = "key window change"
 
         var weight: Int {
             switch self {
-            case .jump: 34
-            case .recent: 10
-            case .back: 5
-            case .forward: 4
+            case .jump: 16
+            case .burst: 8
+            case .recent: 8
+            case .back: 4
+            case .forward: 3
             case .step: 4
-            case .newThread: 3
+            case .newThread: 4
+            case .failedStart: 1
+            case .pendingAction: 2
             case .close: 3
-            case .focus: 7
-            case .palette: 5
-            case .terminal: 3
+            case .focus: 5
+            case .palette: 4
+            case .terminal: 4
             case .panel: 3
-            case .sidebar: 4
-            case .escape: 6
-            case .scroll: 6
+            case .sidebar: 3
+            case .escape: 4
+            case .scroll: 5
+            case .click: 10
+            case .settings: 2
+            case .keyWindow: 3
             }
         }
     }
+
+    private static let pendingDeadline: TimeInterval = 10
 
     private let store: StudioStore
     private let duration: TimeInterval
@@ -77,7 +90,19 @@ final class StressHarness {
     private var switchLatencies: [TimeInterval] = []
     private var previousThread: String?
     private var created = 0
+    private var failing = 0
     private var finished = false
+    private var expectClose = false
+    private var closes = 0
+    private var reopenLatencies: [TimeInterval] = []
+    private var watched: NSWindow?
+    private var pendingSeen: [String: TimeInterval] = [:]
+    private var pendingReported: Set<String> = []
+    private var pendingOutcomes: [String: Int] = [:]
+    private var knownRows: Set<String> = []
+    private var rowsRevision = -1
+    private var pendingSignature: [String] = []
+    private var edited: Set<String> = []
 
     init(store: StudioStore, duration: TimeInterval, seed: UInt64) {
         self.store = store
@@ -98,24 +123,9 @@ final class StressHarness {
         do {
             try await until("the core connection", 60) { store.connection == .ready }
             store.shell.onboardingDismissed = true
-            NSApp.activate()
-            if store.mainWindow == nil {
-                let configuration = NSWorkspace.OpenConfiguration()
-                configuration.activates = true
-                NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in }
-            }
-            try await until("the main window", 20) { store.mainWindow != nil }
-            guard let window = store.mainWindow else { throw StressFailure("no main window") }
-            window.makeKeyAndOrderFront(nil)
+            let window = try await reopenMainWindow()
             var seed = StressSeed(store: store)
             try await seed.run()
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    print("FAIL macOS stress: the main window closed after \(self?.monitor.context ?? "launch")")
-                    self?.store.stop()
-                    exit(1)
-                }
-            }
             prompts = seed.prompts
             for (thread, _) in prompts {
                 projects[thread] = store.inbox.thread(thread)?.project
@@ -128,11 +138,15 @@ final class StressHarness {
             monitor.recording = true
             let end = monitor.elapsed() + duration
             while monitor.elapsed() < end {
+                guard let window = visibleMainWindow else { throw StressFailure("the main window disappeared") }
                 try await perform(pick(), in: window)
                 try await pause()
             }
+            try await settlePendings()
             monitor.recording = false
-            KeyDriver.release(in: window)
+            if let window = visibleMainWindow {
+                KeyDriver.release(in: window)
+            }
             monitor.stop()
             finish()
         } catch {
@@ -142,10 +156,46 @@ final class StressHarness {
         }
     }
 
+    private var visibleMainWindow: NSWindow? {
+        store.mainWindow.flatMap { $0.isVisible ? $0 : nil }
+    }
+
+    private func reopenMainWindow() async throws -> NSWindow {
+        let window = try await presentMainWindow(store)
+        if watched !== window {
+            if let watched {
+                NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: watched)
+            }
+            NotificationCenter.default.addObserver(self, selector: #selector(mainWindowWillClose(_:)), name: NSWindow.willCloseNotification, object: window)
+            watched = window
+        }
+        return window
+    }
+
+    @objc private func mainWindowWillClose(_ notification: Notification) {
+        guard !expectClose else { return }
+        print("FAIL macOS stress: the main window closed after \(monitor.context)")
+        store.stop()
+        exit(1)
+    }
+
+    private func settlePendings() async throws {
+        monitor.context = "settling"
+        let deadline = monitor.elapsed() + Self.pendingDeadline + 1
+        while monitor.elapsed() < deadline, store.conversation.pendings.contains(where: { $0.failure == nil }) {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    private lazy var enabled: [Action] = {
+        let skipped = Set((ProcessInfo.processInfo.environment["STRESS_SKIP"] ?? "").split(separator: ",").map(String.init))
+        return Action.allCases.filter { !skipped.contains("\($0)") }
+    }()
+
     private func pick() -> Action {
-        let total = Action.allCases.map(\.weight).reduce(0, +)
+        let total = enabled.map(\.weight).reduce(0, +)
         var roll = random.int(total)
-        for action in Action.allCases {
+        for action in enabled {
             roll -= action.weight
             if roll < 0 { return action }
         }
@@ -161,21 +211,38 @@ final class StressHarness {
     private func press(_ spec: String, _ window: NSWindow, hold: Bool = false) {
         guard let chord = KeyChord.parse(spec) else { return }
         monitor.context = spec
-        let before = store.conversation.thread
+        let before = store.conversation.selectedID
         KeyDriver.press(chord, in: window, hold: hold)
         if ProcessInfo.processInfo.environment["STRESS_TRACE"] != nil {
-            print("press \(spec) \(before ?? "nil") -> \(store.conversation.thread ?? "nil") key=\(window.isKeyWindow) responder=\(type(of: window.firstResponder))")
+            print("press \(spec) \(before ?? "nil") -> \(store.conversation.selectedID ?? "nil") key=\(window.isKeyWindow) responder=\(type(of: window.firstResponder))")
         }
+    }
+
+    private func jump(_ window: NSWindow) {
+        let count = min(9, store.inbox.visibleOrder.count)
+        guard count > 0 else { return }
+        press("cmd+\(1 + random.int(count))", window)
     }
 
     private func perform(_ action: Action, in window: NSWindow) async throws {
         actions[action, default: 0] += 1
+        if ProcessInfo.processInfo.environment["STRESS_TRACE"] != nil {
+            print(String(format: "%7.2f action ", monitor.elapsed()) + action.rawValue)
+        }
         let before = store.conversation.thread
         switch action {
         case .jump:
-            let count = min(9, store.inbox.visibleOrder.count)
-            guard count > 0 else { return }
-            press("cmd+\(1 + random.int(count))", window)
+            jump(window)
+        case .burst:
+            for _ in 0..<(5 + random.int(12)) {
+                if random.int(5) == 0 {
+                    click(.sidebar, window)
+                } else {
+                    jump(window)
+                }
+                noteSwitch(from: before)
+                try await Task.sleep(for: .milliseconds(10 + random.int(21)))
+            }
         case .recent:
             KeyDriver.flags(.control, in: window)
             for index in 0..<(1 + random.int(3)) {
@@ -190,11 +257,15 @@ final class StressHarness {
         case .step:
             press(random.int(2) == 0 ? "cmd+shift+[" : "cmd+shift+]", window)
         case .newThread:
-            guard created < 6 else { return press("cmd+1", window) }
-            try await newThread(in: window)
+            guard created < 8 else { return jump(window) }
+            try await newThread(in: window, failing: false)
+        case .failedStart:
+            guard failing < 3 else { return jump(window) }
+            try await newThread(in: window, failing: true)
+        case .pendingAction:
+            resolveFailedStart()
         case .close:
-            guard store.conversation.thread != nil || store.panels.rightPanelOpen else { return press("cmd+1", window) }
-            press("cmd+w", window)
+            try await close(window)
         case .focus:
             press(random.int(3) == 0 ? "shift+f6" : "f6", window)
         case .palette:
@@ -216,32 +287,113 @@ final class StressHarness {
             scrolled.insert(thread)
             let height = window.contentView?.bounds.height ?? 0
             KeyDriver.scroll(CGFloat(300 + random.int(900)), at: NSPoint(x: frame.midX, y: height - frame.midY), in: window)
+        case .click:
+            let regions: [FocusRegion] = [.sidebar, .sidebar, .timeline, .composer]
+            click(regions[random.int(regions.count)], window)
+        case .settings:
+            try await toggleSettings(window)
+        case .keyWindow:
+            monitor.context = "key window change"
+            NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+            try await Task.sleep(for: .milliseconds(5 + random.int(40)))
+            NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
         }
-        let after = store.conversation.thread
-        if let after, after != before {
+        noteSwitch(from: before)
+    }
+
+    private func noteSwitch(from before: String?) {
+        if let after = store.conversation.thread, after != before {
             switchStart = (after, monitor.elapsed())
         }
     }
 
-    private func newThread(in window: NSWindow) async throws {
+    private func click(_ region: FocusRegion, _ window: NSWindow) {
+        guard let frame = store.shell.keys.frames[region], frame.width > 4, frame.height > 4,
+              let height = window.contentView?.bounds.height else { return }
+        monitor.context = "click \(region)"
+        let x = frame.minX + frame.width * (0.2 + Double(random.int(60)) / 100)
+        let fraction = region == .sidebar ? 0.08 + Double(random.int(50)) / 100 : 0.15 + Double(random.int(70)) / 100
+        let y = frame.minY + frame.height * fraction
+        KeyDriver.click(at: NSPoint(x: x, y: height - y), in: window)
+    }
+
+    private func toggleSettings(_ window: NSWindow) async throws {
+        monitor.context = "Settings window"
+        let before = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        try await Task.sleep(for: .milliseconds(80 + random.int(300)))
+        let opened = NSApp.windows.filter { $0.isVisible && $0 !== window && !before.contains(ObjectIdentifier($0)) }
+        for settings in opened {
+            settings.performClose(nil)
+        }
+        NotificationCenter.default.post(name: NSWindow.didBecomeKeyNotification, object: window)
+    }
+
+    private func close(_ window: NSWindow) async throws {
+        let draft = store.shell.route == .thread && store.conversation.selectedID == nil && !store.panels.rightPanelOpen
+        guard draft else {
+            guard store.conversation.selectedID != nil || store.panels.rightPanelOpen else { return jump(window) }
+            return press("cmd+w", window)
+        }
+        guard closes < 3 else { return jump(window) }
+        closes += 1
+        expectClose = true
+        defer { expectClose = false }
+        press("cmd+w", window)
+        try await until("⌘W on an empty draft to close the main window", 3) { visibleMainWindow == nil }
+        guard NSApp.isRunning else { throw StressFailure("⌘W on an empty draft quit the app") }
+        let start = monitor.elapsed()
+        let reopened = try await reopenMainWindow()
+        reopenLatencies.append(monitor.elapsed() - start)
+        monitor.attach(window: reopened)
+    }
+
+    private func newThread(in window: NSWindow, failing: Bool) async throws {
         press("cmd+t", window)
         try await Task.sleep(for: .milliseconds(30 + random.int(60)))
-        created += 1
-        let text = "hello \(created)"
+        let text: String
+        if failing {
+            self.failing += 1
+            text = "doomed \(self.failing)"
+            store.conversation.newThread.existingWorktree = "/nonexistent/local-studio-stress-\(self.failing)"
+        } else {
+            created += 1
+            text = "hello \(created)"
+        }
         let project = store.inbox.currentProject
         monitor.context = "type"
         for character in text {
             KeyDriver.type(String(character), in: window)
             try await Task.sleep(for: .milliseconds(15 + random.int(30)))
         }
-        let typed = store.conversation.thread == nil ? store.conversation.composer(project: project).text : ""
+        let typed = store.conversation.selectedID == nil ? store.conversation.composer(project: project).text : ""
         if typed != text {
             record("typing", "⌘T then typing “\(text)” left the draft composer with “\(typed)”")
+            store.conversation.newThread.existingWorktree = nil
+            return
         }
-        sends.append(Send(text: text, project: project, at: monitor.elapsed(), sidebarCount: store.inbox.visibleOrder.count))
+        sends.append(Send(text: text, project: project, at: monitor.elapsed(), failing: failing))
         press("return", window)
+        if store.conversation.selectedID != nil, store.conversation.pending == nil {
+            record("send", "sending “\(text)” from a draft did not show a pending thread")
+        }
         try await Task.sleep(for: .milliseconds(random.int(40)))
-        press(random.int(2) == 0 ? "cmd+1" : "cmd+2", window)
+        jump(window)
+    }
+
+    private func resolveFailedStart() {
+        let failed = store.conversation.pendings.filter { $0.failure != nil }
+        guard !failed.isEmpty else { return }
+        let start = failed[random.int(failed.count)]
+        monitor.context = "Retry/Edit"
+        if random.int(2) == 0 {
+            pendingOutcomes["retried", default: 0] += 1
+            store.conversation.retryPending(start.draft)
+        } else {
+            pendingOutcomes["edited", default: 0] += 1
+            edited.insert(start.draft)
+            store.conversation.editPending(start.draft)
+        }
     }
 
     private func record(_ kind: String, _ detail: String) {
@@ -265,8 +417,10 @@ final class StressHarness {
 
     private func check() {
         guard monitor.recording else { return }
-        let thread = store.conversation.thread
         trackSends()
+        checkPendings()
+        checkRows()
+        let thread = store.conversation.thread
         if thread != previousThread {
             if let previousThread, let top = lastTop[previousThread] {
                 expectedTop[previousThread] = top
@@ -277,7 +431,12 @@ final class StressHarness {
         guard store.shell.route == .thread, !(store.panels.rightPanelOpen && store.panels.rightPanelMaximized) else { return }
         let probe = store.shell.probe
         let header = probe.header
-        streak("stale header", header?.thread != thread, "header still shows \(header?.thread ?? "draft") while \(thread ?? "draft") is focused")
+        let pending = store.conversation.focusedPending
+        streak("stale header", header?.thread != thread || header?.pending != pending, "header shows \(header?.thread ?? header?.pending ?? "draft") while \(thread ?? pending ?? "draft") is focused")
+        if let pending, let start = store.conversation.pendingStart(pending), header?.pending == pending {
+            let title = start.info.title.isEmpty ? "Untitled thread" : start.info.title
+            streak("pending header", header?.title != title, "pending header shows “\(header?.title ?? "")”, expected “\(title)”")
+        }
         guard let thread else { return }
         if let header, header.thread == thread {
             checkHeader(header, thread: thread)
@@ -295,6 +454,43 @@ final class StressHarness {
         checkComposer(thread: thread, consistent: header?.thread == thread)
         if let scroll = probe.scroll, scroll.thread == thread, timeline.rows > 0 {
             checkScroll(scroll, thread: thread)
+        }
+    }
+
+    private func checkPendings() {
+        let now = monitor.elapsed()
+        for start in store.conversation.pendings {
+            let first = pendingSeen[start.draft] ?? now
+            pendingSeen[start.draft] = first
+            if store.inbox.thread(start.draft) == nil {
+                record("pending row missing", "pending “\(start.info.title)” has no sidebar row")
+            }
+            guard start.failure == nil, now - first > Self.pendingDeadline, !pendingReported.contains(start.draft) else { continue }
+            pendingReported.insert(start.draft)
+            let state = start.thread == nil ? "neither started nor failed" : "started as \(start.thread ?? "") but never listed"
+            record("pending stuck", "pending “\(start.info.title)” \(state) after \(Int(Self.pendingDeadline)) s")
+        }
+    }
+
+    private func checkRows() {
+        let signature = store.conversation.pendings.map { "\($0.draft)|\($0.thread ?? "")|\($0.failure != nil)" }
+        guard store.inbox.threadsRevision != rowsRevision || signature != pendingSignature else { return }
+        rowsRevision = store.inbox.threadsRevision
+        pendingSignature = signature
+        let current = Set(store.inbox.threads.map(\.id)).union(store.conversation.pendings.map(\.draft))
+        let aliases = store.conversation.aliases
+        for gone in knownRows.subtracting(current) {
+            if let thread = aliases.first(where: { $0.value == gone })?.key, current.contains(thread) {
+                pendingOutcomes["started", default: 0] += 1
+                continue
+            }
+            if edited.contains(gone) { continue }
+            record("row vanished", "sidebar row \(gone) disappeared without an archive or delete")
+        }
+        knownRows = current
+        for start in store.conversation.pendings where start.failure != nil && !pendingReported.contains("failed:\(start.draft)") {
+            pendingReported.insert("failed:\(start.draft)")
+            pendingOutcomes["failed", default: 0] += 1
         }
     }
 
@@ -367,16 +563,13 @@ final class StressHarness {
 
     private func trackSends() {
         let now = monitor.elapsed()
-        for index in sends.indices {
-            if sends[index].listed == nil, store.inbox.visibleOrder.count > sends[index].sidebarCount {
+        for index in sends.indices where sends[index].shown == nil || sends[index].listed == nil {
+            let text = sends[index].text
+            if sends[index].listed == nil, store.inbox.sections.contains(title: text) {
                 sends[index].listed = now - sends[index].at
             }
-            if sends[index].shown == nil, store.shell.probe.timeline?.firstUser == sends[index].text {
+            if sends[index].shown == nil, store.shell.probe.timeline?.firstUser == text {
                 sends[index].shown = now - sends[index].at
-            }
-            if sends[index].thread == nil, let thread = store.conversation.thread, prompts[thread] == nil, projects[thread] == nil {
-                sends[index].thread = thread
-                projects[thread] = sends[index].project
             }
         }
     }
@@ -402,10 +595,14 @@ final class StressHarness {
             print("thread switch → content: \(latencies.count) switches, p50 \(ms(median)) p95 \(ms(p95)) max \(ms(latencies.last ?? 0))")
         }
         for send in sends {
-            print("send “\(send.text)” → thread view \(send.shown.map(ms) ?? "never"), sidebar row \(send.listed.map(ms) ?? "never")")
+            print("send “\(send.text)”\(send.failing ? " (failing start)" : "") → thread view \(send.shown.map(ms) ?? "never"), sidebar row \(send.listed.map(ms) ?? "never")")
         }
+        if !reopenLatencies.isEmpty {
+            print("⌘W on draft closed the window \(reopenLatencies.count)× and the app kept running; reopen → window " + reopenLatencies.map(ms).joined(separator: ", "))
+        }
+        print("pending starts: " + pendingOutcomes.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))
         print("actions: " + Action.allCases.compactMap { action in actions[action].map { "\(action.rawValue) \($0)" } }.joined(separator: ", "))
-        print("key events: \(KeyDriver.native) through NSApp.sendEvent (window key), \(KeyDriver.emulated) through the window and monitors (app inactive)")
+        print("input events: \(KeyDriver.native) through NSApp.sendEvent (window key), \(KeyDriver.emulated) through the window, views and monitors (app inactive)")
         print("invariant violations: \(violationCounts.values.reduce(0, +))")
         for (kind, count) in violationCounts.sorted(by: { $0.key < $1.key }) {
             print("  \(kind): \(count)")
@@ -425,6 +622,12 @@ final class StressHarness {
             store.stop()
             exit(1)
         }
+    }
+}
+
+private extension InboxSections {
+    func contains(title: String) -> Bool {
+        [pinned, active, working, snoozed, settled].contains { rows in rows.contains { $0.title == title } }
     }
 }
 
