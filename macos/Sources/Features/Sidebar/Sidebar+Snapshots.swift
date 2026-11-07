@@ -93,7 +93,7 @@ enum ShellFixtures {
             statusSince: status == .idle ? nil : ago(minutes), updatedAt: ago(minutes),
             snoozedUntil: snoozeHours.map { Int64((Date.now.timeIntervalSince1970 + $0 * 3_600) * 1_000) },
             pinned: pinned, unread: unread, branch: branch, worktree: nil, provider: provider, model: model,
-            additions: diff.0, deletions: diff.1, note: nil, archived: false
+            additions: diff.0, deletions: diff.1, note: nil, archived: false, autoSettle: true
         )
     }
 

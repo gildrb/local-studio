@@ -24,7 +24,7 @@ use crate::model::{
 };
 use crate::session::{self, LiveState};
 use crate::store::{self, Store, StoredProject};
-use crate::threads::{self, Facts, GitHead, InboxPrefs, RosterRow, SavedRow};
+use crate::threads::{self, Facts, GitHead, InboxPrefs, RosterRow, SavedRow, SearchDoc};
 use crate::transcript::Transcript;
 use crate::workspace::model::Settings;
 use crate::workspace::Workspace;
@@ -50,6 +50,7 @@ pub struct StudioConfig {
     pub session_dir: Option<String>,
     pub data_dir: Option<String>,
     pub launch: Option<DaemonLaunch>,
+    pub controller_main: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +146,10 @@ enum Command {
     SetFavoriteModel { provider: String, model: String, favorite: bool },
     ListCommands { request: String, project: Option<String> },
     ListArchived { request: String },
+    SearchThreads { request: String, query: String, limit: u32 },
+    ReorderPinned { threads: Vec<String> },
+    SetAutoSettle { thread: String, enabled: bool },
+    SetHiddenModel { provider: String, model: String, hidden: bool },
     Shutdown { done: std::sync::mpsc::Sender<()> },
 }
 
@@ -178,7 +183,9 @@ impl Studio {
         let mailbox = Arc::new(Mailbox { updates: Mutex::new(Vec::new()), waker });
         let (client_slot, client_watch) = watch::channel(None);
         let query = DaemonQuery::new(client_watch, session_dir.clone());
-        let workspace = Workspace::new(runtime.handle().clone(), Arc::clone(&mailbox), data_dir, query);
+        let controller_main = config.controller_main.filter(|value| !value.is_empty()).map(PathBuf::from);
+        let workspace =
+            Workspace::new(runtime.handle().clone(), Arc::clone(&mailbox), data_dir, query, controller_main);
         let settings = workspace.settings();
         let (commands, receiver) = mpsc::unbounded_channel();
         let actor = Actor {
@@ -335,6 +342,22 @@ impl Studio {
 
     pub fn list_archived(&self, request: String) {
         self.send_command(Command::ListArchived { request });
+    }
+
+    pub fn search_threads(&self, request: String, query: String, limit: u32) {
+        self.send_command(Command::SearchThreads { request, query, limit });
+    }
+
+    pub fn reorder_pinned(&self, threads: Vec<String>) {
+        self.send_command(Command::ReorderPinned { threads });
+    }
+
+    pub fn set_auto_settle(&self, thread: String, enabled: bool) {
+        self.send_command(Command::SetAutoSettle { thread, enabled });
+    }
+
+    pub fn set_hidden_model(&self, provider: String, model: String, hidden: bool) {
+        self.send_command(Command::SetHiddenModel { provider, model, hidden });
     }
 }
 
@@ -648,7 +671,7 @@ impl Actor {
             Command::DeleteThread { thread } => self.delete(&thread).await,
             Command::SetArchived { thread, archived } => self.flag(&thread, |flags, _| flags.archived = archived),
             Command::SetPinned { thread, pinned } => {
-                self.flag(&thread, |flags, now| flags.pinned_at = pinned.then_some(now));
+                self.flag(&thread, |flags, now| flags.pin_order = pinned.then_some(now));
             }
             Command::SetSettled { thread, settled } => self.flag(&thread, |flags, now| {
                 if settled {
@@ -715,14 +738,14 @@ impl Actor {
             }
             Command::LoadModels => self.load_models().await,
             Command::SetFavoriteModel { provider, model, favorite } => {
-                let key = ModelKey { provider, model };
-                self.store.favorites.retain(|known| *known != key);
-                if favorite {
-                    self.store.favorites.push(key);
-                }
+                toggle_key(&mut self.store.favorites, ModelKey { provider, model }, favorite);
                 self.save();
-                self.mailbox
-                    .push(Update::Models { models: self.models.clone(), favorites: self.store.favorites.clone() });
+                self.push_models();
+            }
+            Command::SetHiddenModel { provider, model, hidden } => {
+                toggle_key(&mut self.store.hidden, ModelKey { provider, model }, hidden);
+                self.save();
+                self.push_models();
             }
             Command::ListCommands { request, project } => {
                 let update = match self.list_commands(project).await {
@@ -734,6 +757,20 @@ impl Actor {
             Command::ListArchived { request } => {
                 let threads = self.rows(true);
                 self.mailbox.push(Update::ArchivedThreads { request, threads });
+            }
+            Command::SearchThreads { request, query, limit } => self.search_threads(request, &query, limit),
+            Command::ReorderPinned { threads } => {
+                for (rank, thread) in threads.iter().enumerate() {
+                    let rank = i64::try_from(rank).unwrap_or(i64::MAX).saturating_add(1);
+                    if self.store.flags(thread).pin_order.is_some() {
+                        self.store.update(thread, |flags| flags.pin_order = Some(rank));
+                    }
+                }
+                self.save();
+                self.dirty = true;
+            }
+            Command::SetAutoSettle { thread, enabled } => {
+                self.flag(&thread, |flags, _| flags.auto_settle_disabled = !enabled);
             }
             Command::Shutdown { done } => self.stop(&done).await,
         }
@@ -792,6 +829,34 @@ impl Actor {
         self.store.update(thread, |flags| change(flags, now));
         self.save();
         self.dirty = true;
+    }
+
+    fn push_models(&self) {
+        self.mailbox.push(Update::Models {
+            models: self.models.clone(),
+            favorites: self.store.favorites.clone(),
+            hidden: self.store.hidden.clone(),
+        });
+    }
+
+    fn search_threads(&mut self, request: String, query: &str, limit: u32) {
+        let rows = self.rows(false);
+        let docs: Vec<SearchDoc> = rows
+            .into_iter()
+            .map(|row| SearchDoc {
+                text: self.saved.get(&row.id).map_or_else(|| Arc::from(""), |saved| Arc::clone(&saved.text)),
+                thread: row.id,
+                title: row.title,
+                project: row.project,
+            })
+            .collect();
+        let query = query.to_string();
+        let limit = usize::try_from(limit).unwrap_or(usize::MAX);
+        let mailbox = Arc::clone(&self.mailbox);
+        tokio::task::spawn_blocking(move || {
+            let hits = threads::search(&docs, &query, limit);
+            mailbox.push(Update::ThreadSearch { request, hits });
+        });
     }
 
     fn save(&self) {
@@ -1622,8 +1687,7 @@ impl Actor {
                 Ok(models) => {
                     self.models = models;
                     self.workspace.models_loaded(&self.models);
-                    self.mailbox
-                        .push(Update::Models { models: self.models.clone(), favorites: self.store.favorites.clone() });
+                    self.push_models();
                 }
                 Err(error) => self.mailbox.notice(NoticeLevel::Error, format!("Unreadable model catalog: {error:#}")),
             },
@@ -2022,6 +2086,13 @@ impl Actor {
             self.last_rows = Some(rows.clone());
             self.mailbox.push_threads(rows);
         }
+    }
+}
+
+fn toggle_key(keys: &mut Vec<ModelKey>, key: ModelKey, present: bool) {
+    keys.retain(|known| *known != key);
+    if present {
+        keys.push(key);
     }
 }
 

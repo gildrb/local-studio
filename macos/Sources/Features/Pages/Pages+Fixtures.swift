@@ -1,0 +1,232 @@
+import Foundation
+import LocalStudioKit
+
+enum PagesFixtures {
+    static let now = Int64(Date().timeIntervalSince1970 * 1000)
+
+    static var settings: Settings {
+        Settings(
+            defaultProvider: "anthropic", defaultModel: "claude-sonnet-4-5", defaultThinkingLevel: "medium",
+            defaultAccess: .autoAcceptEdits, newThreadWorkspace: .worktree, newWorktreesStartFromOrigin: true,
+            workingSection: true, autoSettleMerged: true, autoSettleInactive: true, autoSettleInactiveDays: 3,
+            notifications: .notificationsAndSound, inAppNotifications: false, timeFormat: .locale,
+            responseStreaming: .paragraph, hideWhitespace: true, diffFilesCollapsed: true, diffLayout: .stacked,
+            proactivePanels: false, showSkillsInSlashMenu: true, richTextComposer: true, collapseComposerOnScroll: true,
+            sendShortcut: .enter, followUpBehavior: .queue, continueThreadsAfterRestart: false,
+            addProjectBaseDirectory: "/Users/gil/Repos", confirmUnpin: false, confirmArchive: false, confirmDelete: true,
+            quitConfirmation: .hold, textGenerationProvider: nil, textGenerationModel: nil, contextWindowMeter: false,
+            colorScheme: .dark, theme: nil, contrast: 100, diffColors: .redGreen, chatWidth: .normal,
+            interfaceFont: "", interfaceFontSize: 13, promptFont: "", promptFontSize: 14, codeFont: "", codeFontSize: 12,
+            terminalFont: "", terminalFontSize: 12, fontSmoothing: true, wordWrap: true, openLinksIn: .system,
+            autoPull: false, mergeMethod: .squash, gitFetchIntervalSeconds: 30, writingStyle: .conventionalCommits,
+            writingInstructions: "", followPrTemplates: true, sourceControlProvider: nil, sourceControlModel: nil,
+            worktreeCleanupAfterDays: 7, worktreeCleanupOnMerge: true, worktreeCleanupOnDelete: true,
+            worktreeCleanupUnchanged: false, localControllerUrl: "", fleetKey: "fk_live_8c1d", startController: true
+        )
+    }
+
+    static let keybindings: [Keybinding] = [
+        Keybinding(command: "sidebar.toggle", title: "Sidebar: Toggle", shortcut: "cmd+b", defaultShortcut: "cmd+b", when: nil),
+        Keybinding(command: "navigation.back", title: "Navigation: Back", shortcut: "cmd+[", defaultShortcut: "cmd+[", when: "!terminalFocus"),
+        Keybinding(command: "navigation.forward", title: "Navigation: Forward", shortcut: "cmd+]", defaultShortcut: "cmd+]", when: "!terminalFocus"),
+        Keybinding(command: "terminal.toggle", title: "Terminal: Toggle", shortcut: "cmd+j", defaultShortcut: "cmd+j", when: nil),
+        Keybinding(command: "terminal.split", title: "Terminal: Split", shortcut: "cmd+d", defaultShortcut: "cmd+d", when: "terminalFocus"),
+        Keybinding(command: "terminal.new", title: "Terminal: New", shortcut: "cmd+n", defaultShortcut: "cmd+n", when: "terminalFocus"),
+        Keybinding(command: "rightPanel.toggle", title: "Right Panel: Toggle", shortcut: "cmd+option+b", defaultShortcut: "cmd+option+b", when: nil),
+        Keybinding(command: "diff.toggle", title: "Diff: Toggle", shortcut: "cmd+shift+d", defaultShortcut: "cmd+d", when: "!terminalFocus"),
+        Keybinding(command: "commandPalette.toggle", title: "Command Palette: Toggle", shortcut: "cmd+k", defaultShortcut: "cmd+k", when: "!terminalFocus"),
+        Keybinding(command: "chat.new", title: "Chat: New", shortcut: "cmd+n", defaultShortcut: "cmd+n", when: "!terminalFocus"),
+        Keybinding(command: "chat.newWithoutProject", title: "Chat: New Without Project", shortcut: nil, defaultShortcut: "cmd+option+n", when: nil),
+        Keybinding(command: "thread.settle", title: "Thread: Settle", shortcut: "cmd+shift+s", defaultShortcut: "cmd+shift+s", when: nil),
+        Keybinding(command: "thread.undo", title: "Thread: Undo", shortcut: "cmd+z", defaultShortcut: "cmd+z", when: "!terminalFocus && !editableFocus"),
+        Keybinding(command: "usage.cost", title: "Usage: Cost", shortcut: "c", defaultShortcut: "c", when: "usagePageOpen"),
+        Keybinding(command: "usage.tokens", title: "Usage: Tokens", shortcut: "t", defaultShortcut: "t", when: "usagePageOpen"),
+        Keybinding(command: "usage.period.day", title: "Usage: Period: Past 24h", shortcut: "cmd+shift+1", defaultShortcut: "cmd+shift+1", when: "usagePageOpen"),
+        Keybinding(command: "usage.period.week", title: "Usage: Period: 7 days", shortcut: "cmd+shift+2", defaultShortcut: "cmd+shift+2", when: "usagePageOpen"),
+    ]
+
+    static let models: [ModelOption] = [
+        ModelOption(provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true),
+        ModelOption(provider: "anthropic", id: "claude-opus-4-1", name: "Claude Opus 4.1", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true),
+        ModelOption(provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high"], contextWindow: 400_000, configured: true),
+        ModelOption(provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", reasoning: true, thinkingLevels: [], contextWindow: 1_000_000, configured: false),
+    ]
+
+    static let favorites = [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")]
+
+    static let providers: [ProviderStatus] = [
+        ProviderStatus(id: "anthropic", name: "Anthropic", configured: true, modelCount: 2, auth: "configured"),
+        ProviderStatus(id: "openai-codex", name: "OpenAI Codex", configured: true, modelCount: 1, auth: "configured"),
+        ProviderStatus(id: "google", name: "Google", configured: false, modelCount: 1, auth: "missing"),
+    ]
+
+    static let projects: [Project] = [
+        Project(id: "/Users/gil/Repos/local-studio", name: "local-studio", path: "/Users/gil/Repos/local-studio", icon: nil, isGit: true),
+        Project(id: "/Users/gil/Repos/eukhe", name: "eukhe", path: "/Users/gil/Repos/eukhe", icon: nil, isGit: true),
+    ]
+
+    static var base: [Update] {
+        [
+            .connection(state: .ready),
+            .projects(projects: projects),
+            .settings(settings: settings),
+            .keybindings(bindings: keybindings),
+            .models(models: models, favorites: favorites, hidden: []),
+            .providers(providers: providers),
+        ]
+    }
+
+    static func thread(_ id: String, _ title: String, project: String?, hoursAgo: Double, branch: String? = nil) -> ThreadRow {
+        ThreadRow(
+            id: id, project: project, title: title, shelf: .settled, status: .idle, statusSince: nil,
+            updatedAt: now - Int64(hoursAgo * 3_600_000), snoozedUntil: nil, pinned: false, unread: false,
+            branch: branch, worktree: nil, provider: "anthropic", model: "claude-sonnet-4-5",
+            additions: branch == nil ? 0 : 42, deletions: branch == nil ? 0 : 7, note: nil, archived: true, autoSettle: true
+        )
+    }
+
+    static let archived: [ThreadRow] = [
+        thread("a1", "Port the settings search index", project: projects[0].id, hoursAgo: 3, branch: "settings-search"),
+        thread("a2", "Investigate flaky terminal resize", project: projects[0].id, hoursAgo: 30),
+        thread("a3", "Draft daemon reconnect strategy", project: projects[1].id, hoursAgo: 80, branch: "reconnect"),
+        thread("a4", "Quick question about tokio select", project: nil, hoursAgo: 200),
+    ]
+
+    static func days(_ count: Int, seed: [UInt64]) -> [UsageDay] {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return (0..<count).map { index in
+            let date = Date().addingTimeInterval(-Double(count - 1 - index) * 86_400)
+            let tokens = seed[index % seed.count] * UInt64(1 + index % 3)
+            return UsageDay(day: formatter.string(from: date), tokens: tokens, costUsd: Double(tokens) / 1_000_000 * 4.2)
+        }
+    }
+
+    static var usage: UsageReport {
+        let daily = days(30, seed: [820_000, 1_400_000, 300_000, 2_100_000, 0, 950_000, 1_750_000])
+        let total = daily.reduce(0) { $0 + $1.tokens }
+        let cost = daily.reduce(0) { $0 + $1.costUsd }
+        return UsageReport(
+            period: .month, totalTokens: total, inputTokens: total * 7 / 10, outputTokens: total * 3 / 10, costUsd: cost,
+            requests: 184,
+            byModel: [
+                UsageByModel(provider: "anthropic", model: "claude-sonnet-4-5", tokens: total * 6 / 10, costUsd: cost * 0.55, requests: 112),
+                UsageByModel(provider: "openai-codex", model: "gpt-5-codex", tokens: total * 3 / 10, costUsd: cost * 0.4, requests: 58),
+                UsageByModel(provider: "local", model: "qwen3-coder-30b-a3b", tokens: total / 10, costUsd: cost * 0.05, requests: 14),
+            ],
+            daily: daily,
+            limits: []
+        )
+    }
+
+    static let pulls: [PullRequest] = [
+        PullRequest(number: 412, title: "Native settings window with grouped forms", url: "https://github.com/gildrb/local-studio/pull/412", state: "OPEN", checks: "passing", head: "swift/s4", base: "main"),
+        PullRequest(number: 409, title: "Core: stream usage aggregation from saved sessions", url: "https://github.com/gildrb/local-studio/pull/409", state: "OPEN", checks: "pending", head: "core/usage", base: "main"),
+        PullRequest(number: 401, title: "Fix terminal drawer resize jitter", url: "https://github.com/gildrb/local-studio/pull/401", state: "MERGED", checks: "passing", head: "fix/terminal-resize", base: "main"),
+        PullRequest(number: 398, title: "Experiment: GPUI sidebar", url: "https://github.com/gildrb/local-studio/pull/398", state: "CLOSED", checks: "failing", head: "gpui-sidebar", base: "main"),
+    ]
+
+    static let gib: UInt64 = 1_073_741_824
+
+    static var studio: LocalController {
+        LocalController(
+            target: "", url: "http://127.0.0.1:18091", id: "ctl-studio", name: "studio", host: "127.0.0.1", local: true,
+            reachable: true, error: nil, version: "0.9.2",
+            hardware: LocalHardware(
+                cpus: 32, memoryTotalBytes: 128 * gib, memoryFreeBytes: 60 * gib,
+                gpus: [
+                    LocalGpu(index: 0, name: "NVIDIA GeForce RTX 4090", card: "rtx-4090", memoryUsedMib: 20_480, memoryTotalMib: 24_564, busy: true),
+                    LocalGpu(index: 1, name: "NVIDIA GeForce RTX 4090", card: "rtx-4090", memoryUsedMib: 19_900, memoryTotalMib: 24_564, busy: true),
+                ],
+                memoryUsedBytes: 39 * gib, memoryCapacityBytes: 48 * gib, memoryLabel: "VRAM", gpuSummary: "2× RTX 4090"
+            ),
+            endpoints: [
+                LocalEndpoint(id: "ep-1", controllerId: "ctl-studio", port: 8001, pid: 4411, models: ["qwen3-coder-30b-a3b"], live: true, jobId: "run-1"),
+            ],
+            jobs: [],
+            recipes: [
+                LocalRecipe(id: "qwen3-coder-30b-vllm-2x4090", model: "qwen3-coder-30b-a3b", card: "rtx-4090", engine: "vllm", cards: 2, context: 131_072, tokensPerSecond: 85, fits: true, blocked: nil, detail: "2 of 2 GPUs · full rig · vllm · 131k context · 85 tok/s"),
+                LocalRecipe(id: "gpt-oss-20b-llamacpp-1x4090", model: "gpt-oss-20b", card: "rtx-4090", engine: "llama.cpp", cards: 1, context: 65_536, tokensPerSecond: 140, fits: true, blocked: nil, detail: "1 of 2 GPUs · llama.cpp · 66k context · 140 tok/s"),
+                LocalRecipe(id: "glm-4.6-sglang-8xh100", model: "glm-4.6", card: "h100", engine: "sglang", cards: 8, context: 200_000, tokensPerSecond: nil, fits: false, blocked: "needs 8 GPUs; captured h100 record from lab", detail: "8 of 2 GPUs · sglang"),
+            ],
+            requests: 1_284, tokens: 9_430_000, measuredRequests: 1_120
+        )
+    }
+
+    static var laptop: LocalController {
+        LocalController(
+            target: "http://100.88.4.12:18091", url: "http://100.88.4.12:18091", id: "ctl-mbp", name: "gil-mbp", host: "100.88.4.12", local: false,
+            reachable: true, error: nil, version: "0.9.2",
+            hardware: LocalHardware(
+                cpus: 14, memoryTotalBytes: 64 * gib, memoryFreeBytes: 30 * gib, gpus: [],
+                memoryUsedBytes: 34 * gib, memoryCapacityBytes: 64 * gib, memoryLabel: "Memory", gpuSummary: "Apple M4 Max"
+            ),
+            endpoints: [],
+            jobs: [LocalJob(id: "run-7", recipeId: "gpt-oss-20b-mlx", port: 8002, phase: "downloading", progress: 0.4, message: "weights 6.1 / 15.2 GB", failed: false, detail: "downloading 40% · weights 6.1 / 15.2 GB")],
+            recipes: [],
+            requests: 96, tokens: 410_000, measuredRequests: 96
+        )
+    }
+
+    static var offline: LocalController {
+        LocalController(
+            target: "http://100.88.4.40:18091", url: "http://100.88.4.40:18091", id: nil, name: "rig-02", host: "100.88.4.40", local: false,
+            reachable: false, error: "connect timed out after 3s", version: nil, hardware: nil, endpoints: [], jobs: [], recipes: [],
+            requests: 0, tokens: 0, measuredRequests: 0
+        )
+    }
+
+    static var localUsage: LocalUsage {
+        LocalUsage(
+            todayTokens: 380_000, weekTokens: 2_240_000, allTokens: 9_840_000, requests: 1_380, measuredRequests: 1_216,
+            daily: days(30, seed: [120_000, 340_000, 90_000, 410_000, 0, 220_000]),
+            models: [
+                LocalModelUsage(model: "qwen3-coder-30b-a3b", requests: 1_102, sharePercent: 79.9, tokens: 8_900_000, measured: true),
+                LocalModelUsage(model: "gpt-oss-20b", requests: 278, sharePercent: 20.1, tokens: 940_000, measured: true),
+            ]
+        )
+    }
+
+    static var registry: LocalRegistry {
+        LocalRegistry(
+            controller: "", all: false, commit: "4f2a9c1e7b", error: nil,
+            matches: [LocalRegistryMatch(name: "NVIDIA GeForce RTX 4090", memoryGb: 24, count: 2, hardwareId: "rtx-4090", hardwareName: "RTX 4090")],
+            total: 64,
+            models: [
+                RegistryModel(repo: "Qwen/Qwen3-Coder-30B-A3B-Instruct", variants: [
+                    RegistryVariant(id: "qwen3-coder-30b-vllm-2x4090", status: "verified", engine: "vllm", hardwareId: "rtx-4090", hardwareCount: 2, format: "safetensors", precision: "fp8", sizeGb: 31.2, launchKind: "docker", evidence: true, recommended: true, fits: true),
+                    RegistryVariant(id: "qwen3-coder-30b-llamacpp-1x4090", status: "community", engine: "llama.cpp", hardwareId: "rtx-4090", hardwareCount: 1, format: "gguf", precision: "q4_k_m", sizeGb: 18.6, launchKind: "docker", evidence: false, recommended: false, fits: true),
+                ]),
+                RegistryModel(repo: "openai/gpt-oss-20b", variants: [
+                    RegistryVariant(id: "gpt-oss-20b-llamacpp-1x4090", status: "verified", engine: "llama.cpp", hardwareId: "rtx-4090", hardwareCount: 1, format: "gguf", precision: "mxfp4", sizeGb: 12.1, launchKind: "docker", evidence: true, recommended: true, fits: true),
+                ]),
+                RegistryModel(repo: "zai-org/GLM-4.6", variants: [
+                    RegistryVariant(id: "glm-4.6-sglang-8xh100", status: "verified", engine: "sglang", hardwareId: "h100", hardwareCount: 8, format: "safetensors", precision: "fp8", sizeGb: 355, launchKind: "docker", evidence: true, recommended: false, fits: false),
+                ]),
+            ],
+            downloads: [LocalDownload(recipe: "gpt-oss-20b-llamacpp-1x4090", state: "downloaded")]
+        )
+    }
+
+    static var localSnapshot: LocalSnapshot {
+        LocalSnapshot(
+            controllers: [studio, laptop, offline], registry: registry, usage: localUsage,
+            tailnet: LocalTailnet(available: true, devices: [
+                TailnetDevice(name: "rig-03", ip: "100.88.4.41", os: "linux", controllerUrl: nil, controllerName: nil, linked: false),
+                TailnetDevice(name: "mini", ip: "100.88.4.50", os: "macOS", controllerUrl: "http://100.88.4.50:18091", controllerName: "mac-mini", linked: false),
+            ]),
+            record: nil, share: nil, autoModel: "qwen3-coder-30b-a3b", generatedAt: nil, error: nil
+        )
+    }
+
+    static var offlineSnapshot: LocalSnapshot {
+        LocalSnapshot(
+            controllers: [offline], registry: nil,
+            usage: LocalUsage(todayTokens: 0, weekTokens: 0, allTokens: 0, requests: 0, measuredRequests: 0, daily: [], models: []),
+            tailnet: nil, record: nil, share: nil, autoModel: nil, generatedAt: nil,
+            error: "Local controller unavailable at http://127.0.0.1:18091: connection refused"
+        )
+    }
+}

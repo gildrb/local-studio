@@ -1,6 +1,6 @@
 use crate::workspace::model::{
-    Branch, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalSnapshot, ProviderStatus, PullRequest,
-    SearchHit, Settings, UsageReport,
+    Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalSnapshot, ProviderStatus,
+    PullRequest, PullRequestDetail, SearchHit, Settings, UsageReport,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +63,7 @@ pub enum ThreadStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ThreadRow {
     pub id: String,
     pub project: Option<String>,
@@ -82,6 +83,16 @@ pub struct ThreadRow {
     pub deletions: u32,
     pub note: Option<String>,
     pub archived: bool,
+    pub auto_settle: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct ThreadSearchHit {
+    pub thread: String,
+    pub title: String,
+    pub snippet: String,
+    pub project: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,13 +337,14 @@ pub enum Update {
     Projects { projects: Vec<Project> },
     Threads { threads: Vec<ThreadRow> },
     ArchivedThreads { request: String, threads: Vec<ThreadRow> },
+    ThreadSearch { request: String, hits: Vec<ThreadSearchHit> },
     ThreadStarted { draft: String, thread: String },
     Thread { thread: String, info: ThreadInfo },
     Transcript { thread: String, op: TranscriptOp },
     Approvals { thread: String, approvals: Vec<Approval> },
     Queue { thread: String, queued: Vec<QueuedMessage> },
     ComposerText { thread: String, text: String },
-    Models { models: Vec<ModelOption>, favorites: Vec<ModelKey> },
+    Models { models: Vec<ModelOption>, favorites: Vec<ModelKey>, hidden: Vec<ModelKey> },
     Commands { request: String, commands: Vec<SlashCommand> },
     Notification { thread: String, kind: NotificationKind, title: String, body: String },
     GitStatus { project: String, status: GitStatus },
@@ -342,6 +354,8 @@ pub enum Update {
     FileContent { request: String, path: String, content: FileContent },
     SearchResults { request: String, results: Vec<SearchHit> },
     PullRequests { request: String, pulls: Vec<PullRequest> },
+    PullRequestDetail { request: String, detail: PullRequestDetail },
+    Devices { request: String, devices: Vec<Device> },
     TerminalOpened { request: String, terminal: String },
     TerminalOutput { terminal: String, data: Vec<u8> },
     TerminalExited { terminal: String, code: Option<i32> },

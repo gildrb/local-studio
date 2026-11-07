@@ -108,10 +108,7 @@ struct RootView: View {
                 }
             }
         } else {
-            VStack(spacing: 0) {
-                ThreadHeaderBar(store: store, leadingInset: leading, trailingInset: Theme.Metrics.trailingChromeInset)
-                PageSeam(store: store, route: shell.route)
-            }
+            PageSeam(store: store, route: shell.route, leadingInset: leading - 16)
         }
     }
 

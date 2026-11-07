@@ -1,0 +1,556 @@
+import AppKit
+import LocalStudioKit
+import SwiftUI
+
+struct RightPanelView: View {
+    let store: StudioStore
+    var leadingInset: CGFloat = 0
+    @State private var dragOrigin: CGFloat?
+
+    private var panels: PanelState { store.workspace.panels }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if !panels.rightPanelMaximized {
+                ResizeHandle(axis: .horizontal, cursor: .columnResize, gesture: resize)
+            }
+            VStack(spacing: 0) {
+                PanelTabStrip(panels: panels, leadingInset: panels.rightPanelMaximized ? leadingInset : 0)
+                PanelHairline()
+                Group {
+                    if let surface = panels.activeContent {
+                        PanelSurfaceView(store: store, surface: surface)
+                            .id(surface.id)
+                    } else {
+                        PanelLauncherView(panels: panels)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .background(Theme.canvas)
+        }
+        .frame(width: panels.rightPanelMaximized ? nil : panels.rightPanelWidth)
+        .frame(maxWidth: panels.rightPanelMaximized ? .infinity : nil, maxHeight: .infinity)
+        .transaction { $0.disablesAnimations = true }
+    }
+
+    private var resize: some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+            .onChanged { value in
+                let origin = dragOrigin ?? panels.rightPanelWidth
+                dragOrigin = origin
+                let range = PanelState.widthRange
+                panels.rightPanelWidth = min(max(origin - value.translation.width, range.lowerBound), range.upperBound)
+            }
+            .onEnded { _ in dragOrigin = nil }
+    }
+}
+
+struct PanelHairline: View {
+    var body: some View {
+        Rectangle()
+            .fill(Theme.hairline)
+            .frame(height: 1)
+    }
+}
+
+struct ResizeHandle<G: Gesture>: View {
+    let axis: Axis
+    let cursor: NSCursor
+    let gesture: G
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.hairline)
+            .frame(width: axis == .horizontal ? 1 : nil, height: axis == .vertical ? 1 : nil)
+            .overlay {
+                Color.clear
+                    .frame(width: axis == .horizontal ? 9 : nil, height: axis == .vertical ? 9 : nil)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        if inside { cursor.push() } else { NSCursor.pop() }
+                    }
+                    .gesture(gesture)
+            }
+            .zIndex(1)
+    }
+}
+
+private struct PanelTabStrip: View {
+    let panels: PanelState
+    let leadingInset: CGFloat
+
+    var body: some View {
+        HStack(spacing: 4) {
+            ScrollViewReader { proxy in
+                ScrollView(.horizontal) {
+                    HStack(spacing: 2) {
+                        ForEach(panels.surfaces) { surface in
+                            PanelTab(panels: panels, surface: surface, active: surface.id == panels.activeSurface)
+                                .id(surface.id)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                }
+                .scrollIndicators(.never)
+                .onAppear { reveal(proxy) }
+                .onChange(of: panels.activeSurface) { reveal(proxy) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if !panels.surfaces.isEmpty {
+                Menu {
+                    ForEach(panels.launcherActions()) { action in
+                        Button {
+                            panels.openSurface(action.kind)
+                        } label: {
+                            Label(action.kind.label, systemImage: action.kind.symbol)
+                        }
+                        .disabled(!action.available)
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 14, weight: .light))
+                        .foregroundStyle(Theme.chromeIcon)
+                }
+                .menuStyle(.button)
+                .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
+                .help("Open a surface")
+            }
+            ChromeIconButton(
+                panels.rightPanelMaximized ? "Restore Panel" : "Maximize Panel",
+                symbol: panels.rightPanelMaximized ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"
+            ) {
+                panels.rightPanelMaximized.toggle()
+            }
+        }
+        .padding(.leading, leadingInset)
+        .padding(.trailing, PanelState.trailingChromeInset)
+        .frame(height: Theme.Metrics.titlebarHeight)
+        .background(PanelDragArea())
+    }
+
+    private func reveal(_ proxy: ScrollViewProxy) {
+        if let active = panels.activeSurface {
+            proxy.scrollTo(active)
+        }
+    }
+}
+
+private struct PanelTab: View {
+    let panels: PanelState
+    let surface: PanelSurface
+    let active: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: surface.symbol)
+                .font(.system(size: 12, weight: .light))
+                .foregroundStyle(active ? Color.primary : Theme.secondaryText)
+            Text(Self.clip(surface.title))
+                .font(.system(size: 12.5))
+                .foregroundStyle(active ? Color.primary : Theme.secondaryText)
+                .lineLimit(1)
+                .fixedSize()
+            Button {
+                panels.close(surface.id)
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(active || hovering ? 1 : 0)
+            .help("Close \(surface.title)")
+            .accessibilityLabel("Close \(surface.title)")
+        }
+        .padding(.leading, 9)
+        .padding(.trailing, 4)
+        .frame(height: 28)
+        .rowSurface(selected: active, hovering: hovering)
+        .contentShape(Rectangle())
+        .onTapGesture { panels.show(surface.id) }
+        .onHover { hovering = $0 }
+        .help(surface.title)
+        .contextMenu {
+            if let path = surface.copyablePath {
+                Button("Copy Path") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(path, forType: .string)
+                }
+                Divider()
+            }
+            Button("Close") { panels.close(surface.id) }
+            Button("Close Others") { panels.closeOthers(surface.id) }
+                .disabled(panels.surfaces.count < 2)
+            Button("Close to the Right") { panels.closeToRight(surface.id) }
+                .disabled(panels.surfaces.last?.id == surface.id)
+            Button("Close All") { panels.closeAll() }
+        }
+    }
+
+    private static func clip(_ title: String) -> String {
+        guard title.count > 26 else { return title }
+        return "\(title.prefix(12))…\(title.suffix(12))"
+    }
+}
+
+struct PanelDragArea: View {
+    var body: some View {
+        Color.clear
+            .contentShape(Rectangle())
+            .gesture(WindowDragGesture())
+            .allowsWindowActivationEvents(true)
+    }
+}
+
+private struct PanelLauncherView: View {
+    let panels: PanelState
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let actions = panels.launcherActions()
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Open a surface")
+                .font(.system(size: 13, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+            ForEach(actions) { action in
+                LauncherRow(action: action) { panels.openSurface(action.kind) }
+            }
+        }
+        .frame(maxWidth: 340)
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .focusable()
+        .focusEffectDisabled()
+        .focused($focused)
+        .onKeyPress(phases: .down) { press in
+            guard press.modifiers.isEmpty || press.modifiers == .shift,
+                  let key = press.characters.lowercased().first,
+                  let action = actions.first(where: { $0.kind.shortcut == key }), action.available else { return .ignored }
+            panels.openSurface(action.kind)
+            return .handled
+        }
+        .onAppear { focused = true }
+        .accessibilityLabel("Open a surface")
+    }
+}
+
+private struct LauncherRow: View {
+    let action: PanelLauncherAction
+    let open: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 10) {
+                Image(systemName: action.kind.symbol)
+                    .font(.system(size: 14, weight: .light))
+                    .foregroundStyle(Theme.chromeIcon)
+                    .frame(width: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 6) {
+                        Text(action.kind.label)
+                            .font(.system(size: 13))
+                        if action.badge > 0 {
+                            Text("\(action.badge)")
+                                .font(.system(size: 10, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 5)
+                                .frame(minWidth: 16, minHeight: 16)
+                                .background(Theme.primary, in: Capsule())
+                        }
+                    }
+                    if let detail = action.available ? action.kind.description : action.kind.unavailableHint {
+                        Text(detail)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.secondaryText)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(String(action.kind.shortcut).uppercased())
+                    .font(.system(size: 11, weight: .medium, design: .rounded))
+                    .foregroundStyle(Theme.secondaryText)
+                    .frame(width: 20, height: 20)
+                    .background(Theme.input.opacity(0.6), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+            }
+            .padding(.horizontal, 10)
+            .frame(height: action.available && action.kind.description == nil ? 34 : 44)
+            .rowSurface(selected: false, hovering: hovering && action.available)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!action.available)
+        .opacity(action.available ? 1 : 0.45)
+        .onHover { hovering = $0 }
+        .help(action.available ? action.kind.label : action.kind.unavailableHint)
+    }
+}
+
+private struct PanelSurfaceView: View {
+    let store: StudioStore
+    let surface: PanelSurface
+
+    var body: some View {
+        let panels = store.workspace.panels
+        switch surface.content {
+        case .browser(let model):
+            BrowserSurfaceView(model: model)
+        case .terminal(let group):
+            TerminalGroupSurfaceView(group: group, panels: panels, surface: surface.id)
+        case .files(let model):
+            FilesSurfaceView(model: model, panels: panels)
+        case .diff(let model):
+            DiffSurfaceView(model: model, panels: panels)
+        case .file(let model):
+            FilePreviewView(model: model, settings: panels.settings)
+        case .pullRequest(let pull):
+            PullRequestDetailView(pull: pull)
+        case .pullRequests(let model):
+            PullRequestsSurfaceView(model: model)
+        case .agents:
+            AgentsSurfaceView(panels: panels)
+        }
+    }
+}
+
+struct PanelToolbar<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                content
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            PanelHairline()
+        }
+    }
+}
+
+struct PanelMessage: View {
+    let symbol: String
+    let title: String
+    var detail: String?
+    var actionTitle: String?
+    var action: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 22, weight: .light))
+                .foregroundStyle(Theme.chromeIcon)
+            Text(title)
+                .font(.system(size: 13, weight: .medium))
+                .multilineTextAlignment(.center)
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+            }
+            if let actionTitle, let action {
+                Button(actionTitle, action: action)
+                    .controlSize(.small)
+                    .padding(.top, 4)
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: 360)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+struct PanelIconButton: View {
+    let title: String
+    let symbol: String
+    var enabled = true
+    let action: () -> Void
+    @State private var hovering = false
+
+    init(_ title: String, symbol: String, enabled: Bool = true, action: @escaping () -> Void) {
+        self.title = title
+        self.symbol = symbol
+        self.enabled = enabled
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .light))
+                .foregroundStyle(Theme.chromeIcon)
+                .frame(width: 26, height: 26)
+                .background(hovering && enabled ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+        .help(title)
+        .accessibilityLabel(title)
+        .onHover { hovering = $0 }
+    }
+}
+
+struct PanelMenuButton<Content: View>: View {
+    let title: String
+    let symbol: String
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        Menu {
+            content
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 13, weight: .light))
+                .foregroundStyle(Theme.chromeIcon)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .frame(width: 26, height: 26)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
+struct AgentsSurfaceView: View {
+    let panels: PanelState
+    @State private var expanded: Set<UInt64> = []
+
+    var body: some View {
+        let agents = panels.agents
+        VStack(spacing: 0) {
+            PanelToolbar {
+                Text("Subagents")
+                    .font(.system(size: 12.5, weight: .medium))
+                Spacer()
+                let live = agents.filter(\.live).count
+                Text(live > 0 ? "\(live) running" : "\(agents.count) total")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.secondaryText)
+                    .monospacedDigit()
+            }
+            if agents.isEmpty {
+                PanelMessage(symbol: "person.2", title: "No subagents in this thread yet.", detail: "Agents the assistant starts during a turn appear here while they run.")
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 2) {
+                        ForEach(agents.reversed()) { agent in
+                            AgentRow(agent: agent, expanded: expanded.contains(agent.id)) {
+                                if expanded.contains(agent.id) {
+                                    expanded.remove(agent.id)
+                                } else {
+                                    expanded.insert(agent.id)
+                                }
+                            }
+                        }
+                    }
+                    .padding(8)
+                }
+            }
+        }
+    }
+}
+
+private struct AgentRow: View {
+    let agent: AgentRun
+    let expanded: Bool
+    let toggle: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: glyph)
+                    .font(.system(size: 13, weight: .light))
+                    .foregroundStyle(tint)
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(agent.title)
+                        .font(.system(size: 13))
+                        .lineLimit(expanded ? 3 : 1)
+                    meta
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(Theme.secondaryText)
+                    .opacity(agent.output.isEmpty ? 0 : 1)
+            }
+            if expanded, !agent.output.isEmpty {
+                Text(agent.output.suffix(4000))
+                    .font(.system(size: 11.5, design: .monospaced))
+                    .foregroundStyle(Theme.secondaryText)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .rowSurface(selected: expanded, hovering: hovering)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
+        .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder private var meta: some View {
+        let started = agent.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }
+        switch agent.state {
+        case .pending:
+            Text("Queued · \(agent.detail)")
+        case .running:
+            if let started {
+                Text("Running for \(started, style: .relative) · \(agent.detail)")
+            } else {
+                Text("Running · \(agent.detail)")
+            }
+        case .succeeded:
+            Text("Done\(duration) · \(agent.detail)")
+        case .failed:
+            Text("Failed\(duration) · \(agent.detail)")
+        case .aborted:
+            Text("Stopped · \(agent.detail)")
+        }
+    }
+
+    private var duration: String {
+        guard let start = agent.startedAt, let end = agent.endedAt, end >= start else { return "" }
+        let seconds = Int((end - start) / 1000)
+        return seconds >= 60 ? " in \(seconds / 60)m \(seconds % 60)s" : " in \(seconds)s"
+    }
+
+    private var glyph: String {
+        switch agent.state {
+        case .pending: "clock"
+        case .running: "circle.dotted"
+        case .succeeded: "checkmark.circle"
+        case .failed: "xmark.circle"
+        case .aborted: "minus.circle"
+        }
+    }
+
+    private var tint: Color {
+        switch agent.state {
+        case .running: Theme.primary
+        case .failed: PanelPalette.removedText
+        case .succeeded: PanelPalette.addedText
+        case .pending, .aborted: Theme.secondaryText
+        }
+    }
+}

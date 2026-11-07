@@ -24,8 +24,8 @@ pub(crate) struct StoredProject {
 pub(crate) struct ThreadFlags {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) project: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) pinned_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none", alias = "pinnedAt")]
+    pub(crate) pin_order: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) settled_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,6 +42,7 @@ pub(crate) struct ThreadFlags {
     pub(crate) access: Option<AccessMode>,
     pub(crate) additions: u32,
     pub(crate) deletions: u32,
+    pub(crate) auto_settle_disabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -54,6 +55,8 @@ struct StateFile {
     threads: BTreeMap<String, ThreadFlags>,
     #[serde(default)]
     favorites: Vec<ModelKey>,
+    #[serde(default)]
+    hidden: Vec<ModelKey>,
 }
 
 #[derive(Debug)]
@@ -62,6 +65,7 @@ pub(crate) struct Store {
     pub(crate) projects: Vec<StoredProject>,
     pub(crate) threads: BTreeMap<String, ThreadFlags>,
     pub(crate) favorites: Vec<ModelKey>,
+    pub(crate) hidden: Vec<ModelKey>,
 }
 
 impl Store {
@@ -70,9 +74,13 @@ impl Store {
         let file = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice::<StateFile>(&bytes)
                 .with_context(|| format!("read the Local Studio state {}", path.display()))?,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                StateFile { version: VERSION, projects: Vec::new(), threads: BTreeMap::new(), favorites: Vec::new() }
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => StateFile {
+                version: VERSION,
+                projects: Vec::new(),
+                threads: BTreeMap::new(),
+                favorites: Vec::new(),
+                hidden: Vec::new(),
+            },
             Err(error) => return Err(error).with_context(|| format!("read {}", path.display())),
         };
         if file.version > VERSION {
@@ -82,7 +90,13 @@ impl Store {
                 file.version
             );
         }
-        Ok(Self { path, projects: file.projects, threads: file.threads, favorites: file.favorites })
+        Ok(Self {
+            path,
+            projects: file.projects,
+            threads: file.threads,
+            favorites: file.favorites,
+            hidden: file.hidden,
+        })
     }
 
     pub(crate) fn project_id(&self, project: &str) -> Option<String> {
@@ -112,6 +126,7 @@ impl Store {
             projects: self.projects.clone(),
             threads: self.threads.clone(),
             favorites: self.favorites.clone(),
+            hidden: self.hidden.clone(),
         };
         let bytes = serde_json::to_vec_pretty(&file)?;
         let directory = self.path.parent().context("the state file has no directory")?;

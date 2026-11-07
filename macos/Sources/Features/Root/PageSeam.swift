@@ -31,14 +31,15 @@ enum MainRoute: Hashable {
 struct PageSeam: View {
     let store: StudioStore
     let route: MainRoute
+    let leadingInset: CGFloat
 
     var body: some View {
         switch route {
-        case .thread: Color.clear
-        case .usage: Color.clear
-        case .local: Color.clear
-        case .pullRequests: Color.clear
-        case .archive: Color.clear
+        case .thread: EmptyView()
+        case .usage: UsagePage(store: store, leadingInset: leadingInset)
+        case .local: LocalPage(store: store, leadingInset: leadingInset)
+        case .pullRequests: PullRequestsPage(store: store, leadingInset: leadingInset)
+        case .archive: ArchivePage(store: store, leadingInset: leadingInset)
         }
     }
 }
@@ -48,7 +49,7 @@ struct RightPanelSeam: View {
     var leadingInset: CGFloat = 0
 
     var body: some View {
-        EmptyView()
+        RightPanelView(store: store)
     }
 }
 
@@ -56,7 +57,7 @@ struct TerminalDrawerSeam: View {
     let store: StudioStore
 
     var body: some View {
-        EmptyView()
+        TerminalDrawerView(store: store)
     }
 }
 
@@ -64,7 +65,6 @@ struct SettingsSeam: View {
     let store: StudioStore
 
     var body: some View {
-        Color.clear
-            .frame(width: 680, height: 520)
+        SettingsView(store: store)
     }
 }

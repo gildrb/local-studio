@@ -6,13 +6,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let store: StudioStore
     let commandRefresh: CommandRefresh
     private var smoke: Smoke?
+    private var conversationSmoke: ConversationSmoke?
     private var shellSmoke: ShellSmoke?
     private var monitors: [Any] = []
     private var commandHold: DispatchWorkItem?
+    private var panelSmoke: PanelSmoke?
 
     override init() {
-        Self.exportControllerMain()
-        store = StudioStore(launch: Self.bundledDaemon())
+        store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
         commandRefresh = CommandRefresh(store: store)
         super.init()
     }
@@ -38,10 +39,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             smoke.start()
             self.smoke = smoke
         }
+        if arguments.contains("+smoke-conversation") {
+            let smoke = ConversationSmoke(store: store)
+            smoke.start()
+            conversationSmoke = smoke
+        }
         if arguments.contains("+smoke-shell") {
             let smoke = ShellSmoke(store: store)
             smoke.start()
             shellSmoke = smoke
+        }
+        if let flag = arguments.firstIndex(of: "+smoke-panels") {
+            let path = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : NSTemporaryDirectory() + "ls-smoke-panels-diff.png"
+            let smoke = PanelSmoke(store: store, output: URL(fileURLWithPath: path))
+            smoke.start()
+            panelSmoke = smoke
         }
     }
 
@@ -102,12 +114,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private static func exportControllerMain() {
-        guard ProcessInfo.processInfo.environment["LOCAL_STUDIO_CONTROLLER_MAIN"]?.isEmpty ?? true,
-              let resources = Bundle.main.resourceURL else { return }
+    private static func bundledController() -> String? {
+        guard let resources = Bundle.main.resourceURL else { return nil }
         let main = resources.appendingPathComponent("controller/src/main.ts")
-        guard FileManager.default.fileExists(atPath: main.path) else { return }
-        setenv("LOCAL_STUDIO_CONTROLLER_MAIN", main.path, 1)
+        return FileManager.default.fileExists(atPath: main.path) ? main.path : nil
     }
 
     private static func bundledDaemon() -> DaemonLaunch? {

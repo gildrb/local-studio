@@ -1,6 +1,8 @@
 mod api;
+mod devices;
 mod diff;
 mod files;
+mod forge;
 mod git;
 mod local;
 pub mod model;
@@ -22,6 +24,7 @@ use std::time::{Duration, Instant};
 use tokio::runtime::Handle;
 use tokio::sync::{mpsc, watch as channel};
 
+use self::devices::Devices;
 use self::local::Local;
 use self::model::{DiffScope, LocalAction, PullRequest, Settings, UsagePeriod};
 use self::terminal::Terminals;
@@ -45,6 +48,7 @@ struct Inner {
     turn_files: Mutex<HashMap<String, BTreeMap<u64, Vec<String>>>>,
     projects: Mutex<Vec<String>>,
     terminals: Terminals,
+    devices: Devices,
     local: Local,
     watcher: GitWatcher,
     watch_lock: tokio::sync::Mutex<()>,
@@ -59,7 +63,13 @@ pub(crate) struct Workspace {
 }
 
 impl Workspace {
-    pub(crate) fn new(runtime: Handle, mailbox: Arc<Mailbox>, data_dir: PathBuf, daemon: DaemonQuery) -> Self {
+    pub(crate) fn new(
+        runtime: Handle,
+        mailbox: Arc<Mailbox>,
+        data_dir: PathBuf,
+        daemon: DaemonQuery,
+        controller_main: Option<PathBuf>,
+    ) -> Self {
         let (loaded, settings_error) = settings::load_json::<Settings>(&data_dir.join("settings.json"));
         let (overrides, keybindings_error) =
             settings::load_json::<BTreeMap<String, Option<String>>>(&data_dir.join("keybindings.json"));
@@ -71,7 +81,8 @@ impl Workspace {
         mailbox.push(Update::Keybindings { bindings: settings::keybindings(&overrides) });
         let (notify, notifications) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner {
-            local: Local::new(&data_dir),
+            local: Local::new(&data_dir, controller_main),
+            devices: Devices::default(),
             runtime,
             mailbox,
             data_dir,
@@ -151,6 +162,7 @@ impl Workspace {
         self.inner.terminals.close_all();
         self.inner.watcher.stop();
         self.inner.local.shutdown();
+        self.inner.devices.shutdown_all();
     }
 
     fn push(&self, update: Update) {
@@ -357,6 +369,65 @@ impl Workspace {
             workspace.forget_pull_requests(&project);
             let status = workspace.status_update(&project).await?;
             Ok(vec![status, Update::PullRequests { request: reply, pulls: vec![pull] }])
+        });
+    }
+
+    pub(crate) fn load_pull_request(&self, request: String, project: String, number: u64) {
+        let reply = request.clone();
+        self.answer(request, async move {
+            let detail = forge::pull_request_detail(Path::new(&project), number).await?;
+            Ok(vec![Update::PullRequestDetail { request: reply, detail }])
+        });
+    }
+
+    pub(crate) fn pull(&self, request: String, project: String) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let done = git::pull(Path::new(&project)).await?;
+            let status = workspace.status_update(&project).await?;
+            Ok(vec![status, Update::RequestDone { request: reply, message: done }])
+        });
+    }
+
+    pub(crate) fn publish_repository(&self, request: String, project: String, name: String, private: bool) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let done = git::publish_repository(Path::new(&project), &name, private).await?;
+            workspace.forget_pull_requests(&project);
+            let status = workspace.status_update(&project).await?;
+            Ok(vec![status, Update::RequestDone { request: reply, message: done }])
+        });
+    }
+
+    pub(crate) fn list_devices(&self, request: String) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let (devices, missing) = workspace.inner.devices.list().await;
+            if devices.is_empty() && !missing.is_empty() {
+                workspace.inner.mailbox.notice(NoticeLevel::Info, missing.join(" "));
+            }
+            Ok(vec![Update::Devices { request: reply, devices }])
+        });
+    }
+
+    pub(crate) fn boot_device(&self, request: String, device: String) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let done = workspace.inner.devices.boot(&device).await?;
+            Ok(vec![Update::RequestDone { request: reply, message: done }])
+        });
+    }
+
+    pub(crate) fn shutdown_device(&self, request: String, device: String) {
+        let workspace = self.clone();
+        let reply = request.clone();
+        self.answer(request, async move {
+            let done = workspace.inner.devices.shutdown(&device).await?;
+            Ok(vec![Update::RequestDone { request: reply, message: done }])
         });
     }
 

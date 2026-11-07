@@ -7,9 +7,9 @@ use anyhow::{bail, Context};
 use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
-    AccessMode, ApprovalAnswer, Block, Connection, DaemonLaunch, Delivery, Item, ItemKind, ModelOption, Project,
-    PromptDraft, Shelf, Studio, StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, ToolState, TranscriptOp, Update,
-    Waker, WorktreeChoice,
+    AccessMode, ApprovalAnswer, Block, Connection, DaemonLaunch, Delivery, Item, ItemKind, ModelKey, ModelOption,
+    Project, PromptDraft, Shelf, Studio, StudioConfig, ThreadRow, ThreadSearchHit, ThreadSettings, ThreadStatus,
+    ToolState, TranscriptOp, Update, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
@@ -53,6 +53,8 @@ struct View {
     approvals: u32,
     composer: Vec<(String, String)>,
     models: Option<Vec<ModelOption>>,
+    hidden: Vec<ModelKey>,
+    search: Option<Vec<ThreadSearchHit>>,
     archived: Option<Vec<ThreadRow>>,
     statuses: HashMap<String, Vec<ThreadStatus>>,
     notifications: Vec<String>,
@@ -120,6 +122,7 @@ impl Harness {
                 self.view.threads = threads;
             }
             Update::ArchivedThreads { threads, .. } => self.view.archived = Some(threads),
+            Update::ThreadSearch { hits, .. } => self.view.search = Some(hits),
             Update::ThreadStarted { draft, thread } => {
                 println!("     started {draft} -> {thread}");
                 self.view.started.insert(draft, thread);
@@ -135,7 +138,10 @@ impl Harness {
                 }
             }
             Update::ComposerText { thread, text } => self.view.composer.push((thread, text)),
-            Update::Models { models, .. } => self.view.models = Some(models),
+            Update::Models { models, hidden, .. } => {
+                self.view.models = Some(models);
+                self.view.hidden = hidden;
+            }
             Update::Notification { kind, title, body, .. } => {
                 println!("     notification {kind:?} {title}: {body}");
                 self.view.notifications.push(format!("{kind:?}"));
@@ -152,6 +158,8 @@ impl Harness {
             | Update::FileContent { .. }
             | Update::SearchResults { .. }
             | Update::PullRequests { .. }
+            | Update::PullRequestDetail { .. }
+            | Update::Devices { .. }
             | Update::TerminalOpened { .. }
             | Update::TerminalOutput { .. }
             | Update::TerminalExited { .. }
@@ -289,6 +297,7 @@ fn main() -> anyhow::Result<()> {
         socket_path: Some(socket.to_string_lossy().into_owned()),
         session_dir: Some(agent_dir.join("sessions").to_string_lossy().into_owned()),
         data_dir: None,
+        controller_main: None,
         launch: Some(DaemonLaunch {
             program: daemon.to_string_lossy().into_owned(),
             arguments: vec![
@@ -310,6 +319,7 @@ struct Ids {
     first: String,
     second: String,
     project: String,
+    hidden: ModelKey,
 }
 
 fn drive(config: &StudioConfig, work: &Path) -> anyhow::Result<()> {
@@ -409,13 +419,49 @@ fn first_run(harness: &mut Harness, work: &Path) -> anyhow::Result<Ids> {
         models.len(),
         models.iter().map(|model| &model.provider).collect::<BTreeSet<_>>()
     );
-    Ok(Ids { first, second, project })
+    let first_model = models.first().context("the catalog is empty")?;
+    let hidden = ModelKey { provider: first_model.provider.clone(), model: first_model.id.clone() };
+    Ok(Ids { first, second, project, hidden })
+}
+
+fn round_two(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
+    let studio = Arc::clone(&harness.studio);
+    let (first, second) = (ids.first.clone(), ids.second.clone());
+    studio.search_threads("search-1".to_string(), "DONE: SMOKE".to_string(), 10);
+    harness.pump_until("thread content search found both threads", |view| {
+        view.search.as_ref().is_some_and(|hits| {
+            [&first, &second].iter().all(|id| {
+                hits.iter()
+                    .any(|hit| &hit.thread == *id && hit.snippet.contains("Done: smoke-ok") && hit.project.is_some())
+            })
+        })
+    })?;
+    studio.search_threads("search-2".to_string(), "no such words anywhere".to_string(), 10);
+    harness.pump_until("search without a match is empty", |view| view.search.as_ref().is_some_and(Vec::is_empty))?;
+    studio.set_pinned(first.clone(), true);
+    studio.set_pinned(second.clone(), true);
+    harness.pump_until("both pinned in pin order", |view| pinned_order(view) == [first.clone(), second.clone()])?;
+    studio.reorder_pinned(vec![second.clone(), first.clone()]);
+    harness.pump_until("pinned reordered", |view| pinned_order(view) == [second.clone(), first.clone()])?;
+    studio.set_pinned(second.clone(), false);
+    studio.set_auto_settle(first.clone(), false);
+    harness.pump_until("auto-settle opt-out shows on the row", |view| {
+        view.row(&first).is_some_and(|row| !row.auto_settle) && view.row(&second).is_some_and(|row| row.auto_settle)
+    })?;
+    studio.set_hidden_model(ids.hidden.provider.clone(), ids.hidden.model.clone(), true);
+    harness.pump_until("hidden model listed", |view| view.hidden.contains(&ids.hidden))?;
+    Ok(())
+}
+
+fn pinned_order(view: &View) -> Vec<String> {
+    view.threads.iter().filter(|row| row.shelf == Shelf::Pinned).map(|row| row.id.clone()).collect()
 }
 
 fn curate(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
     let studio = Arc::clone(&harness.studio);
     let first = ids.first.clone();
     let second = ids.second.clone();
+    round_two(harness, ids)?;
     studio.set_pinned(first.clone(), true);
     studio.rename_thread(first.clone(), "Renamed smoke".to_string());
     studio.set_settled(second.clone(), true);
@@ -459,7 +505,7 @@ fn second_run(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
     harness.pump_until("restarted core connected", |view| matches!(view.connection, Some(Connection::Ready)))?;
     harness.pump_until("projects and thread state persisted across the restart", |view| {
         view.projects.iter().any(|project| project.id == ids.project)
-            && view.row(&ids.first).is_some_and(|row| row.pinned && row.title == "Renamed smoke")
+            && view.row(&ids.first).is_some_and(|row| row.pinned && row.title == "Renamed smoke" && !row.auto_settle)
             && view.row(&ids.second).is_none()
     })?;
     harness.studio.list_archived("archive-2".to_string());
@@ -467,6 +513,10 @@ fn second_run(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
         view.archived.as_ref().is_some_and(|rows| {
             rows.iter().any(|row| row.id == ids.second && row.archived && row.shelf == Shelf::Settled)
         })
+    })?;
+    harness.studio.load_models();
+    harness.pump_until("hidden models persisted across the restart", |view| {
+        view.models.is_some() && view.hidden.contains(&ids.hidden)
     })?;
     Ok(())
 }

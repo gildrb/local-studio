@@ -37,6 +37,7 @@ pub(crate) struct Local {
     data_root: PathBuf,
     cached: tokio::sync::Mutex<Cached>,
     spawned: Mutex<Option<Child>>,
+    controller_main: Option<PathBuf>,
 }
 
 struct Endpoint {
@@ -464,12 +465,15 @@ fn find_bun() -> Option<PathBuf> {
     process::which("bun")
 }
 
-fn controller_script() -> Option<PathBuf> {
+fn controller_script(configured: Option<&Path>) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("LOCAL_STUDIO_CONTROLLER_MAIN").filter(|path| !path.is_empty()) {
         return Some(PathBuf::from(path));
     }
-    let bundled = Path::new(env!("CARGO_MANIFEST_DIR")).join("../controller/src/main.ts");
-    bundled.canonicalize().ok().filter(|path| path.is_file())
+    if let Some(path) = configured.filter(|path| path.is_file()) {
+        return Some(path.to_path_buf());
+    }
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../controller/src/main.ts");
+    source.canonicalize().ok().filter(|path| path.is_file())
 }
 
 fn is_loopback(url: &Url) -> bool {
@@ -485,7 +489,7 @@ fn is_loopback(url: &Url) -> bool {
 }
 
 impl Local {
-    pub(crate) fn new(data_dir: &Path) -> Self {
+    pub(crate) fn new(data_dir: &Path, controller_main: Option<PathBuf>) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(5))
@@ -494,6 +498,7 @@ impl Local {
             data_root: data_dir.join("controller"),
             cached: tokio::sync::Mutex::new(Cached::default()),
             spawned: Mutex::new(None),
+            controller_main,
         }
     }
 
@@ -572,7 +577,8 @@ impl Local {
 
     fn spawn_controller(&self, base: &Url) -> Result<(), String> {
         let bun = find_bun().ok_or("bun is not installed, so Local Studio cannot start a Local controller.")?;
-        let script = controller_script().ok_or("The Local controller sources were not found.")?;
+        let script =
+            controller_script(self.controller_main.as_deref()).ok_or("The Local controller sources were not found.")?;
         let port = base.port_or_known_default().unwrap_or(18091);
         std::fs::create_dir_all(&self.data_root).map_err(|error| error.to_string())?;
         let log = std::fs::File::create(self.data_root.join("controller.log")).map_err(|error| error.to_string())?;
@@ -587,14 +593,7 @@ impl Local {
             .stdin(Stdio::null())
             .stdout(log)
             .stderr(log_err);
-        if let Some(path) = process::joined_path() {
-            command.env("PATH", path);
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            command.process_group(0);
-        }
+        process::own_group(&mut command);
         let child = command.spawn().map_err(|error| format!("could not start the Local controller: {error}"))?;
         *self.spawned.lock().unwrap_or_else(PoisonError::into_inner) = Some(child);
         Ok(())
@@ -902,27 +901,6 @@ impl Local {
 
     pub(crate) fn shutdown(&self) {
         let Some(mut child) = self.spawned.lock().unwrap_or_else(PoisonError::into_inner).take() else { return };
-        let group = format!("-{}", child.id());
-        let _ = Command::new("/bin/kill")
-            .args(["-TERM", "--", &group])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let deadline = Instant::now() + STOP_GRACE;
-        while Instant::now() < deadline {
-            if matches!(child.try_wait(), Ok(Some(_))) {
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        let _ = Command::new("/bin/kill")
-            .args(["-KILL", "--", &group])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        let _ = child.kill();
-        let _ = child.wait();
+        process::stop_group(&mut child, STOP_GRACE);
     }
 }

@@ -8,10 +8,10 @@ use anyhow::{bail, ensure, Context};
 use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
-    AccessMode, Branch, ColorScheme, Connection, DaemonLaunch, DiffLineKind, DiffScope, FileContent, FileDiff,
-    FileEntry, GitStatus, Keybinding, LocalSnapshot, PromptDraft, ProviderStatus, SearchHit, SendShortcut, Settings,
-    Studio, StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, Update, UsagePeriod, UsageReport, Waker,
-    WorktreeChoice,
+    AccessMode, Branch, ColorScheme, Connection, DaemonLaunch, Device, DiffLineKind, DiffScope, FileContent, FileDiff,
+    FileEntry, GitStatus, Keybinding, LocalSnapshot, PromptDraft, ProviderStatus, PullRequestDetail, SearchHit,
+    SendShortcut, Settings, Studio, StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, Update, UsagePeriod,
+    UsageReport, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
@@ -69,6 +69,8 @@ struct View {
     keybindings: Option<Vec<Keybinding>>,
     done: Vec<(String, String)>,
     failed: Vec<(String, String)>,
+    details: Vec<(String, PullRequestDetail)>,
+    devices: Vec<(String, Vec<Device>)>,
 }
 
 impl View {
@@ -87,6 +89,8 @@ impl View {
             || self.terminals.iter().any(|(id, _)| id == request)
             || self.usage.iter().any(|(id, _)| id == request)
             || self.local.iter().any(|(id, _)| id == request)
+            || self.details.iter().any(|(id, _)| id == request)
+            || self.devices.iter().any(|(id, _)| id == request)
     }
 
     fn terminal_text(&self, terminal: &str) -> String {
@@ -166,6 +170,8 @@ impl Harness {
             Update::Providers { providers } => view.providers = Some(providers),
             Update::Settings { settings } => view.settings = Some(settings),
             Update::Keybindings { bindings } => view.keybindings = Some(bindings),
+            Update::PullRequestDetail { request, detail } => view.details.push((request, detail)),
+            Update::Devices { request, devices } => view.devices.push((request, devices)),
             Update::RequestDone { request, message } => {
                 println!("     done {request}: {message}");
                 view.done.push((request, message));
@@ -184,7 +190,8 @@ impl Harness {
             | Update::Commands { .. }
             | Update::Notification { .. }
             | Update::ArchivedThreads { .. }
-            | Update::PullRequests { .. } => {}
+            | Update::PullRequests { .. }
+            | Update::ThreadSearch { .. } => {}
         }
     }
 }
@@ -222,6 +229,62 @@ fn free_port() -> anyhow::Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }
 
+const FAKE_GH: &str = r#"#!/bin/sh
+case "$1 $2" in
+  "pr view") cat "$FAKE_GH_DIR/pr-view.json" ;;
+  "pr diff") cat "$FAKE_GH_DIR/pr-diff.patch" ;;
+  "api "*) cat "$FAKE_GH_DIR/review-comments.json" ;;
+  "repo create")
+    git init --quiet --bare "$FAKE_GH_DIR/remote.git" &&
+      git remote add origin "$FAKE_GH_DIR/remote.git" &&
+      git push --quiet -u origin HEAD 2>/dev/null &&
+      echo "https://github.com/smoke/$3" ;;
+  *) echo "fake gh: unsupported $*" >&2; exit 1 ;;
+esac
+"#;
+
+const PR_VIEW: &str = r#"{"number":7,"title":"Add feature","url":"https://github.com/smoke/repo/pull/7","state":"OPEN",
+"headRefName":"feature","baseRefName":"main",
+"statusCheckRollup":[{"__typename":"CheckRun","name":"build","status":"COMPLETED","conclusion":"SUCCESS","detailsUrl":"https://ci.example/1"},
+{"__typename":"StatusContext","context":"lint","state":"PENDING","targetUrl":""}],
+"body":"Adds the feature.\n\nDetails follow.","author":{"login":"alice"},"createdAt":"2026-11-01T10:00:00Z",
+"comments":[{"author":{"login":"bob"},"body":"Looks good\nmore","createdAt":"2026-11-01T12:00:00Z"}],
+"reviews":[{"author":{"login":"carol"},"state":"APPROVED","body":"","submittedAt":"2026-11-02T09:00:00Z"}],
+"commits":[{"oid":"abc123","messageHeadline":"Add feature","committedDate":"2026-11-01T09:30:00Z","authors":[{"login":"alice","name":"Alice"}]}],
+"mergedAt":null,"mergedBy":null,"closedAt":null}"#;
+
+const PR_DIFF: &str = "diff --git a/src/lib.rs b/src/lib.rs
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/src/lib.rs
+@@ -0,0 +1,3 @@
++pub fn feature() -> u32 {
++    42
++}
+";
+
+const REVIEW_COMMENTS: &str = r#"[{"user":{"login":"dave"},"body":"nit: name","created_at":"2026-11-01T11:00:00Z","path":"src/lib.rs","line":2}]"#;
+
+fn install_fake_gh(root: &Path) -> anyhow::Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let bin = root.join("bin");
+    let fixtures = root.join("fake-gh");
+    std::fs::create_dir_all(&bin)?;
+    std::fs::create_dir_all(&fixtures)?;
+    std::fs::write(fixtures.join("pr-view.json"), PR_VIEW)?;
+    std::fs::write(fixtures.join("pr-diff.patch"), PR_DIFF)?;
+    std::fs::write(fixtures.join("review-comments.json"), REVIEW_COMMENTS)?;
+    let gh = bin.join("gh");
+    std::fs::write(&gh, FAKE_GH)?;
+    std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755))?;
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let joined = std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&path)))?;
+    std::env::set_var("PATH", joined);
+    std::env::set_var("FAKE_GH_DIR", &fixtures);
+    Ok(fixtures)
+}
+
 fn main() -> anyhow::Result<()> {
     let usage = "usage: workspace_smoke <eukhe-daemon> [scratch dir, default /tmp/ls-r2]";
     let mut args = std::env::args_os().skip(1);
@@ -235,6 +298,7 @@ fn main() -> anyhow::Result<()> {
     make_repo(&repo)?;
     let repo = repo.canonicalize()?;
     let port = free_port()?;
+    install_fake_gh(&root)?;
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", &data);
     std::env::set_var("LOCAL_STUDIO_CONTROLLER_URL", format!("http://127.0.0.1:{port}"));
     let socket = root.join("d.sock");
@@ -250,6 +314,7 @@ fn main() -> anyhow::Result<()> {
                 agent_dir.to_string_lossy().into_owned(),
             ],
         }),
+        controller_main: Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../controller/src/main.ts").to_string()),
     };
     let outcome = drive(&config, &repo, port);
     let stopped = stop_daemon(&socket);
@@ -279,8 +344,110 @@ fn first_run(harness: &mut Harness, repo: &Path, port: u16) -> anyhow::Result<()
     diffs_and_worktree(harness, &project)?;
     files(harness, &project)?;
     terminal_and_commit(harness, &project)?;
+    forge(harness, &project)?;
+    devices(harness)?;
     settings_providers_usage(harness, &project)?;
     local(harness, port)
+}
+
+fn forge(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
+    let project = project.to_string();
+    let fixtures = PathBuf::from(std::env::var_os("FAKE_GH_DIR").context("fake gh")?);
+    let request = harness.request();
+    harness.studio.publish_repository(request.clone(), project.clone(), "smoke-repo".to_string(), true);
+    harness.answer("publish repository through gh repo create", &request)?;
+    ensure!(git(Path::new(&project), &["remote"])?.trim() == "origin", "origin added");
+    harness.pump_until("published branch tracks origin", |view| {
+        view.status(&project).is_some_and(|status| status.upstream.as_deref() == Some("origin/watched"))
+    })?;
+    let request = harness.request();
+    harness.studio.publish_repository(request.clone(), project.clone(), "smoke-repo".to_string(), true);
+    let id = request.clone();
+    harness.pump_until("second publish refused", move |view| view.answered(&id))?;
+    ensure!(harness.view.failure(&request).is_some_and(|message| message.contains("origin")), "refused");
+
+    let clone = fixtures.join("clone");
+    git(&fixtures, &["clone", "--quiet", "--branch", "watched", "remote.git", "clone"])?;
+    git(&clone, &["config", "user.name", "Remote Smoke"])?;
+    git(&clone, &["config", "user.email", "remote@localhost"])?;
+    std::fs::write(clone.join("REMOTE.md"), "from the remote\n")?;
+    git(&clone, &["add", "-A"])?;
+    git(&clone, &["commit", "--quiet", "-m", "Remote change"])?;
+    git(&clone, &["push", "--quiet", "origin", "watched"])?;
+    let request = harness.request();
+    harness.studio.pull(request.clone(), project.clone());
+    harness.answer("fast-forward pull", &request)?;
+    ensure!(Path::new(&project).join("REMOTE.md").is_file(), "pulled file present");
+    ensure!(
+        harness.view.done.last().is_some_and(|(_, message)| message.contains("Fast-forwarded watched by 1 commit")),
+        "ff message"
+    );
+
+    std::fs::write(clone.join("REMOTE.md"), "remote again\n")?;
+    git(&clone, &["commit", "--quiet", "-am", "Remote again"])?;
+    git(&clone, &["push", "--quiet", "origin", "watched"])?;
+    std::fs::write(Path::new(&project).join("LOCAL.md"), "local work\n")?;
+    git(Path::new(&project), &["add", "LOCAL.md"])?;
+    git(Path::new(&project), &["commit", "--quiet", "-m", "Local change"])?;
+    let request = harness.request();
+    harness.studio.pull(request.clone(), project.clone());
+    let id = request.clone();
+    harness.pump_until("diverged pull refused", move |view| view.answered(&id))?;
+    ensure!(harness.view.failure(&request).is_some_and(|message| message.contains("diverged")), "divergence reported");
+
+    let request = harness.request();
+    harness.studio.load_pull_request(request.clone(), project.clone(), 7);
+    harness.answer("pull request detail from recorded gh output", &request)?;
+    let (_, detail) = harness.view.details.last().cloned().context("detail")?;
+    println!(
+        "     pr #{} {} checks {:?} files {:?} comments {:?} timeline {:?}",
+        detail.pull.number,
+        detail.pull.checks,
+        detail.checks.iter().map(|check| (&check.name, &check.state)).collect::<Vec<_>>(),
+        detail.files.iter().map(|file| (&file.path, file.additions)).collect::<Vec<_>>(),
+        detail.comments.iter().map(|comment| (&comment.author, &comment.path, comment.line)).collect::<Vec<_>>(),
+        detail.timeline.iter().map(|event| event.kind.as_str()).collect::<Vec<_>>()
+    );
+    ensure!(
+        detail.pull.number == 7 && detail.pull.checks == "pending" && detail.author.as_deref() == Some("alice"),
+        "pull"
+    );
+    ensure!(detail.body.starts_with("Adds the feature."), "body");
+    ensure!(
+        detail.checks.len() == 2 && detail.checks[0].state == "success" && detail.checks[1].state == "pending",
+        "checks"
+    );
+    ensure!(detail.files.len() == 1 && detail.files[0].path == "src/lib.rs" && detail.files[0].additions == 3, "files");
+    ensure!(
+        detail.comments.len() == 2
+            && detail.comments[0].author == "dave"
+            && detail.comments[0].path.as_deref() == Some("src/lib.rs")
+            && detail.comments[0].line == Some(2),
+        "comments sorted with the review comment first"
+    );
+    ensure!(
+        detail.timeline.iter().map(|event| event.kind.as_str()).collect::<Vec<_>>()
+            == ["commit", "opened", "comment", "review"],
+        "timeline order"
+    );
+    Ok(())
+}
+
+fn devices(harness: &mut Harness) -> anyhow::Result<()> {
+    let request = harness.request();
+    harness.studio.list_devices(request.clone());
+    harness.answer("device listing", &request)?;
+    let devices = harness.view.devices.last().map(|(_, devices)| devices.clone()).unwrap_or_default();
+    println!(
+        "     devices {:?}",
+        devices.iter().map(|device| (&device.name, device.platform, &device.state)).take(6).collect::<Vec<_>>()
+    );
+    let request = harness.request();
+    harness.studio.boot_device(request.clone(), "not-a-device".to_string());
+    let id = request.clone();
+    harness.pump_until("unknown device refused", move |view| view.answered(&id))?;
+    ensure!(harness.view.failure(&request).is_some_and(|message| message.contains("Unknown device")), "unknown");
+    Ok(())
 }
 
 fn git_basics(harness: &mut Harness, repo: &Path) -> anyhow::Result<String> {
@@ -522,14 +689,15 @@ fn settings_providers_usage(harness: &mut Harness, project: &str) -> anyhow::Res
     harness.answer("usage report", &request)?;
     let (_, report) = harness.view.usage.last().cloned().context("usage")?;
     println!(
-        "     usage requests {} tokens {} (in {} out {}) cost {:.4} models {:?} days {:?}",
+        "     usage requests {} tokens {} (in {} out {}) cost {:.4} models {:?} days {:?} limits {:?}",
         report.requests,
         report.total_tokens,
         report.input_tokens,
         report.output_tokens,
         report.cost_usd,
         report.by_model,
-        report.daily.iter().map(|day| (&day.day, day.tokens)).collect::<Vec<_>>()
+        report.daily.iter().map(|day| (&day.day, day.tokens)).collect::<Vec<_>>(),
+        report.limits
     );
     ensure!(report.requests >= 1 && !report.by_model.is_empty() && !report.daily.is_empty(), "usage covers the run");
 
