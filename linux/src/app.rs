@@ -525,6 +525,7 @@ impl App {
                 self.state.borrow_mut().local = Some(snapshot);
                 dirty.local = true;
             }
+            Update::LocalDashboard { .. } => {}
             Update::Providers { providers } => {
                 self.state.borrow_mut().providers = providers;
                 dirty.settings = true;

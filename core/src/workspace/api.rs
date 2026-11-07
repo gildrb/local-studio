@@ -148,6 +148,10 @@ impl Studio {
         self.workspace.local_action(request, action);
     }
 
+    pub fn watch_local_dashboard(&self, controller: Option<String>) {
+        self.workspace.watch_local_dashboard(controller);
+    }
+
     pub fn load_providers(&self) {
         self.workspace.push_cached_providers();
         self.load_models();

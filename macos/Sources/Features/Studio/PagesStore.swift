@@ -32,6 +32,7 @@ final class PagesStore {
     private(set) var localError: String?
     private(set) var localActionError: String?
     private(set) var localPending: [String: LocalPendingKey] = [:]
+    private(set) var localDashboard: LocalDashboard?
     private(set) var providers: [ProviderStatus] = []
     private(set) var settings: Settings?
     private(set) var keybindings: [Keybinding] = []
@@ -46,6 +47,7 @@ final class PagesStore {
     @ObservationIgnored private let requests: RequestCenter
     @ObservationIgnored private var usageRequest: String?
     @ObservationIgnored private var localRequest: String?
+    @ObservationIgnored private var dashboardTarget: String?
 
     init(core: CoreHandle, requests: RequestCenter) {
         self.core = core
@@ -78,6 +80,21 @@ final class PagesStore {
         localRequest = nil
         localLoading = false
         localError = nil
+    }
+
+    func setLocalDashboard(_ dashboard: LocalDashboard) {
+        guard dashboardTarget == nil || dashboard.controller == dashboardTarget, dashboard != localDashboard else { return }
+        localDashboard = dashboard
+    }
+
+    func watchLocalDashboard(_ controller: String?) {
+        guard controller != dashboardTarget else { return }
+        dashboardTarget = controller
+        if let controller, localDashboard?.controller != controller {
+            localDashboard = nil
+        }
+        guard live else { return }
+        core.run { $0.watchLocalDashboard(controller: controller) }
     }
 
     func setProviders(_ providers: [ProviderStatus]) {
