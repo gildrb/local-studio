@@ -287,7 +287,7 @@ private struct DiffRowView: View {
                 .lineLimit(1)
                 .padding(.leading, metrics.gutter * 2 + 18)
                 .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
-                .background(PanelPalette.hunk)
+                .background(Theme.diffHunk)
         case .note(let text):
             Text(text)
                 .font(.system(size: 11.5))
@@ -329,7 +329,7 @@ private struct DiffRowView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(cell.map { lineColor($0.kind) } ?? PanelPalette.hunk)
+        .background(cell.map { lineColor($0.kind) } ?? Theme.diffHunk)
     }
 
     private func number(_ value: UInt32?, kind: DiffLineKind) -> some View {
@@ -348,6 +348,7 @@ private struct DiffRowView: View {
     private func code(_ text: String) -> some View {
         if wrap {
             Text(verbatim: text.isEmpty ? " " : text)
+                .foregroundStyle(Theme.codeText)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 1)
@@ -355,6 +356,7 @@ private struct DiffRowView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(verbatim: text.isEmpty ? " " : text)
+                .foregroundStyle(Theme.codeText)
                 .lineLimit(1)
                 .fixedSize()
                 .padding(.vertical, 1)

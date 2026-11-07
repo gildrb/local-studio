@@ -605,8 +605,8 @@ private struct AgentRow: View {
     private var style: (symbol: String, tint: Color) {
         if agent.running { return ("circle.dotted", Theme.primary) }
         let status = agent.status.lowercased()
-        if status.contains("fail") || status.contains("error") { return ("xmark.circle", PanelPalette.removedText) }
+        if status.contains("fail") || status.contains("error") { return ("xmark.circle", Theme.diffRemoved) }
         if status.contains("cancel") || status.contains("abort") || status.contains("stop") { return ("minus.circle", Theme.secondaryText) }
-        return ("checkmark.circle", PanelPalette.addedText)
+        return ("checkmark.circle", Theme.diffAdded)
     }
 }

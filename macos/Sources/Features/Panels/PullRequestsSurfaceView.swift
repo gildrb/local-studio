@@ -375,9 +375,9 @@ private struct PullRequestTimeline: View {
 
     private func tint(_ kind: String) -> Color {
         switch kind {
-        case "opened": PanelPalette.addedText
+        case "opened": Theme.diffAdded
         case "merged": Theme.primary
-        case "closed": PanelPalette.removedText
+        case "closed": Theme.diffRemoved
         default: Theme.secondaryText
         }
     }
@@ -453,9 +453,9 @@ private struct CheckStyle {
     init(_ state: String) {
         switch state {
         case "success":
-            (symbol, tint, label) = ("checkmark.circle", PanelPalette.addedText, "Passed")
+            (symbol, tint, label) = ("checkmark.circle", Theme.diffAdded, "Passed")
         case "failure", "error", "timed_out", "cancelled", "action_required", "startup_failure":
-            (symbol, tint, label) = ("xmark.circle", PanelPalette.removedText, state == "cancelled" ? "Cancelled" : "Failed")
+            (symbol, tint, label) = ("xmark.circle", Theme.diffRemoved, state == "cancelled" ? "Cancelled" : "Failed")
         case "neutral", "skipped", "stale":
             (symbol, tint, label) = ("minus.circle", Theme.secondaryText, state == "skipped" ? "Skipped" : "Neutral")
         default:
@@ -470,8 +470,8 @@ struct PullStateGlyph: View {
     var body: some View {
         let (symbol, tint): (String, Color) = switch state.uppercased() {
         case "MERGED": ("arrow.triangle.merge", Theme.primary)
-        case "CLOSED": ("xmark.circle", PanelPalette.removedText)
-        default: ("arrow.triangle.pull", PanelPalette.addedText)
+        case "CLOSED": ("xmark.circle", Theme.diffRemoved)
+        default: ("arrow.triangle.pull", Theme.diffAdded)
         }
         Image(systemName: symbol)
             .font(.system(size: 13, weight: .light))
@@ -488,9 +488,9 @@ struct ChecksGlyph: View {
     var body: some View {
         switch checks {
         case "passing":
-            glyph("checkmark.circle", PanelPalette.addedText)
+            glyph("checkmark.circle", Theme.diffAdded)
         case "failing":
-            glyph("xmark.circle", PanelPalette.removedText)
+            glyph("xmark.circle", Theme.diffRemoved)
         case "pending":
             glyph("clock", Theme.secondaryText)
         default:

@@ -139,6 +139,11 @@ enum ThemeImport {
         for (role, color) in roles {
             colors[role] = color.hex
         }
+        for token in ThemeToken.ansi {
+            if let color = solid(terminal, "terminal." + token.rawValue.replacingOccurrences(of: "terminalAnsi", with: "ansi")) {
+                colors[token.rawValue] = color.hex
+            }
+        }
         let name = [object["displayName"], object["name"]].compactMap { $0 as? String }.map(humanize).first { !$0.isEmpty } ?? "VS Code theme"
         return ThemeDefinition(
             id: ThemeLibrary.identifier(for: name, taken: taken), label: String(name.prefix(48)),

@@ -471,8 +471,8 @@ private struct PullTimeline: View {
     private func tint(_ kind: String) -> Color {
         switch kind {
         case "merged": Theme.primary
-        case "closed": PanelPalette.removedText
-        case "opened": PanelPalette.addedText
+        case "closed": Theme.diffRemoved
+        case "opened": Theme.diffAdded
         default: Theme.chromeIcon
         }
     }

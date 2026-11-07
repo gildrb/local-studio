@@ -25,7 +25,7 @@ struct DeviceSurfaceView: View {
                 HStack(spacing: 6) {
                     Image(systemName: model.actionFailed ? "exclamationmark.triangle" : "checkmark.circle")
                         .font(.system(size: 11, weight: .light))
-                        .foregroundStyle(model.actionFailed ? PanelPalette.removedText : Theme.secondaryText)
+                        .foregroundStyle(model.actionFailed ? Theme.diffRemoved : Theme.secondaryText)
                         .accessibilityHidden(true)
                     Text(status)
                         .font(.system(size: 11.5))
@@ -125,7 +125,7 @@ private struct DeviceRow: View {
                     .lineLimit(1)
                 HStack(spacing: 5) {
                     Circle()
-                        .fill(booted ? PanelPalette.addedText : Theme.secondaryText.opacity(0.5))
+                        .fill(booted ? Theme.diffAdded : Theme.secondaryText.opacity(0.5))
                         .frame(width: 6, height: 6)
                         .accessibilityHidden(true)
                     Text(meta)

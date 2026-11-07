@@ -250,7 +250,8 @@ private struct TerminalPaneView: View {
                 fontName: settings?.terminalFont ?? "",
                 fontSize: CGFloat(settings?.terminalFontSize ?? 12),
                 actions: actions,
-                onFocus: onFocus
+                onFocus: onFocus,
+                revision: ThemeTokens.shared.revision
             )
             .padding(.leading, 8)
             .padding(.top, 4)
@@ -269,7 +270,7 @@ private struct TerminalPaneView: View {
                 .background(Theme.card)
             }
         }
-        .background(Color(nsColor: PanelPalette.terminalBackground))
+        .background(Theme.terminal)
         .overlay(alignment: .top) {
             if focused {
                 Rectangle().fill(Theme.primary.opacity(0.7)).frame(height: 1)
@@ -300,6 +301,7 @@ private struct TerminalPane: NSViewRepresentable {
     let fontSize: CGFloat
     let actions: TerminalActions
     let onFocus: () -> Void
+    let revision: Int
     @Environment(\.colorScheme) private var colorScheme
 
     func makeCoordinator() -> TerminalPaneCoordinator {
@@ -313,6 +315,7 @@ private struct TerminalPane: NSViewRepresentable {
         view.onFocus = onFocus
         paint(view)
         context.coordinator.scheme = colorScheme
+        context.coordinator.revision = revision
         context.coordinator.actions = actions
         context.coordinator.attach(view)
         view.menu = context.coordinator.contextMenu(for: view)
@@ -326,10 +329,11 @@ private struct TerminalPane: NSViewRepresentable {
         if view.font != font {
             view.font = font
         }
-        if context.coordinator.scheme != colorScheme {
+        if context.coordinator.scheme != colorScheme || context.coordinator.revision != revision {
             paint(view)
         }
         context.coordinator.scheme = colorScheme
+        context.coordinator.revision = revision
     }
 
     static func dismantleNSView(_ view: PaneTerminalView, coordinator: TerminalPaneCoordinator) {
@@ -344,19 +348,18 @@ private struct TerminalPane: NSViewRepresentable {
     }
 
     private func paint(_ view: PaneTerminalView) {
-        let dark = colorScheme == .dark
-        let appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
-        var background = NSColor.black
-        var foreground = NSColor.white
-        appearance?.performAsCurrentDrawingAppearance {
-            background = PanelPalette.terminalBackground.usingColorSpace(.sRGB) ?? background
-            foreground = PanelPalette.terminalForeground.usingColorSpace(.sRGB) ?? foreground
-        }
+        let appearance: ThemeAppearance = colorScheme == .dark ? .dark : .light
+        let palette = ThemeStore.shared.palettes[appearance] ?? LegacyPalette.palette(appearance)
         view.translucentCellBackgrounds = true
-        view.nativeBackgroundColor = background.withAlphaComponent(0.995)
-        view.nativeForegroundColor = foreground
-        view.caretColor = dark ? NSColor(srgbRed: 0.2044, green: 0.4198, blue: 0.9449, alpha: 1) : NSColor(srgbRed: 0.1043, green: 0.3071, blue: 0.8463, alpha: 1)
-        view.selectedTextBackgroundColor = dark ? NSColor(white: 1, alpha: 0.18) : NSColor(white: 0, alpha: 0.12)
+        view.nativeBackgroundColor = palette[.terminal].nsColor.withAlphaComponent(0.995)
+        view.nativeForegroundColor = palette[.terminalText].nsColor
+        view.caretColor = palette[.terminalCursor].nsColor
+        view.selectedTextBackgroundColor = palette[.terminalSelection].nsColor
+        view.installColors(ThemeToken.ansi.map { token in
+            let color = palette[token]
+            func channel(_ value: Double) -> UInt16 { UInt16((min(max(value, 0), 1) * 65535).rounded()) }
+            return SwiftTerm.Color(red: channel(color.red), green: channel(color.green), blue: channel(color.blue))
+        })
     }
 }
 
@@ -365,6 +368,7 @@ final class TerminalPaneCoordinator: NSObject, TerminalViewDelegate {
     let session: TerminalSession
     var actions: TerminalActions?
     var scheme: SwiftUI.ColorScheme?
+    var revision: Int?
     private weak var view: PaneTerminalView?
 
     init(session: TerminalSession) {

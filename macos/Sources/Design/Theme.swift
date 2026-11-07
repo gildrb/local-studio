@@ -23,6 +23,16 @@ enum Theme {
     static var woke: Color { ThemeTokens.shared.color(.woke) }
     static var overlay: Color { ThemeTokens.shared.color(.overlay) }
     static var shadow: Color { ThemeTokens.shared.color(.shadow) }
+    static var code: Color { ThemeTokens.shared.color(.code) }
+    static var codeText: Color { ThemeTokens.shared.color(.codeText) }
+    static var terminal: Color { ThemeTokens.shared.color(.terminal) }
+    static var diffAdded: Color { ThemeTokens.shared.color(.diffAdded) }
+    static var diffRemoved: Color { ThemeTokens.shared.color(.diffRemoved) }
+    static var diffAddedSurface: Color { ThemeTokens.shared.color(.diffAddedSurface) }
+    static var diffRemovedSurface: Color { ThemeTokens.shared.color(.diffRemovedSurface) }
+    static var diffAddedGutter: Color { ThemeTokens.shared.color(.diffAddedGutter) }
+    static var diffRemovedGutter: Color { ThemeTokens.shared.color(.diffRemovedGutter) }
+    static var diffHunk: Color { ThemeTokens.shared.color(.diffHunk) }
 
     enum Metrics {
         static let titlebarHeight: CGFloat = 52

@@ -226,6 +226,7 @@ private struct TextPreview: View {
                                 .padding(.trailing, 10)
                                 .frame(width: gutter, alignment: .trailing)
                             Text(verbatim: line.isEmpty ? " " : line)
+                                .foregroundStyle(Theme.codeText)
                                 .lineLimit(wrap ? nil : 1)
                                 .fixedSize(horizontal: !wrap, vertical: true)
                                 .textSelection(.enabled)

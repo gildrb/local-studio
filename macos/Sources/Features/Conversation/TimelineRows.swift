@@ -473,6 +473,7 @@ private struct ToolOutput: View {
     var body: some View {
         ScrollView([.vertical, .horizontal]) {
             Text(rendered)
+                .foregroundStyle(Theme.codeText)
                 .font(.system(size: 11.5, design: .monospaced))
                 .lineSpacing(2)
                 .textSelection(.enabled)
@@ -482,7 +483,7 @@ private struct ToolOutput: View {
         }
         .frame(maxHeight: 260)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Theme.message.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Theme.code, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline))
     }
 
@@ -498,9 +499,9 @@ private struct ToolOutput: View {
         for line in trimmed.split(separator: "\n", omittingEmptySubsequences: false) {
             var part = AttributedString(line + "\n")
             if line.hasPrefix("+"), !line.hasPrefix("+++") {
-                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = .green
+                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.diffAdded
             } else if line.hasPrefix("-"), !line.hasPrefix("---") {
-                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = .red
+                part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.diffRemoved
             } else if line.hasPrefix("@@") {
                 part[AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.secondaryText
             }
@@ -562,8 +563,8 @@ struct DiffStat: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Text("+\(additions)").foregroundStyle(.green)
-            Text("−\(deletions)").foregroundStyle(.red)
+            Text("+\(additions)").foregroundStyle(Theme.diffAdded)
+            Text("−\(deletions)").foregroundStyle(Theme.diffRemoved)
         }
         .font(.system(size: 11.5).monospacedDigit())
     }

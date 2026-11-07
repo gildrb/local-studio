@@ -127,6 +127,7 @@ struct CodeBlockView: View {
             Rectangle().fill(Theme.hairline).frame(height: 1)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code)
+                    .foregroundStyle(Theme.codeText)
                     .font(.system(size: 12, design: .monospaced))
                     .lineSpacing(2.5)
                     .textSelection(.enabled)
@@ -135,7 +136,7 @@ struct CodeBlockView: View {
                     .padding(.vertical, 10)
             }
         }
-        .background(Theme.message.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Theme.code, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
     }
 }

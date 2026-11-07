@@ -292,7 +292,7 @@ private struct WorktreeCleanupRow: View {
                 case .failed(let message):
                     Text(message)
                         .font(.caption)
-                        .foregroundStyle(PanelPalette.removedText)
+                        .foregroundStyle(Theme.diffRemoved)
                         .textSelection(.enabled)
                 case nil:
                     Text("Applies the rules above to every Local Studio worktree.")

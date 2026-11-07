@@ -7,6 +7,19 @@ import Synchronization
 enum ThemeToken: String, CaseIterable, Sendable {
     case canvas, sidebar, card, primary, hairline, input, hover, selection, selectionStroke, message
     case text, secondaryText, chromeIcon, tertiaryText, success, warning, danger, working, woke, overlay, shadow
+    case code, codeText, terminal, terminalText, terminalCursor, terminalSelection
+    case diffAdded, diffRemoved, diffAddedSurface, diffRemovedSurface, diffAddedGutter, diffRemovedGutter, diffHunk
+    case terminalAnsiBlack, terminalAnsiRed, terminalAnsiGreen, terminalAnsiYellow
+    case terminalAnsiBlue, terminalAnsiMagenta, terminalAnsiCyan, terminalAnsiWhite
+    case terminalAnsiBrightBlack, terminalAnsiBrightRed, terminalAnsiBrightGreen, terminalAnsiBrightYellow
+    case terminalAnsiBrightBlue, terminalAnsiBrightMagenta, terminalAnsiBrightCyan, terminalAnsiBrightWhite
+
+    static let ansi: [ThemeToken] = [
+        .terminalAnsiBlack, .terminalAnsiRed, .terminalAnsiGreen, .terminalAnsiYellow,
+        .terminalAnsiBlue, .terminalAnsiMagenta, .terminalAnsiCyan, .terminalAnsiWhite,
+        .terminalAnsiBrightBlack, .terminalAnsiBrightRed, .terminalAnsiBrightGreen, .terminalAnsiBrightYellow,
+        .terminalAnsiBrightBlue, .terminalAnsiBrightMagenta, .terminalAnsiBrightCyan, .terminalAnsiBrightWhite,
+    ]
 
     var role: String? {
         switch self {
@@ -26,13 +39,18 @@ enum ThemeToken: String, CaseIterable, Sendable {
         case .warning: "warningForeground"
         case .danger: "errorForeground"
         case .overlay: "surfaceOverlay"
-        case .selectionStroke, .success, .working, .woke, .shadow: nil
+        case .code: "codeBackground"
+        case .codeText: "codeForeground"
+        case .terminal: "terminalBackground"
+        case .terminalText: "terminalForeground"
+        case .selectionStroke, .working, .woke, .shadow: nil
+        default: rawValue
         }
     }
 
     var isText: Bool {
         switch self {
-        case .text, .secondaryText, .chromeIcon, .tertiaryText: true
+        case .text, .secondaryText, .chromeIcon, .tertiaryText, .codeText: true
         default: false
         }
     }
@@ -55,7 +73,14 @@ struct ThemePalette: Equatable, Sendable {
 
 enum LegacyPalette {
     private static func gray(_ value: Double, _ alpha: Double = 1) -> RGBA { RGBA(red: value, green: value, blue: value, alpha: alpha) }
-    private static func rgb(_ red: Double, _ green: Double, _ blue: Double) -> RGBA { RGBA(red: red, green: green, blue: blue) }
+    private static func rgb(_ red: Double, _ green: Double, _ blue: Double, _ alpha: Double = 1) -> RGBA {
+        RGBA(red: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    private static let ansi = Dictionary(uniqueKeysWithValues: zip(ThemeToken.ansi, [
+        "#000000", "#c23621", "#25bc24", "#adad27", "#492ee1", "#d338d3", "#33bbc8", "#cbcccd",
+        "#818383", "#fc391f", "#31e722", "#eaec23", "#5833ff", "#f935f8", "#14f0f0", "#e9ebeb",
+    ].compactMap(ThemeColorParser.parse)))
 
     static let dark = ThemePalette(colors: [
         .canvas: gray(0.0392), .sidebar: gray(0.068), .card: gray(0.068), .primary: rgb(0.2044, 0.4198, 0.9449),
@@ -64,7 +89,12 @@ enum LegacyPalette {
         .chromeIcon: gray(1, 0.6), .tertiaryText: gray(0.36), .success: rgb(0.204, 0.827, 0.6), .warning: rgb(0.984, 0.749, 0.141),
         .danger: rgb(0.973, 0.443, 0.443), .working: rgb(0.22, 0.741, 0.973), .woke: rgb(0.984, 0.573, 0.235),
         .overlay: gray(0.086), .shadow: gray(0, 0.5),
-    ])
+        .code: gray(1, 0.036), .codeText: gray(1, 0.85), .terminal: gray(0.0392), .terminalText: gray(0.86),
+        .terminalCursor: rgb(0.2044, 0.4198, 0.9449), .terminalSelection: gray(1, 0.18),
+        .diffAdded: rgb(0.34, 0.80, 0.50), .diffRemoved: rgb(0.96, 0.42, 0.42),
+        .diffAddedSurface: rgb(0.18, 0.70, 0.38, 0.10), .diffRemovedSurface: rgb(0.92, 0.30, 0.30, 0.10),
+        .diffAddedGutter: rgb(0.18, 0.70, 0.38, 0.16), .diffRemovedGutter: rgb(0.92, 0.30, 0.30, 0.16), .diffHunk: gray(1, 0.03),
+    ].merging(ansi) { current, _ in current })
 
     static let light = ThemePalette(colors: [
         .canvas: gray(0.9895), .sidebar: gray(0.98), .card: gray(1), .primary: rgb(0.1043, 0.3071, 0.8463),
@@ -74,7 +104,12 @@ enum LegacyPalette {
         .tertiaryText: rgb(0.62, 0.62, 0.65), .success: rgb(0.02, 0.588, 0.412), .warning: rgb(0.851, 0.467, 0.024),
         .danger: rgb(0.863, 0.149, 0.149), .working: rgb(0.008, 0.518, 0.78), .woke: rgb(0.918, 0.345, 0.047),
         .overlay: gray(1), .shadow: gray(0, 0.14),
-    ])
+        .code: rgb(0.957, 0.957, 0.961, 0.6), .codeText: gray(0, 0.85), .terminal: gray(0.9895), .terminalText: gray(0.13),
+        .terminalCursor: rgb(0.1043, 0.3071, 0.8463), .terminalSelection: gray(0, 0.12),
+        .diffAdded: rgb(0.10, 0.50, 0.24), .diffRemoved: rgb(0.76, 0.16, 0.16),
+        .diffAddedSurface: rgb(0.18, 0.62, 0.32, 0.10), .diffRemovedSurface: rgb(0.86, 0.22, 0.22, 0.09),
+        .diffAddedGutter: rgb(0.18, 0.62, 0.32, 0.16), .diffRemovedGutter: rgb(0.86, 0.22, 0.22, 0.14), .diffHunk: rgb(0.94, 0.95, 0.97),
+    ].merging(ansi) { current, _ in current })
 
     static func palette(_ appearance: ThemeAppearance) -> ThemePalette {
         appearance == .dark ? dark : light
