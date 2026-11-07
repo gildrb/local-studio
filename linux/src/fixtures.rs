@@ -14,7 +14,7 @@ use crate::app::{App, Dirty};
 use crate::format;
 use crate::state::{Page, State};
 
-pub const SCENES: [&str; 15] = [
+pub const SCENES: [&str; 27] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -30,9 +30,21 @@ pub const SCENES: [&str; 15] = [
     "13-usage",
     "14-conversation-light",
     "15-command-palette",
+    "16-composer-commands",
+    "17-composer-mentions",
+    "18-sidebar-search",
+    "19-sidebar-multiselect",
+    "20-files-panel",
+    "21-file-preview",
+    "22-pulls-panel",
+    "23-agents-panel",
+    "24-devices-panel",
+    "25-browser-panel",
+    "26-pull-requests-page",
+    "27-project-search",
 ];
 
-const FOCUSED: &str = "t-sidebar";
+pub const FOCUSED: &str = "t-sidebar";
 const MINUTE: i64 = 60_000;
 
 #[allow(clippy::too_many_lines)]
@@ -106,7 +118,7 @@ pub fn stage(app: &Rc<App>, scene: &str) {
         "08-diff-panel" => {
             conversation(app, false);
             app.panel.show("diff");
-            app.panel.set_fixture_diff(&diff_files());
+            app.panel.set_fixture_diff(&diff_files_public());
         }
         "09-terminal-panel" => {
             conversation(app, false);
@@ -142,7 +154,7 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             app.open_page(Page::Usage);
             app.apply(vec![Update::Usage { request: "fixture".to_string(), report: usage_report() }]);
         }
-        _ => {}
+        _ => crate::scenes::stage(app, scene),
     }
 }
 
@@ -156,6 +168,9 @@ pub fn teardown(app: &Rc<App>) {
     }
     app.panel.root.set_visible(false);
     app.split.set_show_sidebar(true);
+    app.sidebar.reset();
+    app.composer.reset();
+    app.branches.reset();
     app.timeline.clear();
     *app.state.borrow_mut() = State::default();
     crate::theme::color_scheme(ColorScheme::System);
@@ -176,7 +191,7 @@ fn first_expander(widget: &impl IsA<gtk::Widget>) -> Option<adw::ExpanderRow> {
     None
 }
 
-fn conversation(app: &Rc<App>, live: bool) {
+pub fn conversation(app: &Rc<App>, live: bool) {
     app.apply(base());
     app.select_thread(Some(FOCUSED.to_string()));
     let mut updates = vec![
@@ -208,7 +223,7 @@ fn conversation(app: &Rc<App>, live: bool) {
     app.apply(updates);
 }
 
-fn base() -> Vec<Update> {
+pub fn base() -> Vec<Update> {
     vec![
         Update::Connection { state: Connection::Ready },
         Update::Settings { settings: Settings::default() },
@@ -223,7 +238,7 @@ fn base() -> Vec<Update> {
     ]
 }
 
-fn project_id(name: &str) -> String {
+pub fn project_id(name: &str) -> String {
     format!("/home/gil/code/{name}")
 }
 
@@ -365,7 +380,7 @@ fn info(live: bool) -> ThreadInfo {
     }
 }
 
-fn item(id: u64, turn: u64, minutes: i64, kind: ItemKind) -> Item {
+pub fn item(id: u64, turn: u64, minutes: i64, kind: ItemKind) -> Item {
     Item { id, turn, created_at: Some(format::now_ms() - minutes * MINUTE), kind }
 }
 
@@ -499,7 +514,7 @@ fn transcript(live: bool) -> Vec<Item> {
     items
 }
 
-fn diff_files() -> Vec<FileDiff> {
+pub fn diff_files_public() -> Vec<FileDiff> {
     let line = |kind, old: Option<u32>, new: Option<u32>, text: &str| DiffLine {
         kind,
         old_line: old,
