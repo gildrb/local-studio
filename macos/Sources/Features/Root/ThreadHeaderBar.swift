@@ -14,6 +14,10 @@ struct ThreadHeaderBar: View {
             breadcrumb
             Spacer(minLength: 12)
             if store.shell.route == .thread {
+                if let project = store.focusedProject, store.inbox.project(project) != nil {
+                    ProjectScriptsControl(store: store, project: project)
+                        .id(project)
+                }
                 OpenInEditorButton(path: store.workspacePath(for: store.focusedRow))
                 if let project = gitProject {
                     GitActionsButton(store: store, project: project)

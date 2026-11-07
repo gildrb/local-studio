@@ -37,6 +37,10 @@ extension SnapshotCatalog {
                 AnyView(ThreadHeaderBar(store: store, leadingInset: 16, trailingInset: Theme.Metrics.trailingChromeInset)
                     .overlay(alignment: .trailing) { PanelToggles(store: store) })
             },
+            SnapshotEntry(name: "shell-header-actions", size: CGSize(width: 980, height: 52), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + ShellFixtures.projectConfig) { store in
+                AnyView(ThreadHeaderBar(store: store, leadingInset: 16, trailingInset: Theme.Metrics.trailingChromeInset)
+                    .overlay(alignment: .trailing) { PanelToggles(store: store) })
+            },
             SnapshotEntry(name: "shell-header-publish", size: CGSize(width: 980, height: 52), focus: "t-pinned", updates: ShellFixtures.updates + ShellFixtures.focusedNoRemote) { store in
                 AnyView(ThreadHeaderBar(store: store, leadingInset: 16, trailingInset: Theme.Metrics.trailingChromeInset)
                     .overlay(alignment: .trailing) { PanelToggles(store: store) })

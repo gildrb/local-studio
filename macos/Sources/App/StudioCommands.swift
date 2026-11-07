@@ -43,6 +43,7 @@ final class CommandRefresh: ObservableObject {
         _ = store.conversation.queued
         _ = store.pages.settings?.timeFormat
         _ = store.workspace.gitStatus
+        _ = store.inbox.projectScripts
     }
 }
 
@@ -208,6 +209,18 @@ struct StudioCommands: Commands {
         CommandButton(store: store, title: "Copy Reference", command: "thread.copyReference")
         CommandButton(store: store, title: "Copy Pull Request Number", command: "pullRequest.copyNumber")
         Divider()
+        Menu("Project Actions") {
+            let project = store.focusedProject
+            let scripts = project.flatMap { store.inbox.projectScripts[$0] } ?? []
+            ForEach(scripts, id: \.id) { script in
+                Button(script.name) { if let project { store.runProjectScript(script, in: project) } }
+                    .keyboardShortcut(CoreShortcut.parse(script.keybinding))
+            }
+            if !scripts.isEmpty { Divider() }
+            Button("Add Action…") { store.openProjectSettings(project) }
+                .disabled(project == nil)
+        }
+        .disabled(store.focusedProject == nil)
         Button("Project Settings…") { store.openProjectSettings(store.focusedProject) }
             .disabled(store.focusedProject == nil)
     }
