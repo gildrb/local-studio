@@ -63,12 +63,34 @@ try {
   const commit = git("rev-parse", "HEAD").toString().trim();
   const stream =
     'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\\"x\\\":1}"}}]}}]}\n\ndata: [DONE]\n\n';
+  const born = Date.now();
+  const metrics = (model) => {
+    const ms = Date.now() - born;
+    const requests = Math.floor(ms / 1000);
+    const labels = `{model_name="${model}",engine="0"}`;
+    return [
+      "# TYPE vllm:generation_tokens_total counter",
+      `vllm:generation_tokens_total${labels} ${Math.floor(ms * 0.4)}`,
+      `vllm:prompt_tokens_total${labels} ${ms * 2}`,
+      `vllm:num_requests_running${labels} 4`,
+      `vllm:num_requests_waiting${labels} 1`,
+      `vllm:kv_cache_usage_perc${labels} 0.04`,
+      `vllm:time_to_first_token_seconds_bucket{le="0.5",model_name="${model}"} ${requests}`,
+      `vllm:time_to_first_token_seconds_sum${labels} ${requests * 0.346}`,
+      `vllm:time_to_first_token_seconds_count${labels} ${requests}`,
+      "",
+    ].join("\n");
+  };
   const engine = async (models) =>
     listen(
       createServer(async (req, res) => {
         if (req.url === "/v1/models") {
           res.setHeader("content-type", "application/json");
           return res.end(JSON.stringify({ data: models.map((id) => ({ id })) }));
+        }
+        if (req.url === "/metrics") {
+          res.setHeader("content-type", "text/plain; version=0.0.4");
+          return res.end(metrics(models[0]));
         }
         let raw = "";
         for await (const chunk of req) raw += chunk;
@@ -104,6 +126,20 @@ try {
     ports.push(await listen(s));
     await new Promise((resolve) => s.close(resolve));
   }
+  const fakeBin = join(root, "bin");
+  mkdirSync(fakeBin);
+  writeFileSync(
+    join(fakeBin, "nvidia-smi"),
+    [
+      "#!/bin/sh",
+      'case "$1" in --query-gpu=*)',
+      "printf '0, GPU-e2e-0, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 95000, 97887, 275.40, 275.00, 65, 100\\n'",
+      "printf '1, GPU-e2e-1, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 96000, 97887, 276.00, 275.00, 48, 100\\n' ;;",
+      "esac",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
   for (const [i, port] of ports.entries()) {
     const home = join(root, `controller-${i}`);
     mkdirSync(home);
@@ -140,6 +176,7 @@ try {
       LOCAL_STUDIO_CONTROLLER_HOME: home,
       LOCAL_STUDIO_CONTROLLER_PORT: String(port),
       LOCAL_STUDIO_CONTROLLER_HOST: "127.0.0.1",
+      ...(i === 0 ? { PATH: `${fakeBin}:${process.env.PATH}` } : {}),
     };
     const child = spawn("bun", [new URL("../src/main.ts", import.meta.url).pathname], {
       env,
@@ -165,6 +202,25 @@ try {
   const s = await snapshot(a);
   assert.equal(s.controllers.filter((x) => x.reachable).length, 3);
   assert.equal(s.endpoints.filter((x) => x.models.includes("shared")).length, 2);
+  let telemetry;
+  await waitFor(async () => {
+    telemetry = await (await call(a, "/api/telemetry?history=1")).json();
+    return telemetry.live.decodeTps > 0 && telemetry.history.days.some((d) => d.generation > 0);
+  }, "telemetry from engine metrics and nvidia-smi");
+  assert(Math.abs(telemetry.live.decodeTps - 400) < 60, `decode ${telemetry.live.decodeTps}`);
+  assert.equal(telemetry.live.running, 4);
+  assert.equal(telemetry.live.waiting, 1);
+  assert.equal(telemetry.live.kvPercent, 4);
+  assert(Math.abs(telemetry.live.ttftMs - 346) < 1, `ttft ${telemetry.live.ttftMs}`);
+  assert.equal(telemetry.peaks.running, 4);
+  assert.equal(telemetry.engines.find((e) => e.models.includes("alpha")).kind, "vllm");
+  assert.deepEqual(
+    telemetry.gpus.map((g) => [g.index, g.powerW, g.powerLimitW, g.temperatureC]),
+    [[0, 275.4, 275, 65], [1, 276, 275, 48]],
+  );
+  assert.equal(telemetry.history.decode.values.length, 288);
+  assert(telemetry.history.days.at(-1).prompt > telemetry.history.days.at(-1).generation);
+  assert.equal((await (await call(c, "/api/telemetry")).json()).live.decodeTps, null);
   assert.equal((await call(a, "/api/recipes/captured/run", {})).status, 409);
   assert.equal((await call(a, "/api/peers", "{")).status, 400);
   assert.equal((await call(a, "/api/peers", { url: `http://127.0.0.1:${a}` })).status, 400);
@@ -322,7 +378,7 @@ try {
   assert(models.data.some((m) => m.id === "auto"));
   assert(!models.data.some((m) => m.id === "beta"));
   console.log(
-    "PASS E2E: authentication, discovery, multi-API models, cyclic federation, native streams/errors, credential isolation, registry launch guard, auto and usage.",
+    "PASS E2E: authentication, discovery, multi-API models, cyclic federation, native streams/errors, credential isolation, registry launch guard, auto, usage and engine/GPU telemetry.",
   );
 } finally {
   for (const child of children) child.kill("SIGTERM");
