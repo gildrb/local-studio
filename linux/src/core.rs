@@ -27,6 +27,7 @@ impl Core {
             session_dir: None,
             data_dir: None,
             launch: daemon_program().map(|program| DaemonLaunch { program, arguments: vec!["supervisor".to_string()] }),
+            controller_main: controller_main(),
         };
         let studio = Studio::new(config, Arc::new(ChannelWaker(sender)))?;
         self.studio.replace(Some(studio));
@@ -84,6 +85,15 @@ fn daemon_program() -> Option<String> {
         .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
         .map(|dir| dir.join("eukhe-daemon"));
     sibling.into_iter().chain(on_path).find(|path| is_executable(path)).map(|path| path.to_string_lossy().into_owned())
+}
+
+fn controller_main() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    exe.ancestors()
+        .skip(1)
+        .flat_map(|dir| [dir.join("controller/src/main.ts"), dir.join("share/local-studio/controller/src/main.ts")])
+        .find(|path| path.is_file())
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 fn is_executable(path: &Path) -> bool {

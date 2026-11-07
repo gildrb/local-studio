@@ -6,7 +6,7 @@ use local_studio_core::{
     FileDiff, GitStatus, Item, ItemKind, Keybinding, LocalController, LocalEndpoint, LocalGpu, LocalHardware, LocalJob,
     LocalModelUsage, LocalRecipe, LocalRegistry, LocalRegistryMatch, LocalSnapshot, LocalUsage, ModelKey, ModelOption,
     ModelRef, NoticeLevel, Project, ProviderStatus, QueuedMessage, RegistryModel, RegistryVariant, Settings, Shelf,
-    ThreadInfo, ThreadRow, ThreadStatus, ToolKind, ToolState, TranscriptOp, Update, UsageByModel, UsageDay,
+    ThreadInfo, ThreadRow, ThreadStatus, ToolKind, ToolState, TranscriptOp, Update, UsageByModel, UsageDay, UsageLimit,
     UsagePeriod, UsageReport,
 };
 
@@ -217,6 +217,7 @@ fn base() -> Vec<Update> {
         Update::Models {
             models: models(),
             favorites: vec![ModelKey { provider: "anthropic".to_string(), model: "claude-sonnet-4-5".to_string() }],
+            hidden: Vec::new(),
         },
         Update::ArchivedThreads { request: "fixture".to_string(), threads: archived() },
     ]
@@ -260,6 +261,7 @@ fn row(id: &str, project: &str, title: &str, shelf: Shelf, status: ThreadStatus,
         deletions: 0,
         note: None,
         archived: false,
+        auto_settle: true,
     }
 }
 
@@ -853,5 +855,28 @@ fn usage_report() -> UsageReport {
             },
         ],
         daily: days(7, 4_000_000),
+        limits: vec![
+            UsageLimit {
+                provider: "anthropic".to_string(),
+                window: "5-hour".to_string(),
+                used_percent: Some(62.0),
+                resets_at: Some(format::now_ms() + 95 * MINUTE),
+                parked: false,
+            },
+            UsageLimit {
+                provider: "anthropic".to_string(),
+                window: "Weekly".to_string(),
+                used_percent: Some(28.0),
+                resets_at: Some(format::now_ms() + 3 * 24 * 60 * MINUTE),
+                parked: false,
+            },
+            UsageLimit {
+                provider: "openai".to_string(),
+                window: "5-hour".to_string(),
+                used_percent: Some(100.0),
+                resets_at: Some(format::now_ms() + 40 * MINUTE),
+                parked: true,
+            },
+        ],
     }
 }

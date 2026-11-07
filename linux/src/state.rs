@@ -35,6 +35,7 @@ pub struct State {
     pub queue: Vec<QueuedMessage>,
     pub models: Vec<ModelOption>,
     pub favorites: Vec<ModelKey>,
+    pub hidden: Vec<ModelKey>,
     pub settings: Settings,
     pub keybindings: Vec<Keybinding>,
     pub providers: Vec<ProviderStatus>,

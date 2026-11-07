@@ -284,10 +284,11 @@ impl App {
                     self.composer.set_text(&text);
                 }
             }
-            Update::Models { models, favorites } => {
+            Update::Models { models, favorites, hidden } => {
                 let mut state = self.state.borrow_mut();
                 state.models = models;
                 state.favorites = favorites;
+                state.hidden = hidden;
                 dirty.composer = true;
                 dirty.settings = true;
             }
@@ -296,7 +297,10 @@ impl App {
             | Update::Files { .. }
             | Update::FileContent { .. }
             | Update::SearchResults { .. }
-            | Update::PullRequests { .. } => {}
+            | Update::PullRequests { .. }
+            | Update::PullRequestDetail { .. }
+            | Update::Devices { .. }
+            | Update::ThreadSearch { .. } => {}
             Update::Notification { thread, kind, title, body } => self.notify(&thread, kind, &title, &body),
             Update::GitStatus { project, status } => {
                 self.state.borrow_mut().git.insert(project, status);
