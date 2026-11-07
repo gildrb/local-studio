@@ -12,7 +12,7 @@ struct ApprovalCard: View {
                     Image(systemName: "hand.raised")
                         .font(.system(size: 12, weight: .light))
                         .accessibilityHidden(true)
-                    Text("Command approval")
+                    Text(Self.kind(approval))
                         .font(.system(size: 12.5, weight: .semibold))
                     if let agent = approval.agent, !agent.isEmpty {
                         Text(agent)
@@ -52,6 +52,27 @@ struct ApprovalCard: View {
                             .overlay(Capsule().strokeBorder(Theme.hairline))
                     }
                     Spacer(minLength: 8)
+                    Menu {
+                        Button("Always Allow This Session") {
+                            store.conversation.answer(approval, .alwaysAllowSession)
+                        }
+                        .help("Approve and stop asking for \(approval.effects.joined(separator: ", ")) in this thread")
+                        Button("Decline") {
+                            store.conversation.answer(approval, .deny)
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 13, weight: .light))
+                            .foregroundStyle(Theme.chromeIcon)
+                            .frame(width: 26, height: 26)
+                            .contentShape(Rectangle())
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.plain)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("More approval options")
+                    .accessibilityLabel("More approval options")
                     Button("Decline") {
                         store.conversation.answer(approval, .deny)
                     }
@@ -70,5 +91,13 @@ struct ApprovalCard: View {
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).strokeBorder(Color.orange.opacity(0.3)))
         }
+    }
+
+    static func kind(_ approval: Approval) -> String {
+        let files = approval.effects.contains { effect in
+            let effect = effect.lowercased()
+            return effect.contains("write") || effect.contains("edit") || effect.contains("file")
+        }
+        return files ? "File change approval" : "Command approval"
     }
 }

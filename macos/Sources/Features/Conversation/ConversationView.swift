@@ -349,9 +349,14 @@ private struct TimelineFooter: View {
 
     var body: some View {
         let conversation = store.conversation
+        let setup = conversation.thread.flatMap { conversation.worktreeSetup[$0] }
+        let settingUp = setup.map { !$0.done } ?? false
         VStack(alignment: .leading, spacing: 14) {
-            if let info = conversation.info, info.busy {
-                WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty)
+            if let setup, !setup.done || setup.error != nil {
+                WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error)
+            }
+            if let info = conversation.info, info.busy || settingUp {
+                WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty, settingUpWorktree: settingUp)
             }
             ForEach(conversation.queued, id: \.id) { message in
                 QueuedBubble(message: message, store: store)
