@@ -33,6 +33,11 @@ final class PagesStore {
     private(set) var localActionError: String?
     private(set) var localPending: [String: LocalPendingKey] = [:]
     private(set) var providers: [ProviderStatus] = []
+    private(set) var engines: [LocalEngine] = []
+    private(set) var providerErrors: [String] = []
+    private(set) var providersLoaded = false
+    private(set) var providerPending: Set<String> = []
+    private(set) var providerActionError: String?
     private(set) var settings: Settings?
     private(set) var keybindings: [Keybinding] = []
     private(set) var pullsProject: String?
@@ -46,6 +51,7 @@ final class PagesStore {
     @ObservationIgnored private let requests: RequestCenter
     @ObservationIgnored private var usageRequest: String?
     @ObservationIgnored private var localRequest: String?
+    @ObservationIgnored private var discoveries: [String: (DiscoveryOutcome) -> Void] = [:]
 
     init(core: CoreHandle, requests: RequestCenter) {
         self.core = core
@@ -80,8 +86,80 @@ final class PagesStore {
         localError = nil
     }
 
-    func setProviders(_ providers: [ProviderStatus]) {
+    func setProviders(_ providers: [ProviderStatus], engines: [LocalEngine], errors: [String]) {
         self.providers = providers
+        self.engines = engines
+        providerErrors = errors
+        providersLoaded = true
+    }
+
+    func discovered(request: String, baseUrl: String, models: [ProviderModel]) {
+        discoveries.removeValue(forKey: request)?(.models(baseUrl: baseUrl, models: models))
+    }
+
+    func discoverModels(baseUrl: String, api: ProviderApi, key: String?, provider: String?, finished: @escaping (DiscoveryOutcome) -> Void) {
+        guard live else {
+            finished(.failed("Local Studio is not connected to the agent daemon."))
+            return
+        }
+        var request = ""
+        request = requests.issue { [weak self] outcome in
+            guard let self, case .failed(let message) = outcome else { return }
+            discoveries.removeValue(forKey: request)?(.failed(message))
+        }
+        discoveries[request] = finished
+        core.run { $0.discoverProviderModels(request: request, baseUrl: baseUrl, api: api, key: key, provider: provider) }
+    }
+
+    func addCustomProvider(_ provider: CustomProvider, finished: @escaping (RequestOutcome) -> Void) {
+        providerAction("add", finished: finished) { $0.addCustomProvider(request: $1, provider: provider) }
+    }
+
+    func updateCustomProvider(_ id: String, _ provider: CustomProvider, finished: @escaping (RequestOutcome) -> Void) {
+        providerAction(id, finished: finished) { $0.updateCustomProvider(request: $1, id: id, provider: provider) }
+    }
+
+    func removeCustomProvider(_ id: String) {
+        providerAction(id) { $0.removeCustomProvider(request: $1, id: id) }
+    }
+
+    func refreshProviderModels(_ id: String) {
+        providerAction(id) { $0.refreshProviderModels(request: $1, id: id) }
+    }
+
+    func setProviderKey(_ provider: String, key: String?) {
+        providerAction(provider) { $0.setProviderKey(request: $1, provider: provider, key: key) }
+    }
+
+    func useLocalEngine(_ engine: LocalEngine) {
+        providerAction(engine.id) { $0.useLocalEngine(request: $1, engine: engine.id) }
+    }
+
+    func isProviderPending(_ id: String) -> Bool {
+        providerPending.contains(id)
+    }
+
+    func dismissProviderActionError() {
+        providerActionError = nil
+    }
+
+    private func providerAction(_ id: String, finished: ((RequestOutcome) -> Void)? = nil, _ call: @escaping (Studio, String) -> Void) {
+        let report: (RequestOutcome) -> Void = finished ?? { [weak self] outcome in
+            if case .failed(let message) = outcome {
+                self?.providerActionError = message
+            }
+        }
+        guard live else {
+            report(.failed("Local Studio is not connected to the agent daemon."))
+            return
+        }
+        providerActionError = nil
+        providerPending.insert(id)
+        let request = requests.issue { [weak self] outcome in
+            self?.providerPending.remove(id)
+            report(outcome)
+        }
+        core.run { call($0, request) }
     }
 
     func setSettings(_ settings: Settings) {
@@ -237,4 +315,9 @@ final class PagesStore {
         core.run { $0.cleanupWorktrees(request: request) }
     }
 
+}
+
+enum DiscoveryOutcome {
+    case models(baseUrl: String, models: [ProviderModel])
+    case failed(String)
 }

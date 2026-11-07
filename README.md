@@ -20,6 +20,11 @@ Needs Xcode 26+, Rust 1.98, Nushell, and a sibling `eukhe` checkout. Linux: see 
 - Every thread across every project in one sidebar, with live status (working, needs approval, done).
 - Threads keep running in the Eukhe daemon when the window closes; the Eukhe TUI sees the same sessions.
 
+## Providers
+
+- Settings → Providers: paste API keys for built-in providers, add any OpenAI-compatible, OpenAI Responses or Anthropic endpoint (Test Connection lists its models), and use engines running on the Local fleet with one click.
+- Keys go to Eukhe's `auth.json` (mode 0600) and endpoints to its `models.json`; new models show up in the model picker right away.
+
 ## Local models
 
 - Settings → Local and the Local page manage machines, loaded models and the Local AI Registry through the controller.
@@ -41,7 +46,7 @@ Needs Xcode 26+, Rust 1.98, Nushell, and a sibling `eukhe` checkout. Linux: see 
 
 - macOS 26+ (Apple Silicon) and Linux only.
 - Not sandboxed: agents run code with your user permissions.
-- Provider sign-in happens in Eukhe (`eukhe`, then `/login`).
+- Subscription sign-in (ChatGPT, Claude, GitHub Copilot) happens in Eukhe (`eukhe`, then `/login`).
 
 ## Credits
 

@@ -24,6 +24,56 @@ extension SnapshotCatalog {
                 view: { store in AnyView(ProvidersSettings(store: store, expanded: ["anthropic"])) }
             ),
             SnapshotEntry(
+                name: "pages-settings-providers-full",
+                size: CGSize(width: 720, height: 1900),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(ProvidersSettings(store: store, expanded: ["ollama"])) }
+            ),
+            SnapshotEntry(
+                name: "pages-settings-providers-errors",
+                size: CGSize(width: 720, height: 520),
+                updates: PagesFixtures.base + [
+                    .providers(
+                        providers: PagesFixtures.providers, engines: [],
+                        errors: ["models.json providers.broken: \"baseUrl\" is required when defining custom models."]
+                    ),
+                ],
+                view: { store in AnyView(ProvidersSettings(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-add-endpoint",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(EndpointSheet(pages: store.pages, editing: nil)) }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-add-endpoint-tested",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in
+                    AnyView(EndpointSheet(pages: store.pages, editing: nil, seed: EndpointSeed(
+                        name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", discovered: PagesFixtures.endpointModels
+                    )))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-add-endpoint-error",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in
+                    AnyView(EndpointSheet(pages: store.pages, editing: nil, seed: EndpointSeed(
+                        name: "Gateway", baseUrl: "https://llm.example.com/v1",
+                        error: "https://llm.example.com/v1/models rejected the API key (HTTP 401)."
+                    )))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-edit-endpoint",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(EndpointSheet(pages: store.pages, editing: PagesFixtures.providers[9])) }
+            ),
+            SnapshotEntry(
                 name: "pages-local-populated",
                 size: CGSize(width: 1000, height: 1500),
                 updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.localSnapshot)],

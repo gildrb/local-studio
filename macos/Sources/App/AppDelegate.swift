@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitors: [Any] = []
     private var commandHold: DispatchWorkItem?
     private var panelSmoke: PanelSmoke?
+    private var providersSmoke: ProvidersSmoke?
 
     override init() {
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
@@ -56,6 +57,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             smoke.start()
             panelSmoke = smoke
         }
+        if arguments.contains("+smoke-providers") {
+            let smoke = ProvidersSmoke(store: store)
+            smoke.start()
+            providersSmoke = smoke
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -81,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var automated: Bool {
-        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil
+        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil
     }
 
     private static func quitShortcutPressed() -> Bool {
