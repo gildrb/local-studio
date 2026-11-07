@@ -121,6 +121,7 @@ struct StorageSettings: View {
                     SettingRow(.cleanupUnchanged) {
                         Toggle(SettingKey.cleanupUnchanged.title, isOn: bind(\.worktreeCleanupUnchanged))
                     }
+                    WorktreeCleanupRow(pages: pages)
                 }
                 SettingsSection(.data, footer: "Projects, pins, drafts, favorites, settings and keybindings are stored here as JSON.") {
                     SettingRow(.dataLocation) {
@@ -259,6 +260,46 @@ struct ConnectionsSettings: View {
         case .connecting: Theme.warning
         case .ready: Theme.success
         case .lost: Theme.danger
+        }
+    }
+}
+
+private struct WorktreeCleanupRow: View {
+    let pages: PagesStore
+    @State private var running = false
+    @State private var result: RequestOutcome?
+
+    var body: some View {
+        LabeledContent {
+            Button(running ? "Cleaning Up…" : "Clean Up Now") {
+                running = true
+                result = nil
+                pages.cleanupWorktrees { outcome in
+                    running = false
+                    result = outcome
+                }
+            }
+            .disabled(running)
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Clean up worktrees now")
+                switch result {
+                case .done(let message):
+                    Text(message.isEmpty ? "Nothing to clean up." : message)
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .textSelection(.enabled)
+                case .failed(let message):
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(PanelPalette.removedText)
+                        .textSelection(.enabled)
+                case nil:
+                    Text("Applies the rules above to every Local Studio worktree.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                }
+            }
         }
     }
 }

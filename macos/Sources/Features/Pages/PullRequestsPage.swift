@@ -203,6 +203,7 @@ private struct PullDetailView: View {
     let error: String?
     @State private var tab: PullTab
     @State private var diff: DiffModel?
+    @State private var actions = PullRequestActionState()
 
     init(store: StudioStore, project: String, pull: PullRequest, detail: PullRequestDetail?, error: String?, tab: PullTab = .summary) {
         self.store = store
@@ -262,6 +263,10 @@ private struct PullDetailView: View {
                 Button("Open in Browser") { openPull(pull) }
             }
             .controlSize(.small)
+            PullRequestActionBar(store: store, project: project, pull: pull, state: actions) {
+                store.pages.loadPullRequests(project: project)
+                store.pages.loadPullRequest(project: project, number: pull.number)
+            }
         }
     }
 
