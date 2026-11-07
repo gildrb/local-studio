@@ -96,7 +96,7 @@ extension StudioStore {
     }
 
     func stepThread(_ offset: Int) {
-        guard let target = inbox.neighbor(of: conversation.thread, offset: offset) else { return }
+        guard let target = inbox.neighbor(of: conversation.selectedID, offset: offset) else { return }
         open(target)
     }
 

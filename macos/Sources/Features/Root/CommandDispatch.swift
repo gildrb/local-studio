@@ -13,11 +13,20 @@ extension StudioStore {
         if let chord = binding(command)?.shortcut {
             for other in pages.keybindings where other.command != command && other.shortcut == chord && clauseHolds(other) && commands.canPerform(other.command) {
                 commands.perform(other.command)
+                shell.probe.ran(other.command)
                 return
             }
         }
-        if commands.perform(command) { return }
-        builtin(command)?()
+        if commands.perform(command) {
+            shell.probe.ran(command)
+            return
+        }
+        guard let action = builtin(command) else {
+            shell.probe.ran(nil)
+            return
+        }
+        action()
+        shell.probe.ran(command)
     }
 
     func canDispatch(_ command: String) -> Bool {
@@ -86,7 +95,8 @@ extension StudioStore {
         case "chat.newWithoutProject": return { self.newThread(in: nil) }
         case "chat.newTab": return { self.newThreadTab() }
         case "thread.close":
-            guard shell.route == .thread, conversation.thread != nil, !panels.rightPanelOpen else { return nil }
+            guard !panels.rightPanelOpen else { return nil }
+            guard shell.route == .thread, conversation.selectedID != nil else { return { self.mainWindow?.performClose(nil) } }
             return { self.closeThread() }
         case "thread.recentNext": return { self.cycleRecent(1) }
         case "thread.recentPrevious": return { self.cycleRecent(-1) }

@@ -108,6 +108,9 @@ final class InboxStore {
     @ObservationIgnored private(set) var searchRequest: String?
     @ObservationIgnored private var searchedQuery: String?
     @ObservationIgnored private(set) var threadsRevision = 0
+    @ObservationIgnored private var pendingRows: [ThreadRow] = []
+    @ObservationIgnored private var pendingIndex: [String: ThreadRow] = [:]
+    @ObservationIgnored private var aliases: [String: String] = [:]
 
     init(core: CoreHandle, requests: RequestCenter) {
         self.core = core
@@ -258,7 +261,28 @@ final class InboxStore {
 
     func thread(_ id: String?) -> ThreadRow? {
         guard let id else { return nil }
-        return index[id]
+        return index[id] ?? pendingIndex[id]
+    }
+
+    func isPending(_ id: String) -> Bool {
+        pendingIndex[id] != nil
+    }
+
+    func key(_ id: String) -> String {
+        aliases[id] ?? id
+    }
+
+    func setPending(_ rows: [ThreadRow], aliases: [String: String], workingSection: Bool) {
+        let shelved = rows.map { row in
+            var row = row
+            row.shelf = row.status == .working && workingSection ? .working : .active
+            return row
+        }
+        self.aliases = aliases
+        guard shelved != pendingRows else { return }
+        pendingRows = shelved
+        pendingIndex = Dictionary(shelved.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        rebuild()
     }
 
     func project(_ id: String?) -> Project? {
@@ -418,7 +442,7 @@ final class InboxStore {
 
     private func rebuild() {
         var next = InboxSections()
-        for row in threads where projectFilter.map({ row.project == $0 }) ?? true {
+        for row in pendingRows + threads where projectFilter.map({ row.project == $0 }) ?? true {
             switch row.shelf {
             case .pinned: next.pinned.append(row)
             case .active: next.active.append(row)

@@ -9,9 +9,15 @@ struct StatusBadge: View {
     var body: some View {
         if let glyph = Self.glyph(row.status) {
             HStack(spacing: 4) {
-                Image(systemName: glyph.symbol)
-                    .font(.system(size: 11, weight: .regular))
-                    .accessibilityHidden(true)
+                if row.status == .working {
+                    LogoMark()
+                        .frame(width: 12, height: 12)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: glyph.symbol)
+                        .font(.system(size: 11, weight: .regular))
+                        .accessibilityHidden(true)
+                }
                 Text(label(glyph.title))
                     .font(.system(size: 11.5))
                     .monospacedDigit()
@@ -131,7 +137,7 @@ struct InboxRowView: View {
         .opacity(row.status == .working && !highlighted ? 0.85 : 1)
         .onHover { hovering = $0 }
         .onTapGesture { click() }
-        .contextMenu { MenuNodes(nodes: ThreadActions.menu(store, for: row.id)) }
+        .contextMenu { MenuNodes(nodes: menu) }
         .draggable(row.id) {
             Text(row.title.isEmpty ? "Untitled thread" : row.title)
                 .font(.system(size: 13, weight: .medium))
@@ -232,7 +238,7 @@ struct InboxRowView: View {
     @ViewBuilder private var trailing: some View {
         if let jump {
             JumpHint(number: jump)
-        } else if hovering {
+        } else if hovering, !pending {
             HStack(spacing: 2) {
                 RowSnoozeMenu(store: store, ids: store.inbox.targets(for: row.id))
                 RowActionButton(title: "Settle", symbol: "checkmark") { store.inbox.setSettled(store.inbox.targets(for: row.id), true) }
@@ -243,7 +249,9 @@ struct InboxRowView: View {
     }
 
     @ViewBuilder private var slimAction: some View {
-        switch row.shelf {
+        switch pending ? nil : row.shelf {
+        case nil:
+            StatusBadge(row: row, now: now)
         case .snoozed:
             RowActionButton(title: "Wake Thread Now", symbol: "alarm") { store.inbox.snooze([row.id], until: nil) }
         case .settled:
@@ -327,7 +335,7 @@ struct InboxRowView: View {
     }
 
     private var highlighted: Bool {
-        store.inbox.selection.contains(row.id) || (store.inbox.selection.isEmpty && store.shell.route == .thread && store.focusedThread == row.id)
+        store.inbox.selection.contains(row.id) || (store.inbox.selection.isEmpty && store.shell.route == .thread && store.conversation.selectedID == row.id)
     }
 
     private var tooltip: String {
@@ -338,10 +346,23 @@ struct InboxRowView: View {
         return lines.joined(separator: "\n")
     }
 
+    private var pending: Bool {
+        store.inbox.isPending(row.id)
+    }
+
+    private var menu: [MenuNode] {
+        guard pending else { return ThreadActions.menu(store, for: row.id) }
+        guard row.status == .failed else { return [] }
+        return [
+            .action("Retry", symbol: "arrow.clockwise") { store.conversation.retryPending(row.id) },
+            .action("Edit Message", symbol: "pencil") { store.conversation.editPending(row.id) },
+        ]
+    }
+
     private func click() {
         store.shell.sidebarCursor = row.id
         let flags = NSEvent.modifierFlags
-        if NSApp.currentEvent?.clickCount == 2, flags.isDisjoint(with: [.command, .shift]) {
+        if NSApp.currentEvent?.clickCount == 2, flags.isDisjoint(with: [.command, .shift]), !pending {
             store.inbox.renaming = row.id
             return
         }

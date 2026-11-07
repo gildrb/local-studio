@@ -909,9 +909,7 @@ impl Actor {
             }
             Command::SelectThread { thread } => self.select(thread).await,
             Command::StartThread { draft, project, prompt, settings } => {
-                if let Err(error) = self.start_thread(&draft, project, prompt, settings, None).await {
-                    self.mailbox.notice(NoticeLevel::Error, error);
-                }
+                self.start_thread(&draft, project, prompt, settings, None).await;
             }
             Command::StartThreads { draft, project, prompt, settings, models } => {
                 self.start_threads(&draft, project, prompt, settings, models).await;
@@ -1503,6 +1501,23 @@ impl Actor {
         prompt: PromptDraft,
         settings: ThreadSettings,
         fan_out: Option<String>,
+    ) {
+        match self.create_thread(draft, project, settings, fan_out).await {
+            Ok(id) => {
+                if let Err(error) = self.send_prompt(&id, prompt, Delivery::Queue).await {
+                    self.mailbox.notice(NoticeLevel::Error, error);
+                }
+            }
+            Err(message) => self.mailbox.push(Update::RequestFailed { request: draft.to_string(), message }),
+        }
+    }
+
+    async fn create_thread(
+        &mut self,
+        draft: &str,
+        project: Option<String>,
+        settings: ThreadSettings,
+        fan_out: Option<String>,
     ) -> Result<String, String> {
         let client = self.client.clone().ok_or_else(|| "Not connected to the Eukhe daemon yet.".to_string())?;
         let project_path = match &project {
@@ -1558,7 +1573,6 @@ impl Actor {
         }
         self.mailbox.push(Update::ThreadStarted { draft: draft.to_string(), thread: id.clone() });
         self.dirty = true;
-        self.send_prompt(&id, prompt, Delivery::Queue).await?;
         Ok(id)
     }
 
@@ -1571,9 +1585,7 @@ impl Actor {
         models: Vec<ModelKey>,
     ) {
         if models.is_empty() {
-            if let Err(error) = self.start_thread(draft, project, prompt, settings, None).await {
-                self.mailbox.notice(NoticeLevel::Error, error);
-            }
+            self.start_thread(draft, project, prompt, settings, None).await;
             return;
         }
         let base = match &settings.worktree {
@@ -1596,11 +1608,7 @@ impl Actor {
                     WorktreeChoice::Local
                 },
             };
-            if let Err(error) =
-                self.start_thread(&member, project.clone(), prompt.clone(), member_settings, Some(group.clone())).await
-            {
-                self.mailbox.notice(NoticeLevel::Error, error);
-            }
+            self.start_thread(&member, project.clone(), prompt.clone(), member_settings, Some(group.clone())).await;
         }
     }
 

@@ -61,14 +61,6 @@ private struct DraftHero: View {
             }
             .padding(.bottom, 26)
             VStack(spacing: 6) {
-                if let pending = store.conversation.pendingDraft, let setup = store.conversation.worktreeSetup[pending] {
-                    WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
-                        store.conversation.cancelWorktreeSetup()
-                    } workLocally: {
-                        store.conversation.skipWorktreeSetup()
-                    }
-                    .padding(.bottom, 8)
-                }
                 ComposerView(store: store)
                     .focusRegionFrame(.composer, in: store.shell)
                 ThreadContextStrip(store: store)
@@ -141,11 +133,27 @@ private struct ConversationColumn: View {
         let settings = store.pages.settings
         let width = settings?.chatWidth.maxWidth ?? ChatWidth.normal.maxWidth
         TimelineScroll(store: store, width: width)
-            .id(store.conversation.thread)
+            .id(store.conversation.selectedID)
             .environment(\.responseStreaming, settings?.responseStreaming ?? .paragraph)
             .environment(\.timeFormat, settings?.timeFormat ?? .locale)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 8) {
+                    if let pending = store.conversation.pending {
+                        if let setup = store.conversation.worktreeSetup[pending.draft], pending.failure == nil {
+                            WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
+                                store.conversation.cancelWorktreeSetup()
+                            } workLocally: {
+                                store.conversation.skipWorktreeSetup()
+                            }
+                        }
+                        if let failure = pending.failure {
+                            StartFailureCard(message: failure) {
+                                store.conversation.editPending(pending.draft)
+                            } retry: {
+                                store.conversation.retryPending(pending.draft)
+                            }
+                        }
+                    }
                     ApprovalCard(store: store)
                     ComposerView(store: store)
                         .focusRegionFrame(.composer, in: store.shell)
@@ -165,11 +173,16 @@ private struct LoadingPlaceholder: View {
 
     var body: some View {
         if conversation.rows.isEmpty, conversation.info == nil {
-            Text("Loading thread…")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Theme.secondaryText)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 40)
+            VStack(spacing: 10) {
+                LogoMark(style: .coin)
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+                Text("Loading thread…")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 40)
         }
     }
 }
@@ -204,7 +217,7 @@ private struct TimelineScroll: View {
         self.store = store
         self.width = width
         let restored = store.conversation.restoredScroll
-        thread = store.conversation.thread
+        thread = store.conversation.selectedID
         restoredTop = restored.followsEnd ? nil : restored.top
         _position = State(initialValue: restoredTop.map { ScrollPosition(id: $0, anchor: .top) } ?? ScrollPosition(edge: .bottom))
     }
@@ -309,13 +322,13 @@ private struct TimelineScroll: View {
             return text
         }.first
         return TimelineProbe(
-            thread: conversation.thread, pending: nil, rows: conversation.rows.count, firstUser: firstUser,
+            thread: conversation.thread, pending: conversation.focusedPending, rows: conversation.rows.count, firstUser: firstUser,
             placeholder: conversation.rows.isEmpty && conversation.info == nil
         )
     }
 
     private var current: Bool {
-        store.conversation.thread == thread
+        store.conversation.selectedID == thread
     }
 
     private func updateCurrentAnchor(visible ids: [UInt64]) {

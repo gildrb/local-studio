@@ -28,7 +28,7 @@ final class StudioStore {
         workspace = WorkspaceStore(core: core, requests: requests)
         pages = PagesStore(core: core, requests: requests)
         workspace.panels.bind(conversation: conversation, inbox: inbox, pages: pages)
-        conversation.notify = { [weak self] level, text in self?.post(level, text) }
+        conversation.pendingsChanged = { [weak self] in self?.syncPendings() }
     }
 
     func start() throws {
@@ -43,10 +43,25 @@ final class StudioStore {
         requests.reset()
     }
 
-    func select(_ thread: String?) {
+    func select(_ id: String?) {
+        let thread = id.map(conversation.resolve)
+        if let thread, let start = conversation.pendingStart(thread) {
+            if let started = start.thread {
+                select(started)
+                return
+            }
+            conversation.showPending(thread)
+            shell.touchRecent(thread)
+            core.run { $0.selectThread(thread: nil) }
+            return
+        }
         conversation.focus(thread, row: inbox.thread(thread))
         shell.touchRecent(thread)
         core.run { $0.selectThread(thread: thread) }
+    }
+
+    func syncPendings() {
+        inbox.setPending(conversation.pendingRows(), aliases: conversation.aliases, workingSection: pages.settings?.workingSection ?? true)
     }
 
     func post(_ level: NoticeLevel, _ text: String) {
@@ -76,6 +91,8 @@ final class StudioStore {
         case .projects(let projects):
             inbox.setProjects(projects)
         case .threads(let threads):
+            let listed = Set(threads.map(\.id))
+            conversation.settlePendings { listed.contains($0) }
             inbox.setThreads(threads)
         case .threadSearch(let request, let hits):
             requests.settle(request)
@@ -179,6 +196,11 @@ final class StudioStore {
             requests.complete(request, .done(message))
         case .requestFailed(let request, let message):
             requests.complete(request, .failed(message))
+            if conversation.pendingStart(request) != nil {
+                conversation.startFailed(draft: request, message: message)
+            } else if request.contains("#") {
+                post(.error, message)
+            }
         case .notice(let level, let text):
             post(level, text)
         }

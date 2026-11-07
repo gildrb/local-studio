@@ -118,7 +118,7 @@ extension StudioStore {
     }
 
     func closeThread() {
-        guard shell.route == .thread, conversation.thread != nil else { return }
+        guard shell.route == .thread, conversation.selectedID != nil else { return }
         newThread(in: focusedProject ?? inbox.currentProject)
         focus(.composer)
     }

@@ -26,4 +26,12 @@ final class RenderProbe {
     var header: HeaderProbe?
     var timeline: TimelineProbe?
     var scroll: ScrollProbe?
+    private(set) var dispatched: [String?] = []
+
+    func ran(_ command: String?) {
+        dispatched.append(command)
+        if dispatched.count > 64 {
+            dispatched.removeFirst(dispatched.count - 64)
+        }
+    }
 }

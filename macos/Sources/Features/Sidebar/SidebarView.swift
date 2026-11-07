@@ -64,7 +64,7 @@ struct SidebarView: View {
             ScrollView {
                 VStack(spacing: 0) {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        if store.shell.route == .thread, store.focusedThread == nil {
+                        if store.shell.route == .thread, store.conversation.selectedID == nil {
                             DraftRow(store: store, selected: store.inbox.selection.isEmpty)
                         }
                         ForEach(sections.pinned, id: \.id) { row in
@@ -76,7 +76,8 @@ struct SidebarView: View {
                                 .frame(height: 6)
                                 .pinnedDropTarget(store: store, before: nil, target: $dropTarget)
                         }
-                        ForEach(sections.active, id: \.id) { row in
+                        ForEach(keyed(sections.active), id: \.key) { item in
+                            let row = item.row
                             InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
                         }
                         if sections.pinned.isEmpty, sections.active.isEmpty, sections.working.isEmpty {
@@ -112,7 +113,8 @@ struct SidebarView: View {
             ShelfHeader(shelf: shelf, count: rows.count, expanded: expanded) { store.inbox.toggleShelf(shelf) }
             if expanded {
                 let visible = shelf == .settled ? Array(rows.prefix(store.inbox.settledLimit)) : rows
-                ForEach(visible, id: \.id) { row in
+                ForEach(keyed(visible), id: \.key) { item in
+                    let row = item.row
                     InboxRowView(store: store, row: row, variant: variant, now: now, jump: hints[row.id])
                 }
                 if shelf == .settled, rows.count > visible.count {
@@ -127,6 +129,10 @@ struct SidebarView: View {
                 }
             }
         }
+    }
+
+    private func keyed(_ rows: [ThreadRow]) -> [KeyedRow] {
+        rows.map { KeyedRow(key: store.inbox.key($0.id), row: $0) }
     }
 
     private func handleSearchKey(_ key: SearchKey) -> Bool {
@@ -159,6 +165,11 @@ struct SidebarView: View {
         store.focus(.sidebar)
         return true
     }
+}
+
+struct KeyedRow {
+    let key: String
+    let row: ThreadRow
 }
 
 enum SearchKey {
