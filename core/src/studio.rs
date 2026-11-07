@@ -35,6 +35,7 @@ const TIMER_PERIOD: Duration = Duration::from_secs(15);
 const EVENT_BURST: usize = 512;
 const NEW_THREAD_TITLE: &str = "New thread";
 const BODY_LIMIT: usize = 140;
+const GRANTABLE_EFFECTS: [&str; 6] = ["read", "write", "exec", "net", "outside", "protected"];
 const GENERATED_TITLE_LIMIT: usize = 80;
 const TITLE_QUESTION: &str =
     "Reply with a concise 3-7 word title for this conversation, no punctuation. Reply with the title only.";
@@ -411,6 +412,7 @@ struct Thread {
     pending_run: bool,
     reopen: bool,
     ended_by_events: bool,
+    allowed_effects: Vec<String>,
 }
 
 struct Actor {
@@ -535,6 +537,9 @@ impl Actor {
         self.client = Some(client.clone());
         self.client_slot.send_replace(Some(client.clone()));
         self.mailbox.push(Update::Connection { state: Connection::Ready });
+        let version = Some(client.daemon_build().version.to_string()).filter(|version| !version.is_empty());
+        let pid = client.hello().get("supervisorPid").and_then(Value::as_u64).and_then(|pid| u32::try_from(pid).ok());
+        self.mailbox.push(Update::Daemon { socket: self.socket.to_string_lossy().into_owned(), version, pid });
         if client.supports_server_capability("agent_roster") {
             match client.request_ok(DaemonCommand::RosterSubscribe { id: None, rest: Map::default() }).await {
                 Ok(data) => self.roster_changed(data.get("roster").cloned().unwrap_or_default(), &[], true, false),
@@ -740,7 +745,7 @@ impl Actor {
                 self.store.update(&thread, |flags| flags.access = Some(mode));
                 self.save();
                 if let Some(active) = self.live_active(&thread) {
-                    if let Err(error) = self.apply_access(&active, mode).await {
+                    if let Err(error) = self.apply_access(&thread, &active).await {
                         self.mailbox.notice(NoticeLevel::Error, error);
                     }
                 }
@@ -1080,8 +1085,9 @@ impl Actor {
         for turn in settled.into_iter().filter(|turn| !turn.files.is_empty()) {
             self.workspace.record_turn_files(id.to_string(), turn.turn, turn.files);
         }
-        if let Some(mode) = self.store.flags(id).access {
-            if let Err(error) = self.apply_access(&attach.active_session_id, mode).await {
+        let allowed = self.threads.get(id).is_some_and(|thread| !thread.allowed_effects.is_empty());
+        if self.store.flags(id).access.is_some() || allowed {
+            if let Err(error) = self.apply_access(id, &attach.active_session_id).await {
                 self.mailbox.notice(NoticeLevel::Warning, error);
             }
         }
@@ -1154,8 +1160,15 @@ impl Actor {
         }
     }
 
-    async fn apply_access(&self, active: &str, mode: AccessMode) -> Result<(), String> {
-        let list = access_effects(mode).join(",");
+    async fn apply_access(&self, id: &str, active: &str) -> Result<(), String> {
+        let mode = self.store.flags(id).access.unwrap_or(AccessMode::FullAccess);
+        let mut effects: Vec<String> = access_effects(mode).iter().map(|effect| (*effect).to_string()).collect();
+        for effect in self.threads.get(id).map(|thread| thread.allowed_effects.as_slice()).unwrap_or_default() {
+            if !effects.contains(effect) {
+                effects.push(effect.clone());
+            }
+        }
+        let list = effects.join(",");
         let command = DaemonCommand::Cvar {
             id: None,
             active_session_id: active.to_string(),
@@ -1360,9 +1373,28 @@ impl Actor {
             return;
         };
         let verdict = match answer {
-            ApprovalAnswer::Approve => ShellVerdict::Approve,
+            ApprovalAnswer::Approve | ApprovalAnswer::AlwaysAllowSession => ShellVerdict::Approve,
             ApprovalAnswer::Deny => ShellVerdict::Deny,
         };
+        if answer == ApprovalAnswer::AlwaysAllowSession {
+            let effects: Vec<String> = self
+                .threads
+                .get(id)
+                .and_then(|thread| thread.live.as_ref())
+                .and_then(|live| live.approvals.iter().find(|(approval, _)| approval.request_id == request))
+                .map(|(approval, _)| approval.effects.clone())
+                .unwrap_or_default();
+            if let Some(thread) = self.threads.get_mut(id) {
+                for effect in effects.into_iter().filter(|effect| GRANTABLE_EFFECTS.contains(&effect.as_str())) {
+                    if !thread.allowed_effects.contains(&effect) {
+                        thread.allowed_effects.push(effect);
+                    }
+                }
+            }
+            if let Err(error) = self.apply_access(id, &active).await {
+                self.mailbox.notice(NoticeLevel::Warning, error);
+            }
+        }
         let command = DaemonCommand::AnswerShellApproval {
             id: None,
             active_session_id: active,
@@ -2182,7 +2214,7 @@ fn access_effects(mode: AccessMode) -> &'static [&'static str] {
         AccessMode::Supervised => &["read"],
         AccessMode::AutoAcceptEdits => &["read", "write"],
         AccessMode::Auto => &["read", "write", "exec"],
-        AccessMode::FullAccess => &["read", "write", "exec", "net", "outside", "protected"],
+        AccessMode::FullAccess => &GRANTABLE_EFFECTS,
     }
 }
 

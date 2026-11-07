@@ -7,18 +7,21 @@ struct ComposerControls: View {
     let draft: ComposerDraft
     let project: String?
     let canSend: Bool
-    @Binding var showsModels: Bool
     let send: () -> Void
 
     var body: some View {
         let conversation = store.conversation
+        let settings = store.pages.settings
         HStack(spacing: 2) {
             ComposerIconButton(title: "Attach files", symbol: "paperclip", action: attach)
-            ModelPickerButton(store: store, presented: $showsModels)
+            ModelPickerButton(store: store)
             ThinkingMenu(store: store)
             AccessMenu(store: store)
+            StashMenu(store: store, project: project)
             Spacer(minLength: 8)
-            ContextMeter(store: store)
+            if settings?.contextWindowMeter ?? true {
+                ContextMeter(store: store)
+            }
             if conversation.busy {
                 RoundActionButton(title: "Stop generation", symbol: "stop.fill", size: 9, fill: .red, enabled: true) {
                     conversation.abort()
@@ -26,7 +29,7 @@ struct ComposerControls: View {
                 .keyboardShortcut(".", modifiers: .command)
             }
             RoundActionButton(
-                title: conversation.busy ? "Queue message (⌥↩ steers)" : "Send message",
+                title: sendTitle(busy: conversation.busy, steers: settings?.followUpBehavior == .steer),
                 symbol: "arrow.up",
                 size: 12,
                 fill: Theme.primary,
@@ -35,6 +38,11 @@ struct ComposerControls: View {
             )
         }
         .frame(height: 30)
+    }
+
+    private func sendTitle(busy: Bool, steers: Bool) -> String {
+        guard busy else { return "Send message" }
+        return steers ? "Steer the running turn (⌥↩ queues)" : "Queue message (⌥↩ steers)"
     }
 
     private func attach() {
@@ -128,21 +136,21 @@ private struct RoundActionButton: View {
 
 private struct ModelPickerButton: View {
     let store: StudioStore
-    @Binding var presented: Bool
     @State private var hovering = false
 
     var body: some View {
+        let conversation = store.conversation
         Button {
-            presented.toggle()
+            conversation.modelPickerPresented.toggle()
         } label: {
-            ComposerChip(title: title, hovering: hovering || presented)
+            ComposerChip(title: title, hovering: hovering || conversation.modelPickerPresented)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Model")
         .accessibilityLabel("Model: \(title)")
-        .popover(isPresented: $presented, arrowEdge: .bottom) {
-            ModelPickerPanel(store: store) { presented = false }
+        .popover(isPresented: Bindable(conversation).modelPickerPresented, arrowEdge: .bottom) {
+            ModelPickerPanel(store: store) { conversation.modelPickerPresented = false }
         }
     }
 
@@ -555,11 +563,23 @@ struct ThreadContextStrip: View {
                 }
             }
         } else if let project = store.inbox.project(store.inbox.currentProject), project.isGit {
+            let options = conversation.newThread
             strip {
-                WorkspaceMenu(options: conversation.newThread)
-                if conversation.newThread.worktree {
-                    BaseBranchButton(store: store, project: project.id)
-                    BranchNameField(options: conversation.newThread)
+                if let branch = options.existingBranch, options.existingWorktree != nil {
+                    Label("Worktree · \(branch)", systemImage: "lock")
+                        .padding(.horizontal, 8)
+                        .help(options.existingWorktree ?? "")
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Existing worktree: \(branch)")
+                    Button("Change") { options.chooseWorkspace(worktree: false) }
+                        .buttonStyle(.link)
+                        .font(.system(size: 12))
+                } else {
+                    WorkspaceMenu(options: options, worktree: options.usesWorktree(store.pages.settings))
+                    if options.usesWorktree(store.pages.settings) {
+                        BaseBranchButton(store: store, project: project.id)
+                        BranchNameField(options: options)
+                    }
                 }
             }
         }
@@ -579,19 +599,20 @@ struct ThreadContextStrip: View {
 
 private struct WorkspaceMenu: View {
     let options: NewThreadOptions
+    let worktree: Bool
     @State private var hovering = false
 
     var body: some View {
         Menu {
-            Picker("Workspace", selection: Binding(get: { options.worktree }, set: { options.worktree = $0 })) {
+            Picker("Workspace", selection: Binding(get: { worktree }, set: { options.chooseWorkspace(worktree: $0) })) {
                 Label("Local checkout", systemImage: "folder").tag(false)
                 Label("New worktree", systemImage: "arrow.triangle.branch").tag(true)
             }
             .pickerStyle(.inline)
         } label: {
             ComposerChip(
-                title: options.worktree ? "New worktree" : "Local checkout",
-                symbol: options.worktree ? "arrow.triangle.branch" : "folder",
+                title: worktree ? "New worktree" : "Local checkout",
+                symbol: worktree ? "arrow.triangle.branch" : "folder",
                 hovering: hovering
             )
         }
@@ -601,7 +622,7 @@ private struct WorkspaceMenu: View {
         .fixedSize()
         .onHover { hovering = $0 }
         .help("Workspace")
-        .accessibilityLabel(options.worktree ? "Workspace: New worktree" : "Workspace: Local checkout")
+        .accessibilityLabel(worktree ? "Workspace: New worktree" : "Workspace: Local checkout")
     }
 }
 

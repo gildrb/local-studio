@@ -65,6 +65,7 @@ final class InboxStore {
     private(set) var currentProject: String?
     private(set) var undo: InboxUndo?
     private(set) var receivedThreads = false
+    private(set) var receivedProjects = false
 
     private(set) var searchEntries: [InboxSearchEntry] = []
     private(set) var searchingMessages = false
@@ -92,6 +93,7 @@ final class InboxStore {
     var renaming: String?
 
     let shell = ShellState()
+    let commands = CommandRouter()
     @ObservationIgnored let notifier = Notifier()
 
     @ObservationIgnored private let core: CoreHandle
@@ -108,6 +110,7 @@ final class InboxStore {
     }
 
     func setProjects(_ projects: [Project]) {
+        receivedProjects = true
         self.projects = projects
         if let filter = projectFilter, !projects.contains(where: { $0.id == filter }) {
             projectFilter = nil
@@ -115,6 +118,28 @@ final class InboxStore {
         if let current = currentProject, projects.contains(where: { $0.id == current }) { return }
         if currentProject == nil, projectChosen { return }
         currentProject = projects.first?.id
+    }
+
+    func renameProject(_ project: String, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, self.project(project)?.name != trimmed else { return }
+        core.run { $0.renameProject(project: project, name: trimmed) }
+    }
+
+    func setProjectIcon(_ project: String, _ icon: String?) {
+        let value = icon?.trimmingCharacters(in: .whitespacesAndNewlines)
+        core.run { $0.setProjectIcon(project: project, icon: value?.isEmpty == true ? nil : value) }
+    }
+
+    private(set) var projectScripts: [String: [ProjectScript]] = [:]
+    private(set) var projectSettings: [String: (settings: ProjectSettings, effective: Settings)] = [:]
+
+    func setProjectScripts(project: String, scripts: [ProjectScript]) {
+        projectScripts[project] = scripts
+    }
+
+    func setProjectSettings(project: String, settings: ProjectSettings, effective: Settings) {
+        projectSettings[project] = (settings, effective)
     }
 
     func setThreadSearch(request: String, hits: [ThreadSearchHit]) {

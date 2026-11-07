@@ -11,6 +11,7 @@ final class ConversationStore {
     private(set) var info: ThreadInfo?
     private(set) var entries: [TimelineEntry] = []
     private(set) var rows: [TimelineRow] = []
+    private(set) var anchors: [TimelineAnchor] = []
     private(set) var approvals: [Approval] = []
     private(set) var queued: [QueuedMessage] = []
     private(set) var models: [ModelOption] = []
@@ -24,14 +25,18 @@ final class ConversationStore {
     private(set) var endRequest = 0
     private(set) var focusRequest = 0
     private(set) var expandedFolds: Set<UInt64> = []
+    var modelPickerPresented = false
     var followsEnd = true
     let newThread = NewThreadOptions()
+    let stash = ComposerStash()
+    private(set) var pullsRequest: String?
+    @ObservationIgnored var draftProject: String?
 
     @ObservationIgnored private let core: CoreHandle
     @ObservationIgnored private let requests: RequestCenter
     @ObservationIgnored private var draft: String?
     @ObservationIgnored private var drafts: [String: ComposerDraft] = [:]
-    @ObservationIgnored private var commandsRequest: String?
+    @ObservationIgnored private(set) var commandsRequest: String?
     @ObservationIgnored private var sentPrompts: [String] = []
 
     init(core: CoreHandle, requests: RequestCenter) {
@@ -47,12 +52,19 @@ final class ConversationStore {
         info?.busy == true
     }
 
+    private(set) var worktreeSetup: [String: (stages: [SetupStage], done: Bool, error: String?)] = [:]
+
+    func setWorktreeSetup(thread: String, stages: [SetupStage], done: Bool, error: String?) {
+        worktreeSetup[thread] = (stages, done, error)
+    }
+
     func focus(_ thread: String?) {
         guard thread != self.thread else { return }
         self.thread = thread
         info = nil
         entries = []
         rows = []
+        anchors = []
         approvals = []
         queued = []
         expandedFolds = []
@@ -155,6 +167,12 @@ final class ConversationStore {
         core.run { $0.listBranches(request: request, project: project, query: query, limit: 60) }
     }
 
+    func loadPullRequests(project: String) {
+        let request = requests.issue()
+        pullsRequest = request
+        core.run { $0.listPullRequests(request: request, project: project) }
+    }
+
     func composer(project: String?) -> ComposerDraft {
         composer(key: thread ?? "project:\(project ?? "")")
     }
@@ -175,12 +193,66 @@ final class ConversationStore {
     func send(_ text: String, project: String?, steer: Bool) {
         let draft = ComposerDraft()
         draft.text = text
-        send(draft, project: project, steer: steer, settings: nil)
+        send(draft, project: project, delivery: steer ? .steer : .queue, settings: nil, defaultBranch: nil)
     }
 
-    func submit(project: String?, steer: Bool, settings: Settings?) {
+    func submit(project: String?, alternate: Bool, settings: Settings?, defaultBranch: String? = nil) {
         let draft = composer(project: project)
-        send(draft, project: project, steer: steer, settings: settings)
+        let preferred: Delivery = settings?.followUpBehavior == .steer ? .steer : .queue
+        let opposite: Delivery = preferred == .steer ? .queue : .steer
+        send(draft, project: project, delivery: alternate ? opposite : preferred, settings: settings, defaultBranch: defaultBranch)
+    }
+
+    func steerQueuedMessage() -> Bool {
+        guard let message = queued.first(where: { !$0.steering && !$0.sending }) else { return false }
+        sendNow(message)
+        return true
+    }
+
+    func attachContext(text: String, source: String) {
+        let body = text.trimmingCharacters(in: .newlines)
+        guard !body.isEmpty else { return }
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false).count
+        let title = lines == 1 ? "\(source) · 1 line" : "\(source) · \(lines) lines"
+        let kind: ComposerContext.Kind = source.lowercased().contains("terminal") ? .terminal : .text
+        composer(project: draftProject).contexts.append(ComposerContext(kind: kind, title: title, source: source, text: body))
+        focusRequest += 1
+    }
+
+    func attachPullRequest(_ pull: PullRequest, to draft: ComposerDraft) {
+        guard !draft.contexts.contains(where: { $0.kind == .pullRequest && $0.title.hasPrefix("#\(pull.number) ") }) else { return }
+        let detail = [pull.title, pull.url, "\(pull.head) → \(pull.base) · \(pull.state.lowercased())"].joined(separator: "\n")
+        draft.contexts.append(ComposerContext(
+            kind: .pullRequest, title: "#\(pull.number) \(pull.title)", source: "Pull request #\(pull.number)", text: detail
+        ))
+    }
+
+    func stashKey(project: String?) -> String {
+        (thread != nil ? info?.project : project) ?? ""
+    }
+
+    @discardableResult
+    func stashPrompt(project: String?) -> Bool {
+        let draft = composer(project: project)
+        guard !draft.isEmpty else { return false }
+        stash.park(StashedPrompt(text: draft.text, files: draft.files, contexts: draft.contexts), project: stashKey(project: project))
+        draft.clear()
+        focusRequest += 1
+        return true
+    }
+
+    func restoreStash(_ prompt: StashedPrompt, project: String?) {
+        let key = stashKey(project: project)
+        let draft = composer(project: project)
+        if !draft.isEmpty {
+            stash.park(StashedPrompt(text: draft.text, files: draft.files, contexts: draft.contexts), project: key)
+        }
+        draft.clear()
+        draft.text = prompt.text
+        draft.files = prompt.files
+        draft.contexts = prompt.contexts
+        stash.remove(prompt.id, project: key)
+        focusRequest += 1
     }
 
     func abort() {
@@ -321,12 +393,13 @@ final class ConversationStore {
         return newThread.access ?? settings?.defaultAccess ?? .supervised
     }
 
-    private func send(_ draft: ComposerDraft, project: String?, steer: Bool, settings: Settings?) {
-        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func send(_ draft: ComposerDraft, project: String?, delivery: Delivery, settings: Settings?, defaultBranch: String?) {
+        let text = draft.promptText
         guard !text.isEmpty || !draft.images.isEmpty else { return }
         let prompt = PromptDraft(text: text, images: draft.images.map(\.attachment), files: draft.files)
-        if !text.isEmpty {
-            sentPrompts.append(text)
+        let typed = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty {
+            sentPrompts.append(typed)
         }
         draft.clear()
         followsEnd = true
@@ -340,12 +413,13 @@ final class ConversationStore {
                 model: model?.id,
                 thinkingLevel: thinkingLevel(settings: settings),
                 access: access(settings: settings),
-                worktree: newThread.worktreeChoice
+                worktree: newThread.worktreeChoice(settings: settings, defaultBranch: defaultBranch)
             )
+            newThread.threadStarted()
             core.run { $0.startThread(draft: id, project: project, prompt: prompt, settings: options) }
             return
         }
-        core.run { $0.send(thread: thread, prompt: prompt, delivery: steer && busy ? .steer : .queue) }
+        core.run { $0.send(thread: thread, prompt: prompt, delivery: busy ? delivery : .queue) }
     }
 
     private func composer(key: String) -> ComposerDraft {
@@ -359,11 +433,25 @@ final class ConversationStore {
 
     private func rebuildRows() {
         rows = TimelineLayout.rows(for: entries, expanded: expandedFolds)
+        let next = rows.enumerated().compactMap { index, row -> TimelineAnchor? in
+            guard case .entry(let entry, _) = row, case .user(let text, _, _) = entry.item.kind else { return nil }
+            let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+            return TimelineAnchor(id: entry.id, order: index, preview: line)
+        }
+        if next != anchors {
+            anchors = next
+        }
     }
 
     private var outOfSync: String {
         "The transcript went out of sync; reopen the thread."
     }
+}
+
+struct TimelineAnchor: Identifiable, Equatable {
+    let id: UInt64
+    let order: Int
+    let preview: String
 }
 
 @MainActor
@@ -477,14 +565,36 @@ final class NewThreadOptions {
     var model: ModelKey?
     var thinkingLevel: String?
     var access: AccessMode?
-    var worktree = false
+    var worktree: Bool?
     var branch = ""
     var base: String?
+    var existingWorktree: String?
+    var existingBranch: String?
 
-    var worktreeChoice: WorktreeChoice {
+    func usesWorktree(_ settings: Settings?) -> Bool {
+        worktree ?? (settings?.newThreadWorkspace == .worktree)
+    }
+
+    func worktreeChoice(settings: Settings?, defaultBranch: String?) -> WorktreeChoice {
+        if let existingWorktree {
+            return .existing(path: existingWorktree)
+        }
+        guard usesWorktree(settings) else { return .local }
         let name = branch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard worktree else { return .local }
-        return .newWorktree(branch: name.isEmpty ? Self.generatedBranch() : name, base: base)
+        let origin = (settings?.newWorktreesStartFromOrigin ?? true) ? defaultBranch.map { "origin/" + $0 } : nil
+        return .newWorktree(branch: name.isEmpty ? Self.generatedBranch() : name, base: base ?? origin)
+    }
+
+    func chooseWorkspace(worktree: Bool) {
+        existingWorktree = nil
+        existingBranch = nil
+        self.worktree = worktree
+    }
+
+    func threadStarted() {
+        existingWorktree = nil
+        existingBranch = nil
+        branch = ""
     }
 
     static func generatedBranch() -> String {
@@ -498,15 +608,23 @@ final class ComposerDraft {
     var text = ""
     var images: [ComposerImage] = []
     var files: [String] = []
+    var contexts: [ComposerContext] = []
 
     var isEmpty: Bool {
-        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty
+        text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty && contexts.isEmpty
+    }
+
+    var promptText: String {
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let blocks = contexts.map(\.promptBlock)
+        return ([body] + blocks).filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 
     func clear() {
         text = ""
         images = []
         files = []
+        contexts = []
     }
 
     func attach(image data: Data, mimeType: String) {
@@ -536,4 +654,30 @@ struct ComposerImage: Identifiable {
     let id = UUID()
     let attachment: ImageAttachment
     let thumbnail: NSImage?
+}
+
+struct ComposerContext: Identifiable, Equatable, Codable {
+    enum Kind: String, Codable {
+        case pullRequest
+        case terminal
+        case text
+    }
+
+    var id = UUID()
+    let kind: Kind
+    let title: String
+    let source: String
+    let text: String
+
+    var symbol: String {
+        switch kind {
+        case .pullRequest: "arrow.triangle.pull"
+        case .terminal: "terminal"
+        case .text: "text.alignleft"
+        }
+    }
+
+    var promptBlock: String {
+        "\(source):\n```\n\(text)\n```"
+    }
 }
