@@ -14,18 +14,10 @@ def developer-dir []: nothing -> string {
     "/Library/Developer/CommandLineTools"
 }
 
-def make-icon [source: path, target: path] {
-    let iconset = (mktemp -d | path join "AppIcon.iconset")
-    mkdir $iconset
-    for size in [16 32 128 256 512] {
-        for scale in [1 2] {
-            let pixels = ($size * $scale | into string)
-            let name = if $scale == 1 { $"icon_($size)x($size).png" } else { $"icon_($size)x($size)@2x.png" }
-            ^/usr/bin/sips -z $pixels $pixels $source --out ($iconset | path join $name) | ignore
-        }
-    }
-    ^/usr/bin/iconutil -c icns $iconset -o $target
-    rm -r -f ($iconset | path dirname)
+def compile-icon [package: path, resources: path] {
+    let partial = (mktemp -t "local-studio-icon.XXXXXX")
+    ^xcrun actool ($package | path join "AppIcon.icon") --compile $resources --platform macosx --minimum-deployment-target 26.0 --app-icon AppIcon --output-partial-info-plist $partial --output-format human-readable-text | ignore
+    rm -f $partial
 }
 
 def build-kit [repo: path, package: path, profile: string] {
@@ -80,10 +72,6 @@ def main [
         "Release" => "release"
         _ => { error make { msg: $"unknown configuration ($configuration); expected Debug or Release" } }
     }
-    let icon_source = match $configuration {
-        "Debug" => "assets/dev/blueprint-macos-1024.png"
-        _ => "assets/prod/black-macos-1024.png"
-    }
     let developer = (developer-dir)
     let sdk = (with-env { DEVELOPER_DIR: $developer } { ^xcrun --sdk macosx --show-sdk-path | str trim })
     let sdk_version = (with-env { DEVELOPER_DIR: $developer } { ^xcrun --sdk macosx --show-sdk-version | str trim })
@@ -100,7 +88,7 @@ def main [
         mkdir ($contents | path join "MacOS") ($contents | path join "Resources")
         cp ($products | path join "LocalStudio") $executable
         cp ($package | path join "LocalStudio-Info.plist") ($contents | path join "Info.plist")
-        make-icon ($repo | path join $icon_source) ($contents | path join "Resources" "AppIcon.icns")
+        compile-icon $package ($contents | path join "Resources")
         bundle-controller $repo ($contents | path join "Resources" "controller")
         for resource in (glob ($package | path join "Resources" "*")) {
             cp $resource ($contents | path join "Resources")
