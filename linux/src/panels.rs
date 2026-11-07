@@ -7,8 +7,18 @@ use local_studio_core::{DiffLineKind, DiffScope, FileDiff};
 use vte::prelude::*;
 
 use crate::app::App;
+use crate::surfaces::{AgentsSurface, BrowserSurface, DevicesSurface, FilesSurface, PullsSurface};
 
 const SCOPES: [&str; 3] = ["Working tree", "Branch changes", "Latest turn"];
+const TABS: [(&str, &str, &str); 7] = [
+    ("diff", "view-dual-symbolic", "Diff (Ctrl+D)"),
+    ("files", "folder-symbolic", "Files"),
+    ("terminal", "utilities-terminal-symbolic", "Terminal (Ctrl+J)"),
+    ("pulls", "preferences-system-sharing-symbolic", "Pull Requests"),
+    ("agents", "avatar-default-symbolic", "Agents"),
+    ("devices", "phone-symbolic", "Devices"),
+    ("browser", "web-browser-symbolic", "Browser"),
+];
 const PALETTE: [&str; 16] = [
     "#1c1c1e", "#f85149", "#3fb950", "#d29922", "#6e9cf7", "#bc8cff", "#39c5cf", "#c9d1d9", "#6e7681", "#ff7b72",
     "#56d364", "#e3b341", "#8fb2ff", "#d2a8ff", "#56d4dd", "#f0f6fc",
@@ -26,6 +36,11 @@ pub struct Panel {
     terminal_id: RefCell<Option<String>>,
     terminal_request: RefCell<Option<String>>,
     terminal_size: Cell<(i64, i64)>,
+    pub files: FilesSurface,
+    pub pulls: PullsSurface,
+    pub agents: AgentsSurface,
+    pub devices: DevicesSurface,
+    pub browser: BrowserSurface,
     app: Weak<App>,
 }
 
@@ -34,13 +49,15 @@ impl Panel {
     pub fn new(app: Weak<App>) -> Self {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.add_css_class("ls-panel");
-        root.set_size_request(420, -1);
+        root.set_size_request(440, -1);
         root.set_visible(false);
         let tabs = adw::ToggleGroup::new();
-        tabs.add(adw::Toggle::builder().name("diff").label("Diff").build());
-        tabs.add(adw::Toggle::builder().name("terminal").label("Terminal").build());
+        for (name, icon, tooltip) in TABS {
+            tabs.add(adw::Toggle::builder().name(name).icon_name(icon).tooltip(tooltip).build());
+        }
         tabs.set_active_name(Some("diff"));
         tabs.add_css_class("round");
+        tabs.add_css_class("flat");
         let refresh = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text("Refresh").build();
         refresh.add_css_class("flat");
         let close = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Close Panel").build();
@@ -116,9 +133,19 @@ impl Panel {
         }
         terminal.set_font(Some(&gtk::pango::FontDescription::from_string("Monospace 10")));
 
+        let files = FilesSurface::new(&app);
+        let pulls = PullsSurface::new(&app);
+        let agents = AgentsSurface::new();
+        let devices = DevicesSurface::new(&app);
+        let browser = BrowserSurface::new();
         let stack = gtk::Stack::new();
         stack.add_named(&diff_page, Some("diff"));
+        stack.add_named(&files.root, Some("files"));
         stack.add_named(&terminal, Some("terminal"));
+        stack.add_named(&pulls.root, Some("pulls"));
+        stack.add_named(&agents.root, Some("agents"));
+        stack.add_named(&devices.root, Some("devices"));
+        stack.add_named(&browser.root, Some("browser"));
         root.append(&bar);
         root.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         root.append(&stack);
@@ -184,6 +211,11 @@ impl Panel {
             terminal_id: RefCell::new(None),
             terminal_request: RefCell::new(None),
             terminal_size: Cell::new((0, 0)),
+            files,
+            pulls,
+            agents,
+            devices,
+            browser,
             app,
         }
     }
@@ -197,6 +229,10 @@ impl Panel {
         self.show(tab);
     }
 
+    pub fn showing(&self, tab: &str) -> bool {
+        self.root.is_visible() && self.tabs.active_name().is_some_and(|name| name == tab)
+    }
+
     pub fn show(&self, tab: &str) {
         self.root.set_visible(true);
         let current = self.tabs.active_name().map(|name| name.to_string()).unwrap_or_default();
@@ -208,6 +244,8 @@ impl Panel {
         }
         if tab == "terminal" {
             self.terminal.grab_focus();
+        } else if tab == "browser" {
+            self.browser.focus();
         }
     }
 
@@ -218,8 +256,13 @@ impl Panel {
             (state.workspace_dir(), state.selected.clone())
         };
         let Some(dir) = dir else {
-            if tab == "diff" {
-                self.show_message("Open a project thread to see its changes.");
+            match tab {
+                "diff" => self.show_message("Open a project thread to see its changes."),
+                "agents" => self.agents.render(&app),
+                "devices" => self.devices.refresh(&app),
+                "files" => self.files.failed("Open a project thread to browse its files."),
+                "pulls" => self.pulls.failed("Open a project thread to see its pull requests."),
+                _ => {}
             }
             return;
         };
@@ -255,6 +298,10 @@ impl Panel {
                 let rows = u16::try_from(self.terminal.row_count()).unwrap_or(24);
                 app.core.run(|studio| studio.open_terminal(request, dir, cols, rows));
             }
+            "files" => self.files.open(&app, force),
+            "pulls" => self.pulls.open(&app, force),
+            "agents" => self.agents.render(&app),
+            "devices" => self.devices.refresh(&app),
             _ => {}
         }
     }

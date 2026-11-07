@@ -73,11 +73,14 @@
               pkgs.libadwaita
               pkgs.glib
               pkgs.vte-gtk4
+              pkgs.webkitgtk_6_0
+              pkgs.glib-networking
               pkgs.adwaita-icon-theme
               pkgs.hicolor-icon-theme
               pkgs.gsettings-desktop-schemas
             ];
             env.FONTCONFIG_FILE = "${fonts}";
+            env.GIO_EXTRA_MODULES = "${pkgs.glib-networking}/lib/gio/modules";
             shellHook = ''
               export XDG_DATA_DIRS="${
                 lib.concatMapStringsSep ":" (pkg: "${pkg}/share/gsettings-schemas/${pkg.name}") schemas
