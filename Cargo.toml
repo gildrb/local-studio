@@ -22,6 +22,8 @@ ignore = "0.4"
 notify = "8"
 portable-pty = "0.9"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+syntect = { version = "5.3", default-features = false, features = ["parsing", "regex-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -36,3 +38,21 @@ missing_errors_doc = "allow"
 [profile.release]
 lto = "thin"
 codegen-units = 4
+
+[profile.dev.package.syntect]
+opt-level = 3
+
+[profile.dev.package.fancy-regex]
+opt-level = 3
+
+[profile.dev.package.regex-automata]
+opt-level = 3
+
+[profile.dev.package.regex-syntax]
+opt-level = 3
+
+[profile.dev.package.bincode]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3

@@ -21,6 +21,8 @@ ignore.workspace = true
 notify.workspace = true
 portable-pty.workspace = true
 reqwest.workspace = true
+syntect.workspace = true
+two-face.workspace = true
 uniffi = { workspace = true, optional = true }
 
 [lints]

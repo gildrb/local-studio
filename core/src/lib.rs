@@ -1,6 +1,7 @@
 #![cfg_attr(feature = "ffi", allow(unsafe_code))]
 
 mod daemon;
+mod highlight;
 mod images;
 mod model;
 mod oneshot;
@@ -12,6 +13,7 @@ mod threads;
 mod transcript;
 mod workspace;
 
+pub use highlight::{highlight, highlight_lines, CodeSegment, SyntaxKind};
 pub use model::{
     AccessMode, Approval, ApprovalAnswer, Block, CommandKind, Connection, ContextUsage, Delivery, FileChange, Goal,
     ImageAttachment, ImageThumbnail, Item, ItemKind, ModelKey, ModelOption, ModelRef, NoticeLevel, NotificationKind,

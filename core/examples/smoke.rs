@@ -7,10 +7,11 @@ use anyhow::{bail, Context};
 use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
-    AccessMode, ApprovalAnswer, Block, CommandKind, Connection, DaemonLaunch, Delivery, FollowUpBehavior,
-    ImageAttachment, Item, ItemKind, ModelKey, ModelOption, NotificationKind, Project, PromptDraft, ResponseStreaming,
-    Settings, Shelf, SkillEntry, SkillSource, SlashCommand, Studio, StudioConfig, ThreadRow, ThreadSearchHit,
-    ThreadSettings, ThreadStatus, ToolState, TranscriptOp, Update, Waker, WorktreeChoice,
+    highlight, highlight_lines, AccessMode, ApprovalAnswer, Block, CodeSegment, CommandKind, Connection, DaemonLaunch,
+    Delivery, FollowUpBehavior, ImageAttachment, Item, ItemKind, ModelKey, ModelOption, NotificationKind, Project,
+    PromptDraft, ResponseStreaming, Settings, Shelf, SkillEntry, SkillSource, SlashCommand, Studio, StudioConfig,
+    SyntaxKind, ThreadRow, ThreadSearchHit, ThreadSettings, ThreadStatus, ToolState, TranscriptOp, Update, Waker,
+    WorktreeChoice,
 };
 use serde_json::Map;
 
@@ -323,6 +324,7 @@ fn main() -> anyhow::Result<()> {
     if first.as_os_str() == "--stop" {
         return stop_daemon(&PathBuf::from(args.next().context(usage)?));
     }
+    check_highlight()?;
     let daemon = first;
     let root = PathBuf::from(args.next().context(usage)?);
     let agent_dir = root.join("agent");
@@ -368,6 +370,83 @@ fn main() -> anyhow::Result<()> {
     outcome?;
     stopped?;
     println!("PASS core smoke");
+    Ok(())
+}
+
+fn kind_of(segments: &[CodeSegment], text: &str) -> Option<SyntaxKind> {
+    segments.iter().find(|segment| segment.text == text).map(|segment| segment.kind)
+}
+
+fn expect_kinds(label: &str, segments: &[CodeSegment], expected: &[(&str, SyntaxKind)]) -> anyhow::Result<()> {
+    for (text, kind) in expected {
+        let found = kind_of(segments, text);
+        if found != Some(*kind) {
+            bail!("{label}: {text:?} highlighted as {found:?}, expected {kind:?}");
+        }
+    }
+    Ok(())
+}
+
+fn check_highlight() -> anyhow::Result<()> {
+    let rust = "use std::fmt;\n// note\npub fn add(left: i32, name: &str) -> Option<String> {\n    let total = 42;\n    println!(\"sum {}\", total);\n    self.count += 1;\n    None\n}\n";
+    let segments = highlight(rust.to_string(), Some("rs".to_string()), None);
+    if segments.iter().map(|segment| segment.text.as_str()).collect::<String>() != rust {
+        bail!("rust highlight does not cover the input");
+    }
+    expect_kinds(
+        "rust",
+        &segments,
+        &[
+            ("use", SyntaxKind::Keyword),
+            ("// note\n", SyntaxKind::Comment),
+            ("fn", SyntaxKind::Keyword),
+            ("add", SyntaxKind::Function),
+            ("left", SyntaxKind::Parameter),
+            ("i32", SyntaxKind::Type),
+            ("Option", SyntaxKind::Type),
+            ("42", SyntaxKind::Number),
+            ("println!", SyntaxKind::Function),
+            ("\"sum ", SyntaxKind::String),
+            ("self", SyntaxKind::Builtin),
+            ("+=", SyntaxKind::Operator),
+            ("{", SyntaxKind::Punctuation),
+        ],
+    )?;
+    let typescript = "// greet\nexport interface User { name: string; age: number }\nconst greet = (user: User): string => `hi ${user.name}`;\nconsole.log(greet({ name: \"a\", age: 3 }), true);\n";
+    let segments = highlight(typescript.to_string(), Some("ts".to_string()), None);
+    expect_kinds(
+        "typescript",
+        &segments,
+        &[
+            ("// greet", SyntaxKind::Comment),
+            ("export", SyntaxKind::Keyword),
+            ("interface", SyntaxKind::Keyword),
+            ("User", SyntaxKind::Type),
+            ("name", SyntaxKind::Property),
+            ("string", SyntaxKind::Type),
+            ("greet", SyntaxKind::Function),
+            ("user", SyntaxKind::Parameter),
+            ("=>", SyntaxKind::Operator),
+            ("\"a\"", SyntaxKind::String),
+            ("3", SyntaxKind::Number),
+            ("true", SyntaxKind::Constant),
+        ],
+    )?;
+    let unknown = "frobnicate the widgets\n";
+    let segments = highlight(unknown.to_string(), Some("zzz-unknown".to_string()), None);
+    if segments != [CodeSegment { text: unknown.to_string(), kind: SyntaxKind::Plain }] {
+        bail!("unknown language was not plain: {segments:?}");
+    }
+    let lines = highlight_lines(
+        vec!["/* open".to_string(), "still */ let x = 1;".to_string()],
+        None,
+        Some("web/app.js".to_string()),
+    );
+    let continued = lines.get(1).and_then(|line| line.first()).map(|segment| (segment.text.as_str(), segment.kind));
+    if continued != Some(("still */", SyntaxKind::Comment)) {
+        bail!("highlight_lines lost the comment state: {lines:?}");
+    }
+    println!("ok   highlight: rust and typescript kinds, unknown language plain, line state carried");
     Ok(())
 }
 
