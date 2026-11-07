@@ -13,6 +13,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate {
     private(set) var loading = false
     private(set) var failure: String?
     private(set) var zoom: CGFloat = 1
+    private(set) var focusRequest = 0
 
     @ObservationIgnored let webView: WKWebView
 
@@ -59,6 +60,10 @@ final class BrowserModel: NSObject, WKNavigationDelegate {
 
     func stop() {
         webView.stopLoading()
+    }
+
+    func focusAddress() {
+        focusRequest += 1
     }
 
     func openExternally() {
@@ -122,6 +127,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate {
 
 struct BrowserSurfaceView: View {
     @Bindable var model: BrowserModel
+    let panels: PanelState
     @FocusState private var addressFocused: Bool
 
     var body: some View {
@@ -129,7 +135,7 @@ struct BrowserSurfaceView: View {
             PanelToolbar {
                 PanelIconButton("Back", symbol: "chevron.left", enabled: model.canGoBack) { model.back() }
                 PanelIconButton("Forward", symbol: "chevron.right", enabled: model.canGoForward) { model.forward() }
-                PanelIconButton(model.loading ? "Stop" : "Reload", symbol: model.loading ? "xmark" : "arrow.clockwise") { model.reload() }
+                PanelIconButton(model.loading ? "Stop" : "Reload (⌘R)", symbol: model.loading ? "xmark" : "arrow.clockwise") { model.reload() }
                 TextField("Search or enter address", text: $model.address)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5))
@@ -139,6 +145,9 @@ struct BrowserSurfaceView: View {
                     .padding(.horizontal, 9)
                     .frame(height: 26)
                     .background(Theme.input.opacity(0.7), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                PanelIconButton("Float Preview", symbol: "pip.enter", enabled: model.current != nil) {
+                    panels.float(model)
+                }
                 PanelMenuButton(title: "Browser Options", symbol: "ellipsis") {
                     Button("Zoom In") { model.setZoom(model.zoom + 0.1) }
                     Button("Zoom Out") { model.setZoom(model.zoom - 0.1) }
@@ -146,35 +155,159 @@ struct BrowserSurfaceView: View {
                         .disabled(model.zoom == 1)
                     Divider()
                     Button("Focus Address Bar") { addressFocused = true }
+                    Button("Float Preview") { panels.float(model) }
+                        .disabled(model.current == nil)
                     Button("Open in Default Browser") { model.openExternally() }
                         .disabled(model.current == nil)
                 }
             }
-            ZStack {
-                BrowserWebView(webView: model.webView)
-                    .opacity(model.current == nil ? 0 : 1)
-                if let failure = model.failure {
-                    Theme.canvas
-                    PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t open this page.", detail: failure, actionTitle: "Try Again") { model.reload() }
-                } else if model.current == nil {
-                    PanelMessage(symbol: "globe", title: "Preview a page", detail: "Enter a URL, such as localhost:3000, to open it here.")
-                }
-            }
+            BrowserContent(model: model)
         }
         .onAppear {
             if model.current == nil {
                 addressFocused = true
             }
         }
+        .onChange(of: model.focusRequest) { addressFocused = true }
+    }
+}
+
+struct BrowserContent: View {
+    let model: BrowserModel
+
+    var body: some View {
+        ZStack {
+            BrowserWebView(webView: model.webView)
+                .opacity(model.current == nil ? 0 : 1)
+            if let failure = model.failure {
+                Theme.canvas
+                PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t open this page.", detail: failure, actionTitle: "Try Again") { model.reload() }
+            } else if model.current == nil, model.loading {
+                PanelMessage(symbol: "clock", title: "Loading \(model.address)…")
+            } else if model.current == nil {
+                PanelMessage(symbol: "globe", title: "Preview a page", detail: "Enter a URL, such as localhost:3000, to open it here.")
+            }
+        }
+    }
+}
+
+struct PreviewMiniPlayerView: View {
+    let store: StudioStore
+    @State private var dragOrigin: CGSize?
+    @State private var resizeOrigin: CGFloat?
+    @State private var hovering = false
+
+    private var panels: PanelState { store.workspace.panels }
+
+    var body: some View {
+        GeometryReader { proxy in
+            if let model = panels.visibleMiniPlayer {
+                let width = min(max(panels.miniPlayerWidth, PanelState.miniPlayerMinimumWidth), max(proxy.size.width - 24, PanelState.miniPlayerMinimumWidth))
+                let height = width * 0.625 + 30
+                let maxX = max(proxy.size.width - width - 12, 12)
+                let maxY = max(proxy.size.height - height - 12, 12)
+                let origin = CGPoint(
+                    x: min(max(maxX + panels.miniPlayerOffset.width, 12), maxX),
+                    y: min(max(maxY + panels.miniPlayerOffset.height, 12), maxY)
+                )
+                VStack(spacing: 0) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 11, weight: .light))
+                            .foregroundStyle(Theme.chromeIcon)
+                            .accessibilityHidden(true)
+                        Text(model.tabTitle)
+                            .font(.system(size: 11.5))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        PanelIconButton("Open in Right Panel", symbol: "arrow.up.left.and.arrow.down.right") {
+                            panels.dock(model)
+                        }
+                        PanelIconButton("Close Floating Preview", symbol: "xmark") {
+                            panels.closeMiniPlayer()
+                        }
+                    }
+                    .padding(.leading, 9)
+                    .padding(.trailing, 2)
+                    .frame(height: 30)
+                    .background(Theme.card)
+                    .contentShape(Rectangle())
+                    .gesture(move(maxX: maxX, maxY: maxY))
+                    BrowserContent(model: model)
+                }
+                .frame(width: width, height: height)
+                .background(Theme.canvas)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.selectionStroke, lineWidth: 0.8))
+                .shadow(color: .black.opacity(0.28), radius: 18, y: 6)
+                .overlay(alignment: .topLeading) {
+                    Color.clear
+                        .frame(width: 14, height: 14)
+                        .contentShape(Rectangle())
+                        .onHover { inside in
+                            if inside { NSCursor.crosshair.push() } else { NSCursor.pop() }
+                        }
+                        .gesture(resize)
+                        .accessibilityHidden(true)
+                }
+                .offset(x: origin.x, y: origin.y)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel("Floating browser preview")
+            }
+        }
+        .transaction { $0.disablesAnimations = true }
+    }
+
+    private func move(maxX: CGFloat, maxY: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .global)
+            .onChanged { value in
+                let origin = dragOrigin ?? panels.miniPlayerOffset
+                dragOrigin = origin
+                panels.miniPlayerOffset = CGSize(
+                    width: min(max(origin.width + value.translation.width, 12 - maxX), 0),
+                    height: min(max(origin.height + value.translation.height, 12 - maxY), 0)
+                )
+            }
+            .onEnded { _ in dragOrigin = nil }
+    }
+
+    private var resize: some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+            .onChanged { value in
+                let origin = resizeOrigin ?? panels.miniPlayerWidth
+                resizeOrigin = origin
+                panels.miniPlayerWidth = min(max(origin - value.translation.width, PanelState.miniPlayerMinimumWidth), 900)
+            }
+            .onEnded { _ in resizeOrigin = nil }
     }
 }
 
 private struct BrowserWebView: NSViewRepresentable {
     let webView: WKWebView
 
-    func makeNSView(context: Context) -> WKWebView {
-        webView
+    func makeNSView(context: Context) -> NSView {
+        let host = NSView()
+        adopt(into: host)
+        return host
     }
 
-    func updateNSView(_ nsView: WKWebView, context: Context) {}
+    func updateNSView(_ host: NSView, context: Context) {
+        if webView.superview !== host {
+            adopt(into: host)
+        }
+    }
+
+    static func dismantleNSView(_ host: NSView, coordinator: ()) {
+        for view in host.subviews {
+            view.removeFromSuperview()
+        }
+    }
+
+    private func adopt(into host: NSView) {
+        webView.removeFromSuperview()
+        webView.frame = host.bounds
+        webView.autoresizingMask = [.width, .height]
+        host.addSubview(webView)
+    }
 }

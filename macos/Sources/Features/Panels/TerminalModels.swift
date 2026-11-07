@@ -57,6 +57,27 @@ final class TerminalSession: Identifiable {
         return "Terminal \(ordinal)"
     }
 
+    func recentOutput(lines limit: Int = 80) -> String {
+        let tail = buffer.suffix(64 * 1024)
+        let raw = String(bytes: tail, encoding: .utf8) ?? String(bytes: tail, encoding: .isoLatin1) ?? ""
+        let plain = raw
+            .replacingOccurrences(of: #"\x{1B}\[[0-?]*[ -/]*[@-~]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\x{1B}\][^\x{07}\x{1B}]*(\x{07}|\x{1B}\\)"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\x{1B}[@-_]"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "\r\n", with: "\n")
+        let rows = plain.split(separator: "\n", omittingEmptySubsequences: false).map { row in
+            String(row.split(separator: "\r", omittingEmptySubsequences: false).last ?? "")
+        }
+        var kept = Array(rows.suffix(limit))
+        while kept.last?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            kept.removeLast()
+        }
+        while kept.first?.trimmingCharacters(in: .whitespaces).isEmpty == true {
+            kept.removeFirst()
+        }
+        return kept.joined(separator: "\n")
+    }
+
     var text: String {
         String(bytes: buffer, encoding: .utf8) ?? String(bytes: buffer, encoding: .isoLatin1) ?? ""
     }

@@ -191,6 +191,20 @@ extension SnapshotCatalog {
             drawerEntry("drawer-noproject", updates: []) { store in
                 store.workspace.panels.terminalOpen = true
             },
+            SnapshotEntry(name: "panels-miniplayer", size: CGSize(width: 900, height: 560), updates: PanelFixtures.base) { store in
+                let panels = store.workspace.panels
+                panels.openSurface(.browser)
+                if case .browser(let model) = panels.activeContent?.content {
+                    model.address = "localhost:5173"
+                    model.go()
+                    panels.float(model)
+                }
+                return AnyView(ZStack {
+                    Theme.canvas
+                    PanelMessage(symbol: "bubble.left.and.text.bubble.right", title: "Thread", detail: "The floating preview stays above the chat column.")
+                    PreviewMiniPlayerView(store: store)
+                })
+            },
         ]
     }
 

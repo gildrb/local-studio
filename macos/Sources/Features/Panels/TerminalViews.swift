@@ -297,6 +297,7 @@ private struct TerminalPane: NSViewRepresentable {
         context.coordinator.scheme = colorScheme
         context.coordinator.actions = actions
         context.coordinator.attach(view)
+        view.menu = context.coordinator.contextMenu(for: view)
         return view
     }
 
@@ -342,7 +343,7 @@ private struct TerminalPane: NSViewRepresentable {
 }
 
 @MainActor
-final class TerminalPaneCoordinator: TerminalViewDelegate {
+final class TerminalPaneCoordinator: NSObject, TerminalViewDelegate {
     let session: TerminalSession
     var actions: TerminalActions?
     var scheme: SwiftUI.ColorScheme?
@@ -351,6 +352,28 @@ final class TerminalPaneCoordinator: TerminalViewDelegate {
 
     init(session: TerminalSession) {
         self.session = session
+    }
+
+    func contextMenu(for view: PaneTerminalView) -> NSMenu {
+        let menu = NSMenu()
+        let copy = NSMenuItem(title: "Copy", action: #selector(TerminalView.copy(_:)), keyEquivalent: "")
+        copy.target = view
+        menu.addItem(copy)
+        let paste = NSMenuItem(title: "Paste", action: #selector(TerminalView.paste(_:)), keyEquivalent: "")
+        paste.target = view
+        menu.addItem(paste)
+        menu.addItem(.separator())
+        let selectAll = NSMenuItem(title: "Copy Recent Output", action: #selector(copyRecentOutput), keyEquivalent: "")
+        selectAll.target = self
+        menu.addItem(selectAll)
+        return menu
+    }
+
+    @objc private func copyRecentOutput() {
+        let text = session.recentOutput()
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     func attach(_ view: PaneTerminalView) {
