@@ -22,6 +22,7 @@ pub fn install(app: &Rc<App>) {
     install_window(app);
     install_threads(app);
     install_global(app);
+    crate::commands::install(app);
 }
 
 fn install_window(app: &Rc<App>) {
@@ -84,11 +85,19 @@ fn install_threads(app: &Rc<App>) {
                 );
                 return;
             }
-            app.core.run(|studio| studio.set_pinned(id, !pinned));
+            app.core.run(|studio| studio.set_pinned(id.clone(), !pinned));
+            undoable(app, if pinned { "Thread unpinned" } else { "Thread pinned" }, move |app| {
+                let id = id.clone();
+                app.core.run(|studio| studio.set_pinned(id, pinned));
+            });
         }),
         ("thread-settle", |app, id| {
             let settled = app.shelf_of(&id) == Some(Shelf::Settled);
-            app.core.run(|studio| studio.set_settled(id, !settled));
+            app.core.run(|studio| studio.set_settled(id.clone(), !settled));
+            undoable(app, if settled { "Thread un-settled" } else { "Thread settled" }, move |app| {
+                let id = id.clone();
+                app.core.run(|studio| studio.set_settled(id, settled));
+            });
         }),
         ("thread-wake", |app, id| app.core.run(|studio| studio.snooze(id, None))),
         ("thread-unread", |app, id| {
@@ -116,7 +125,11 @@ fn install_threads(app: &Rc<App>) {
     for (index, (name, _)) in SNOOZES.iter().enumerate() {
         add_string_action(app, name, move |app, id| {
             let until = snooze_until(index);
-            app.core.run(|studio| studio.snooze(id, Some(until)));
+            app.core.run(|studio| studio.snooze(id.clone(), Some(until)));
+            undoable(app, "Thread snoozed", move |app| {
+                let id = id.clone();
+                app.core.run(|studio| studio.snooze(id, None));
+            });
         });
     }
     add_string_action(app, "project-filter", |app, project| {
@@ -265,6 +278,15 @@ pub fn thread_menu(state: &State, id: &str) -> gio::Menu {
         }
         first.append_submenu(Some("Snooze"), &snooze);
     }
+    if pinned {
+        item(&first, "Move Up", "thread-move-up");
+        item(&first, "Move Down", "thread-move-down");
+    }
+    let auto = gio::Menu::new();
+    let auto_settle = row.is_none_or(|row| row.auto_settle);
+    item(&auto, if auto_settle { "Enabled ✓" } else { "Enabled" }, "thread-auto-settle-on");
+    item(&auto, if auto_settle { "Disabled" } else { "Disabled ✓" }, "thread-auto-settle-off");
+    first.append_submenu(Some("Auto-settle"), &auto);
     menu.append_section(None, &first);
     let second = gio::Menu::new();
     item(&second, "Rename Thread…", "thread-rename");
@@ -344,7 +366,7 @@ fn rename(app: &Rc<App>, id: String) {
 fn archive(app: &Rc<App>, id: String) {
     let confirm = app.state.borrow().settings.confirm_archive;
     if !confirm {
-        app.core.run(|studio| studio.set_archived(id, true));
+        archive_now(app, id);
         return;
     }
     confirm_action(
@@ -353,11 +375,30 @@ fn archive(app: &Rc<App>, id: String) {
         "You can restore it from Settings → Archive.",
         "Archive",
         false,
-        move |app| {
-            let id = id.clone();
-            app.core.run(|studio| studio.set_archived(id, true));
-        },
+        move |app| archive_now(app, id.clone()),
     );
+}
+
+fn archive_now(app: &Rc<App>, id: String) {
+    app.core.run(|studio| studio.set_archived(id.clone(), true));
+    undoable(app, "Thread archived", move |app| {
+        let id = id.clone();
+        app.core.run(|studio| studio.set_archived(id, false));
+    });
+}
+
+pub fn undoable(app: &Rc<App>, text: &str, undo: impl Fn(&Rc<App>) + 'static) {
+    let undo: crate::app::Hook = Rc::new(undo);
+    app.undo.replace(Some(Rc::clone(&undo)));
+    let toast = adw::Toast::builder().title(text).button_label("Undo").timeout(5).build();
+    let weak = Rc::downgrade(app);
+    toast.connect_button_clicked(move |_| {
+        if let Some(app) = weak.upgrade() {
+            app.undo.replace(None);
+            undo(&app);
+        }
+    });
+    app.toasts.add_toast(toast);
 }
 
 fn delete(app: &Rc<App>, id: String) {

@@ -116,7 +116,7 @@ impl SettingsDialog {
             );
         }
         for provider in &state.providers {
-            let row = adw::ActionRow::builder()
+            let row = adw::ExpanderRow::builder()
                 .title(format::escape(&provider.name))
                 .subtitle(format!("{} models · {}", provider.model_count, provider.id))
                 .build();
@@ -127,6 +127,9 @@ impl SettingsDialog {
             }
             status.set_valign(gtk::Align::Center);
             row.add_suffix(&status);
+            for model in state.models.iter().filter(|model| model.provider == provider.id) {
+                row.add_row(&model_row(app, state, model));
+            }
             group.add(&row);
         }
         self.inner.providers_page.add(&group);
@@ -157,6 +160,20 @@ impl SettingsDialog {
                 None => row.add_suffix(&dim("Unbound")),
             }
             let customized = binding.shortcut != binding.default_shortcut;
+            let record = gtk::Button::builder()
+                .icon_name("input-keyboard-symbolic")
+                .tooltip_text("Record Shortcut")
+                .valign(gtk::Align::Center)
+                .build();
+            record.add_css_class("flat");
+            let weak = app.clone();
+            let (command, title) = (binding.command.clone(), binding.title.clone());
+            record.connect_clicked(move |_| {
+                if let Some(app) = weak.upgrade() {
+                    crate::commands::record_shortcut(&app, command.clone(), &title);
+                }
+            });
+            row.add_suffix(&record);
             let button = gtk::Button::builder()
                 .icon_name(if customized { "edit-undo-symbolic" } else { "edit-clear-symbolic" })
                 .tooltip_text(if customized { "Reset to Default" } else { "Remove" })
@@ -1124,6 +1141,47 @@ fn local_page(app: &Weak<App>) -> adw::PreferencesPage {
         },
     );
     page
+}
+
+fn model_row(app: &Weak<App>, state: &State, model: &ModelOption) -> adw::ActionRow {
+    let key = |known: &&local_studio_core::ModelKey| known.provider == model.provider && known.model == model.id;
+    let favorite = state.favorites.iter().any(|known| key(&known));
+    let hidden = state.hidden.iter().any(|known| key(&known));
+    let row = adw::ActionRow::builder()
+        .title(format::escape(if model.name.is_empty() { &model.id } else { &model.name }))
+        .subtitle(format::escape(&format!("{} · {} context", model.id, format::tokens(model.context_window))))
+        .build();
+    let star = gtk::ToggleButton::builder()
+        .icon_name(if favorite { "starred-symbolic" } else { "non-starred-symbolic" })
+        .tooltip_text("Favorite")
+        .active(favorite)
+        .valign(gtk::Align::Center)
+        .build();
+    star.add_css_class("flat");
+    let weak = app.clone();
+    let (provider, id) = (model.provider.clone(), model.id.clone());
+    star.connect_toggled(move |star| {
+        if let Some(app) = weak.upgrade() {
+            let (provider, id, on) = (provider.clone(), id.clone(), star.is_active());
+            app.core.run(|studio| studio.set_favorite_model(provider, id, on));
+        }
+    });
+    let visible = gtk::Switch::builder()
+        .active(!hidden)
+        .valign(gtk::Align::Center)
+        .tooltip_text("Show in the model picker")
+        .build();
+    let weak = app.clone();
+    let (provider, id) = (model.provider.clone(), model.id.clone());
+    visible.connect_active_notify(move |switch| {
+        if let Some(app) = weak.upgrade() {
+            let (provider, id, hidden) = (provider.clone(), id.clone(), !switch.is_active());
+            app.core.run(|studio| studio.set_hidden_model(provider, id, hidden));
+        }
+    });
+    row.add_suffix(&star);
+    row.add_suffix(&visible);
+    row
 }
 
 fn dim(text: &str) -> gtk::Label {
