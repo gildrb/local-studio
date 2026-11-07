@@ -10,16 +10,57 @@ struct TimelineRowView: View, Equatable {
     }
 
     var body: some View {
-        switch row {
-        case .entry(let entry, let hidesThinking):
-            TimelineEntryView(entry: entry, hidesThinking: hidesThinking, store: store)
-        case .tools(let entries):
-            ToolGroupView(entries: entries, store: store)
-        case .fold(let entry, let expanded):
-            TurnFoldRow(entry: entry, expanded: expanded) {
-                store.conversation.toggleFold(entry.id)
+        Group {
+            switch row {
+            case .entry(let entry, let hidesThinking):
+                TimelineEntryView(entry: entry, hidesThinking: hidesThinking, store: store)
+            case .tools(let entries):
+                ToolGroupView(entries: entries, store: store)
+            case .fold(let entry, let expanded):
+                TurnFoldRow(entry: entry, expanded: expanded) {
+                    store.conversation.toggleFold(entry.id)
+                }
             }
         }
+        .modifier(SelectionOnHover())
+    }
+}
+
+private struct SelectionOnHover: ViewModifier {
+    @Environment(\.timelineLive) private var live
+    @State private var active = false
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.selectableText, active)
+            .onHover { inside in
+                if inside, !active {
+                    active = true
+                }
+            }
+            .onChange(of: live) { _, live in
+                if !live, active {
+                    active = false
+                }
+            }
+    }
+}
+
+private struct SelectableTextModifier: ViewModifier {
+    @Environment(\.selectableText) private var selectable
+
+    func body(content: Content) -> some View {
+        if selectable {
+            content.textSelection(.enabled)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func selectableText() -> some View {
+        modifier(SelectableTextModifier())
     }
 }
 
@@ -78,7 +119,7 @@ private struct UserBubble: View {
                         .font(.system(size: 13.5))
                         .lineSpacing(3)
                         .lineLimit(collapsible && !expanded ? 14 : nil)
-                        .textSelection(.enabled)
+                        .selectableText()
                         .fixedSize(horizontal: false, vertical: true)
                     if collapsible {
                         Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
@@ -138,6 +179,8 @@ private struct UserMessageEditButton: View {
 extension EnvironmentValues {
     @Entry var responseStreaming: ResponseStreaming = .paragraph
     @Entry var timeFormat: TimeFormat = .locale
+    @Entry var selectableText = true
+    @Entry var timelineLive = true
 }
 
 private struct TimestampText: View {
@@ -198,7 +241,7 @@ private struct AssistantMessage: View {
             }
             if let error {
                 Label {
-                    Text(error).textSelection(.enabled)
+                    Text(error).selectableText()
                 } icon: {
                     Image(systemName: "exclamationmark.triangle").accessibilityHidden(true)
                 }
@@ -529,7 +572,7 @@ private struct ToolOutput: View {
                 .foregroundStyle(Theme.codeText)
                 .font(.system(size: 11.5, design: .monospaced))
                 .lineSpacing(2)
-                .textSelection(.enabled)
+                .selectableText()
                 .fixedSize()
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -727,7 +770,7 @@ private struct NoticeRow: View {
                 .font(.system(size: 12, weight: .light))
                 .accessibilityHidden(true)
             Text(text)
-                .textSelection(.enabled)
+                .selectableText()
                 .fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 12.5))

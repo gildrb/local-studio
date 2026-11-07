@@ -407,6 +407,7 @@ private struct TimelineStack: View, Equatable {
             TimelineFooter(store: store, live: current)
         }
         .scrollTargetLayout()
+        .environment(\.timelineLive, current)
         .padding(.horizontal, 20)
         .padding(.top, 24)
         .padding(.bottom, 20)
