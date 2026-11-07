@@ -8,13 +8,13 @@ use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
     AccessMode, ApprovalAnswer, Block, Connection, DaemonLaunch, Delivery, Item, ItemKind, ModelKey, ModelOption,
-    Project, PromptDraft, Shelf, Studio, StudioConfig, ThreadRow, ThreadSearchHit, ThreadSettings, ThreadStatus,
-    ToolState, TranscriptOp, Update, Waker, WorktreeChoice,
+    NotificationKind, Project, PromptDraft, Shelf, Studio, StudioConfig, ThreadRow, ThreadSearchHit, ThreadSettings,
+    ThreadStatus, ToolState, TranscriptOp, Update, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(60);
-const FAUX_SCRIPT: &str = r#"{"modelId":"faux-1","responses":[{"content":[{"type":"thinking","thinking":"planning the smoke"},{"type":"text","text":"Running the smoke command."},{"type":"toolCall","name":"bash","arguments":{"i":"run the smoke","script":"echo smoke-ok > smoke.txt && cat smoke.txt"},"id":"call-1"}]},"Done: smoke-ok","Second answer","\"Smoke Title From The Model.\""]}"#;
+const FAUX_SCRIPT: &str = r#"{"modelId":"faux-1","responses":[{"content":[{"type":"thinking","thinking":"planning the smoke"},{"type":"text","text":"Running the smoke command."},{"type":"toolCall","name":"bash","arguments":{"i":"run the smoke","script":"echo smoke-ok > smoke.txt && cat smoke.txt"},"id":"call-1"}]},"Done: smoke-ok",{"content":[{"type":"text","text":"Second answer"},{"type":"toolCall","name":"bash","arguments":{"i":"run it again","script":"echo again-ok > again.txt && cat again.txt"},"id":"call-2"}]},"Second done","\"Smoke Title From The Model.\""]}"#;
 const GENERATED_TITLE: &str = "Smoke Title From The Model";
 
 #[derive(Default)]
@@ -52,6 +52,9 @@ struct View {
     resets: HashMap<String, u32>,
     answered: HashSet<String>,
     approvals: u32,
+    always: HashSet<String>,
+    approvals_by_thread: HashMap<String, u32>,
+    done_by_thread: HashMap<String, u32>,
     composer: Vec<(String, String)>,
     models: Option<Vec<ModelOption>>,
     hidden: Vec<ModelKey>,
@@ -131,10 +134,14 @@ impl Harness {
             Update::Transcript { thread, op } => self.transcript(&thread, op)?,
             Update::Approvals { thread, approvals } => {
                 for approval in approvals {
-                    if self.view.answered.insert(approval.request_id.clone()) {
+                    if self.view.answered.insert(format!("{thread}/{}", approval.request_id)) {
                         println!("     approval {} {:?}", approval.command, approval.effects);
                         self.view.approvals += 1;
-                        self.studio.answer_approval(thread.clone(), approval.request_id, ApprovalAnswer::Approve);
+                        *self.view.approvals_by_thread.entry(thread.clone()).or_default() += 1;
+                        let always =
+                            self.view.always.iter().any(|draft| self.view.thread(draft).as_ref() == Some(&thread));
+                        let answer = if always { ApprovalAnswer::AlwaysAllowSession } else { ApprovalAnswer::Approve };
+                        self.studio.answer_approval(thread.clone(), approval.request_id, answer);
                     }
                 }
             }
@@ -143,9 +150,12 @@ impl Harness {
                 self.view.models = Some(models);
                 self.view.hidden = hidden;
             }
-            Update::Notification { kind, title, body, .. } => {
+            Update::Notification { thread, kind, title, body } => {
                 println!("     notification {kind:?} {title}: {body}");
                 self.view.notifications.push(format!("{kind:?}"));
+                if kind == NotificationKind::TurnDone {
+                    *self.view.done_by_thread.entry(thread).or_default() += 1;
+                }
             }
             Update::Notice { level, text } => println!("     notice {level:?}: {text}"),
             Update::RequestFailed { request, message } => println!("     request {request} failed: {message}"),
@@ -169,7 +179,11 @@ impl Harness {
             | Update::Providers { .. }
             | Update::Settings { .. }
             | Update::Keybindings { .. }
-            | Update::RequestDone { .. } => {}
+            | Update::RequestDone { .. }
+            | Update::ProjectScripts { .. }
+            | Update::ProjectSettings { .. }
+            | Update::WorktreeSetup { .. }
+            | Update::Daemon { .. } => {}
         }
         Ok(())
     }
@@ -503,6 +517,28 @@ fn curate(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
         view.row(&first).is_some_and(|row| row.title == GENERATED_TITLE)
     })?;
     println!("     {} Threads updates, notifications {:?}", harness.view.thread_updates, harness.view.notifications);
+    round_four(harness, ids)
+}
+
+fn round_four(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
+    let studio = Arc::clone(&harness.studio);
+    harness.view.always.insert("draft-always".to_string());
+    studio.start_thread(
+        "draft-always".to_string(),
+        Some(ids.project.clone()),
+        prompt("ask once, then allow"),
+        settings(AccessMode::Supervised),
+    );
+    harness.pump_until("always-allow thread answered", |view| {
+        view.thread("draft-always").is_some_and(|id| view.done_by_thread.get(&id) == Some(&1))
+    })?;
+    let always = harness.view.thread("draft-always").context("no always-allow thread")?;
+    studio.send(always.clone(), prompt("write again without asking"), Delivery::Queue);
+    harness.pump_until("second write finished", |view| view.done_by_thread.get(&always) == Some(&2))?;
+    if harness.view.approvals_by_thread.get(&always) != Some(&1) {
+        bail!("always-allow asked again: {:?}", harness.view.approvals_by_thread.get(&always));
+    }
+    println!("ok   always allow this session widened the effects (1 approval for 2 writes)");
     Ok(())
 }
 

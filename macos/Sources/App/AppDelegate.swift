@@ -61,6 +61,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !automated else { return .terminateNow }
+        if store.pages.settings?.quitConfirmation == .hold, Self.quitShortcutPressed() {
+            guard Self.quitShortcutHeld(for: 0.6) else {
+                store.post(.info, "Hold ⌘Q to quit Local Studio.")
+                return .terminateCancel
+            }
+        }
+        let working = store.inbox.threads.filter { $0.status == .working }.count
+        guard working > 0 else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = working == 1 ? "A thread is still working" : "\(working) threads are still working"
+        alert.informativeText = "Quit Local Studio anyway?"
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    private var automated: Bool {
+        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil
+    }
+
+    private static func quitShortcutPressed() -> Bool {
+        guard let event = NSApp.currentEvent, event.type == .keyDown else { return false }
+        return event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers?.lowercased() == "q"
+    }
+
+    private static func quitShortcutHeld(for seconds: TimeInterval) -> Bool {
+        let deadline = Date.now.addingTimeInterval(seconds)
+        while Date.now < deadline {
+            let command = CGEventSource.keyState(.combinedSessionState, key: 0x37) || CGEventSource.keyState(.combinedSessionState, key: 0x36)
+            guard command, CGEventSource.keyState(.combinedSessionState, key: 0x0C) else { return false }
+            RunLoop.current.run(until: Date.now.addingTimeInterval(0.03))
+        }
+        return true
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         monitors.forEach(NSEvent.removeMonitor)
         store.stop()

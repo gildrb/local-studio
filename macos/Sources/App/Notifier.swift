@@ -28,7 +28,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 toast(kind == .failed ? .error : .info, body.isEmpty ? heading : "\(heading): \(body)")
             }
             if context.mode == .sound || context.mode == .notificationsAndSound {
-                NSSound(named: kind == .turnDone ? "Glass" : "Ping")?.play()
+                play(kind)
             }
             return
         }
@@ -36,13 +36,29 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         case .off:
             return
         case .sound:
-            NSSound(named: kind == .turnDone ? "Glass" : "Ping")?.play()
-        case .notifications, .notificationsAndSound:
-            post(thread: thread, heading: heading, body: body, sound: context.mode == .notificationsAndSound)
+            play(kind)
+        case .notifications:
+            post(thread: thread, heading: heading, body: body)
+        case .notificationsAndSound:
+            post(thread: thread, heading: heading, body: body)
+            play(kind)
         }
     }
 
-    private func post(thread: String, heading: String, body: String, sound: Bool) {
+    private func play(_ kind: NotificationKind) {
+        let name = kind == .needsApproval ? "notification-input" : "notification-completion"
+        guard let url = Bundle.main.url(forResource: name, withExtension: "mp3") else {
+            NSSound(named: kind == .turnDone ? "Glass" : "Ping")?.play()
+            return
+        }
+        sounds[name] = sounds[name] ?? NSSound(contentsOf: url, byReference: true)
+        sounds[name]?.stop()
+        sounds[name]?.play()
+    }
+
+    private var sounds: [String: NSSound] = [:]
+
+    private func post(thread: String, heading: String, body: String) {
         guard Bundle.main.bundleIdentifier != nil else { return }
         let center = UNUserNotificationCenter.current()
         if !installed {
@@ -58,9 +74,6 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.body = body
         content.threadIdentifier = thread
         content.userInfo = ["thread": thread]
-        if sound {
-            content.sound = .default
-        }
         let request = UNNotificationRequest(identifier: "\(thread)-\(UUID().uuidString)", content: content, trigger: nil)
         Task {
             guard await authorization.value else { return }

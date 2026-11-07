@@ -200,13 +200,29 @@ struct ConnectionsSettings: View {
 
     var body: some View {
         SettingsForm {
-            SettingsSection(.daemon, footer: "Local Studio drives every thread through the Eukhe agent daemon on this Mac.") {
+            SettingsSection(.daemon, footer: "Local Studio drives every thread through the Eukhe agent daemon on this Mac, over a local Unix socket.") {
                 SettingRow(.daemonStatus) {
                     LabeledContent(SettingKey.daemonStatus.title) {
                         HStack(spacing: 6) {
                             Circle().fill(statusColor).frame(width: 7, height: 7)
                             Text(statusText)
                                 .foregroundStyle(Theme.secondaryText)
+                        }
+                    }
+                    if let daemon = store.pages.daemon {
+                        LabeledContent("Socket") {
+                            HStack {
+                                Text(daemon.socket)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .foregroundStyle(Theme.secondaryText)
+                                    .textSelection(.enabled)
+                                Button("Show in Finder") { StudioPaths.reveal(URL(filePath: daemon.socket)) }
+                            }
+                        }
+                        LabeledContent("Version", value: daemon.version ?? "Not reported")
+                        if let pid = daemon.pid {
+                            LabeledContent("Process", value: "PID \(pid)")
                         }
                     }
                     LabeledContent("Local controller") {
@@ -223,7 +239,7 @@ struct ConnectionsSettings: View {
                 SettingRow(.remoteEnvironments) {
                     SettingsNote(
                         symbol: "network",
-                        text: "Remote environments, pairing links and SSH hosts are not available yet. Other machines join through the Local fleet: connect them from Settings › Local."
+                        text: "Remote environments, pairing links, authorized clients and SSH hosts have no backend in the Eukhe daemon, which only listens on a local socket, so Local Studio cannot offer them. Other machines join through the Local fleet instead: connect them from Settings › Local."
                     )
                 }
             }
@@ -240,9 +256,9 @@ struct ConnectionsSettings: View {
 
     private var statusColor: Color {
         switch store.connection {
-        case .connecting: .orange
-        case .ready: .green
-        case .lost: .red
+        case .connecting: Theme.warning
+        case .ready: Theme.success
+        case .lost: Theme.danger
         }
     }
 }

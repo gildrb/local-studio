@@ -23,6 +23,7 @@ final class ShellSmoke {
     private var second = ""
     private var expectedPinned: [String] = []
     private var revision = 0
+    private var routed: [String] = []
 
     init(store: StudioStore) {
         self.store = store
@@ -49,6 +50,17 @@ final class ShellSmoke {
     private func makeSteps() -> [Step] {
         [
             Step(name: "connect", act: { _ in }, done: { $0.store.connection == .ready }),
+            Step(name: "onboarding offered", act: { _ in }, done: { $0.store.needsOnboarding && !$0.store.pages.keybindings.isEmpty }),
+            Step(name: "skip onboarding", act: { $0.store.completeOnboarding() }, done: { smoke in
+                smoke.store.pages.settings?.onboardingCompleted == true && !smoke.store.needsOnboarding
+            }),
+            Step(name: "router dispatch", act: { smoke in
+                smoke.store.commands.register("composer.stash", owner: smoke) { smoke.routed.append("composer.stash") }
+                smoke.store.commands.register("terminal.split", owner: smoke, enabled: { true }, perform: { smoke.routed.append("terminal.split") })
+                smoke.store.dispatch("composer.stash")
+                smoke.store.dispatch("diff.toggle")
+                smoke.store.commands.unregister(owner: smoke)
+            }, done: { $0.routed == ["composer.stash", "terminal.split"] && !$0.store.commands.isRegistered("composer.stash") }),
             Step(name: "add project", act: { smoke in
                 let home = ProcessInfo.processInfo.environment["HOME"] ?? NSTemporaryDirectory()
                 let path = URL(fileURLWithPath: home).appendingPathComponent("shell-smoke-project").path
@@ -59,6 +71,15 @@ final class ShellSmoke {
                 guard let match = smoke.store.inbox.projects.first(where: { $0.path == smoke.project || $0.id == smoke.project || $0.path.hasSuffix("/shell-smoke-project") }) else { return false }
                 smoke.project = match.id
                 return true
+            }),
+            Step(name: "rename project", act: { $0.store.inbox.renameProject($0.project, to: "Smoke Project") }, done: { smoke in
+                smoke.store.inbox.project(smoke.project)?.name == "Smoke Project"
+            }),
+            Step(name: "project icon", act: { $0.store.inbox.setProjectIcon($0.project, "hammer") }, done: { smoke in
+                smoke.store.inbox.project(smoke.project)?.icon == "hammer"
+            }),
+            Step(name: "reset project icon", act: { $0.store.inbox.setProjectIcon($0.project, nil) }, done: { smoke in
+                smoke.store.inbox.project(smoke.project).map { $0.icon == nil } ?? false
             }),
             Step(name: "start thread", act: { smoke in
                 smoke.store.newThread(in: smoke.project)

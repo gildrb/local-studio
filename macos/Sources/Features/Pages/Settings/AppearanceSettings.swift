@@ -18,6 +18,8 @@ private struct AppearanceForm: View {
     let settings: LocalStudioKit.Settings
     let pages: PagesStore
     @State private var contrastDraft: Double?
+    @State private var glassDraft: Double?
+    @State private var importError: String?
 
     private var bind: SettingsBinder { SettingsBinder(settings: settings, pages: pages) }
 
@@ -35,6 +37,22 @@ private struct AppearanceForm: View {
                         Spacer(minLength: 0)
                     }
                     .padding(.vertical, 6)
+                }
+                SettingRow(.themes) {
+                    ThemeGrid(pages: pages, selected: ThemeStore.shared.activeId)
+                    HStack {
+                        Button("Import Theme…") { importError = pages.importTheme() }
+                        Spacer()
+                        Button("New Theme…") { ThemeEditorWindow.shared.open(pages: pages, source: ThemeStore.shared.active) }
+                        Button(ThemeStore.shared.editorOpen ? "Close Theme Editor" : "Open Theme Editor") {
+                            ThemeEditorWindow.shared.toggle(pages: pages)
+                        }
+                    }
+                    if let importError {
+                        Text(importError)
+                            .font(.callout)
+                            .foregroundStyle(Theme.danger)
+                    }
                 }
             }
             SettingsSection(.interface) {
@@ -59,6 +77,31 @@ private struct AppearanceForm: View {
                                 .foregroundStyle(Theme.secondaryText)
                                 .frame(width: 44, alignment: .trailing)
                         }
+                    }
+                }
+                SettingRow(.glassOpacity) {
+                    LabeledContent {
+                        HStack(spacing: 10) {
+                            Slider(
+                                value: Binding(get: { glassDraft ?? Double(settings.glassOpacity) }, set: { glassDraft = $0 }),
+                                in: 0...100,
+                                step: 5
+                            ) { editing in
+                                guard !editing, let value = glassDraft else { return }
+                                glassDraft = nil
+                                pages.update { $0.glassOpacity = UInt32(value) }
+                            }
+                            .frame(width: 180)
+                            Text("\(Int(glassDraft ?? Double(settings.glassOpacity)))%")
+                                .monospacedDigit()
+                                .foregroundStyle(Theme.secondaryText)
+                                .frame(width: 44, alignment: .trailing)
+                        }
+                    } label: {
+                        Text(SettingKey.glassOpacity.title)
+                        Text("Opacity of floating surfaces such as the command palette and notices.")
+                            .font(.callout)
+                            .foregroundStyle(Theme.secondaryText)
                     }
                 }
                 SettingRow(.diffColors) {
@@ -95,7 +138,10 @@ private struct AppearanceForm: View {
                     FontRow(title: SettingKey.terminalFont.title, family: bind(\.terminalFont), size: bind(\.terminalFontSize), families: FontCatalog.monospaced)
                 }
                 SettingRow(.fontSmoothing) {
-                    Toggle(SettingKey.fontSmoothing.title, isOn: bind(\.fontSmoothing))
+                    Toggle(isOn: bind(\.fontSmoothing)) {
+                        Text(SettingKey.fontSmoothing.title)
+                        Text("Turning it off draws thinner text. Takes effect the next time Local Studio opens.")
+                    }
                 }
                 SettingRow(.wordWrap) {
                     Toggle(SettingKey.wordWrap.title, isOn: bind(\.wordWrap))

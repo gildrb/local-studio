@@ -120,7 +120,8 @@ struct ThreadHeaderBar: View {
 
     private func showThreadMenu(_ thread: String) {
         var nodes = ThreadActions.menu(store, for: thread, includeRename: false)
-        nodes.insert(.action("Rename Thread", symbol: "pencil") { store.shell.headerRenaming = true }, at: min(4, nodes.count))
+        let position = nodes.firstIndex { $0.id == "divider-edit" }.map { $0 + 1 } ?? nodes.count
+        nodes.insert(.action("Rename Thread", symbol: "pencil") { store.shell.headerRenaming = true }, at: position)
         NativeMenu.popUp(nodes, below: titleAnchor.view)
     }
 

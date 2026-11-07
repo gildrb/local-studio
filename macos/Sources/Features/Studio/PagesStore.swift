@@ -86,10 +86,19 @@ final class PagesStore {
 
     func setSettings(_ settings: Settings) {
         self.settings = settings
+        ThemeStore.shared.apply(settings)
+        SnapShotService.shared.update(settings: settings, keybindings: keybindings)
     }
 
     func setKeybindings(_ bindings: [Keybinding]) {
         keybindings = bindings
+        SnapShotService.shared.update(settings: settings, keybindings: bindings)
+    }
+
+    private(set) var daemon: (socket: String, version: String?, pid: UInt32?)?
+
+    func setDaemon(socket: String, version: String?, pid: UInt32?) {
+        daemon = (socket, version, pid)
     }
 
     func update(_ change: (inout Settings) -> Void) {
@@ -97,6 +106,7 @@ final class PagesStore {
         change(&next)
         guard next != settings else { return }
         settings = next
+        ThemeStore.shared.apply(next)
         core.run { $0.updateSettings(settings: next) }
     }
 

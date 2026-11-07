@@ -72,18 +72,16 @@ struct RootView: View {
         .sheet(isPresented: snoozeShown) {
             CustomSnoozeSheet(store: store, threads: shell.snoozeTargets)
         }
+        .sheet(isPresented: onboardingShown) {
+            OnboardingView(store: store)
+                .interactiveDismissDisabled()
+        }
         .onChange(of: store.conversation.thread, initial: true) { _, thread in
             store.panels.focus(thread)
             shell.headerRenaming = false
         }
-        .onChange(of: store.pages.settings?.colorScheme, initial: true) { _, scheme in
-            guard let scheme else { return }
-            switch scheme {
-            case .system: NSApp.appearance = nil
-            case .light: NSApp.appearance = NSAppearance(named: .aqua)
-            case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
-            }
-        }
+        .themeRoot()
+        .onAppear { PageCommands.install(store) }
         .transaction { $0.disablesAnimations = true }
     }
 
@@ -128,6 +126,10 @@ struct RootView: View {
 
     private var snoozeShown: Binding<Bool> {
         Binding { !store.shell.snoozeTargets.isEmpty } set: { if !$0 { store.shell.snoozeTargets = [] } }
+    }
+
+    private var onboardingShown: Binding<Bool> {
+        Binding { store.needsOnboarding } set: { if !$0 { store.shell.onboardingDismissed = true } }
     }
 
     private var confirmationTitle: String {
@@ -254,7 +256,7 @@ struct CustomSnoozeSheet: View {
             } header: {
                 Text(threads.count == 1 ? "Snooze thread" : "Snooze \(threads.count) threads")
             } footer: {
-                Text("The thread returns to the inbox when it wakes, or earlier if it needs you.")
+                Text("Wakes \(TimeFormatting.dateTime(until, store.pages.settings?.timeFormat)). The thread returns to the inbox then, or earlier if it needs you.")
                     .foregroundStyle(Theme.secondaryText)
             }
         }
