@@ -39,6 +39,7 @@ struct StatusBadge: View {
         switch status {
         case .idle: nil
         case .working: ("circle.dotted", "Working", Theme.working)
+        case .monitoring: ("eye", "Monitoring", Theme.working)
         case .approval: ("exclamationmark.shield", "Approval", Theme.warning)
         case .failed: ("exclamationmark.circle", "Failed", Theme.danger)
         case .done: ("checkmark.circle", "Done", Theme.success)

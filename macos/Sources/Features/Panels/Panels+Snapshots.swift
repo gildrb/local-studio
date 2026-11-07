@@ -349,10 +349,10 @@ enum PanelFixtures {
             id: thread, project: project, title: "Build the native panels", shelf: .working, status: .working,
             statusSince: now - 300_000, updatedAt: now, snoozedUntil: nil, pinned: false, unread: false,
             branch: "feat/panels", worktree: nil, provider: "anthropic", model: "claude-opus", additions: 214, deletions: 37,
-            note: nil, archived: false, autoSettle: true
+            note: nil, archived: false, autoSettle: true, liveAgents: agents ? 2 : 0, fanOut: nil, pullRequest: nil
         )
         var items: [Item] = [
-            Item(id: 1, turn: 1, createdAt: now - 900_000, kind: .user(text: "Build the panels", images: 0, entry: nil)),
+            Item(id: 1, turn: 1, createdAt: now - 900_000, kind: .user(text: "Build the panels", images: 0, entry: nil, thumbnails: [])),
             Item(id: 2, turn: 1, createdAt: now - 600_000, kind: .turnSummary(turn: 1, durationMs: 192_000, toolCount: 14)),
             Item(id: 3, turn: 2, createdAt: now - 400_000, kind: .turnSummary(turn: 2, durationMs: 64_000, toolCount: 5)),
         ]

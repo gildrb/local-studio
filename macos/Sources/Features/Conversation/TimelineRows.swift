@@ -27,7 +27,7 @@ private struct TimelineEntryView: View {
     var body: some View {
         let item = entry.item
         switch item.kind {
-        case .user(let text, let images, let anchor):
+        case .user(let text, let images, let anchor, _):
             UserBubble(text: text, images: images, createdAt: item.createdAt, anchor: anchor, store: store)
         case .assistant(let blocks, let streaming, let error, let changedFiles):
             AssistantMessage(

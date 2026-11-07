@@ -359,11 +359,12 @@ enum ConversationFixtures {
     static let models: [ModelOption] = [
         ModelOption(
             provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true,
-            thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true
+            thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true, serviceTiers: []
         ),
         ModelOption(
             provider: "openai", id: "gpt-5", name: "GPT-5", reasoning: true,
-            thinkingLevels: ["minimal", "low", "medium", "high"], contextWindow: 400_000, configured: true
+            thinkingLevels: ["minimal", "low", "medium", "high"], contextWindow: 400_000, configured: true,
+            serviceTiers: ["auto", "flex", "priority"]
         ),
     ]
 
@@ -385,10 +386,10 @@ enum ConversationFixtures {
     ]
 
     static let commands: [SlashCommand] = [
-        SlashCommand(name: "review", description: "Review the current diff", source: "prompt"),
-        SlashCommand(name: "skill:release-notes", description: "Draft release notes from merged PRs", source: "skill"),
-        SlashCommand(name: "skill:swift-lint", description: "Fix SwiftLint violations", source: "skill"),
-        SlashCommand(name: "todo", description: "Track tasks for this thread", source: "extension"),
+        SlashCommand(name: "review", description: "Review the current diff", source: "prompt", kind: .template),
+        SlashCommand(name: "skill:release-notes", description: "Draft release notes from merged PRs", source: "skill", kind: .skill),
+        SlashCommand(name: "skill:swift-lint", description: "Fix SwiftLint violations", source: "skill", kind: .skill),
+        SlashCommand(name: "todo", description: "Track tasks for this thread", source: "extension", kind: .command),
     ]
 
     static var projectInfo: ThreadInfo {
@@ -415,11 +416,11 @@ enum ConversationFixtures {
         models: models + [
             ModelOption(
                 provider: "anthropic", id: "claude-opus-4-1", name: "Claude Opus 4.1", reasoning: true,
-                thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true
+                thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true, serviceTiers: []
             ),
             ModelOption(
                 provider: "openai", id: "gpt-4.1-mini", name: "GPT-4.1 mini", reasoning: false,
-                thinkingLevels: [], contextWindow: 1_000_000, configured: true
+                thinkingLevels: [], contextWindow: 1_000_000, configured: true, serviceTiers: []
             ),
         ],
         favorites: [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")],
@@ -433,12 +434,13 @@ enum ConversationFixtures {
             thinkingLevel: "medium", thinkingLevels: ["off", "low", "medium", "high"], access: .supervised,
             busy: busy, runStartedAt: busy ? Int64(Date.now.timeIntervalSince1970 * 1_000) - 12_400 : nil,
             compacting: false, retryAttempt: 0, queued: 0,
-            context: ContextUsage(tokens: 57_600, window: 200_000), branch: nil, worktree: nil
+            context: ContextUsage(tokens: 57_600, window: 200_000), branch: nil, worktree: nil,
+            serviceTier: nil, serviceTiers: [], goal: nil
         )
     }
 
     static func user(_ id: UInt64, turn: UInt64, _ text: String, images: UInt32 = 0) -> Item {
-        Item(id: id, turn: turn, createdAt: base + Int64(id) * 20_000, kind: .user(text: text, images: images, entry: "e\(id)"))
+        Item(id: id, turn: turn, createdAt: base + Int64(id) * 20_000, kind: .user(text: text, images: images, entry: "e\(id)", thumbnails: []))
     }
 
     static func assistant(_ id: UInt64, turn: UInt64, _ blocks: [Block], streaming: Bool = false, error: String? = nil, files: [FileChange] = []) -> Item {

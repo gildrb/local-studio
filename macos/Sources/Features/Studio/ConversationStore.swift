@@ -60,6 +60,17 @@ final class ConversationStore {
         worktreeSetup[thread] = (stages, done, error)
     }
 
+    private(set) var skills: [SkillEntry] = []
+    private(set) var messageImages: [String: (mimeType: String, data: Data)] = [:]
+
+    func setSkills(request: String, skills: [SkillEntry]) {
+        self.skills = skills
+    }
+
+    func setMessageImage(request: String, mimeType: String, data: Data) {
+        messageImages[request] = (mimeType, data)
+    }
+
     func focus(_ thread: String?) {
         guard thread != self.thread else { return }
         self.thread = thread
@@ -189,7 +200,7 @@ final class ConversationStore {
     func promptHistory() -> [String] {
         var history: [String] = []
         for entry in entries {
-            if case .user(let text, _, _) = entry.item.kind, history.last != text {
+            if case .user(let text, _, _, _) = entry.item.kind, history.last != text {
                 history.append(text)
             }
         }
@@ -368,7 +379,8 @@ final class ConversationStore {
             return models.first { $0.provider == model.provider && $0.id == model.id }
                 ?? ModelOption(
                     provider: model.provider, id: model.id, name: model.name ?? model.id, reasoning: model.reasoning,
-                    thinkingLevels: info?.thinkingLevels ?? [], contextWindow: info?.context?.window ?? 0, configured: true
+                    thinkingLevels: info?.thinkingLevels ?? [], contextWindow: info?.context?.window ?? 0, configured: true,
+                    serviceTiers: info?.serviceTiers ?? []
                 )
         }
         let selectable = models.filter { $0.configured && !isHidden($0) }
@@ -443,7 +455,7 @@ final class ConversationStore {
     private func rebuildRows() {
         rows = TimelineLayout.rows(for: entries, expanded: expandedFolds)
         let next = rows.enumerated().compactMap { index, row -> TimelineAnchor? in
-            guard case .entry(let entry, _) = row, case .user(let text, _, _) = entry.item.kind else { return nil }
+            guard case .entry(let entry, _) = row, case .user(let text, _, _, _) = entry.item.kind else { return nil }
             let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
             return TimelineAnchor(id: entry.id, order: index, preview: line)
         }

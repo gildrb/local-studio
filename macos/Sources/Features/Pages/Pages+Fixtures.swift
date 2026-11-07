@@ -74,10 +74,10 @@ enum PagesFixtures {
     ]
 
     static let models: [ModelOption] = [
-        ModelOption(provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true),
-        ModelOption(provider: "anthropic", id: "claude-opus-4-1", name: "Claude Opus 4.1", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true),
-        ModelOption(provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high"], contextWindow: 400_000, configured: true),
-        ModelOption(provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", reasoning: true, thinkingLevels: [], contextWindow: 1_000_000, configured: false),
+        ModelOption(provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true, serviceTiers: []),
+        ModelOption(provider: "anthropic", id: "claude-opus-4-1", name: "Claude Opus 4.1", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true, serviceTiers: []),
+        ModelOption(provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high"], contextWindow: 400_000, configured: true, serviceTiers: ["auto", "flex", "priority"]),
+        ModelOption(provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", reasoning: true, thinkingLevels: [], contextWindow: 1_000_000, configured: false, serviceTiers: []),
     ]
 
     static let favorites = [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")]
@@ -110,7 +110,8 @@ enum PagesFixtures {
             id: id, project: project, title: title, shelf: .settled, status: .idle, statusSince: nil,
             updatedAt: now - Int64(hoursAgo * 3_600_000), snoozedUntil: nil, pinned: false, unread: false,
             branch: branch, worktree: nil, provider: "anthropic", model: "claude-sonnet-4-5",
-            additions: branch == nil ? 0 : 42, deletions: branch == nil ? 0 : 7, note: nil, archived: true, autoSettle: true
+            additions: branch == nil ? 0 : 42, deletions: branch == nil ? 0 : 7, note: nil, archived: true, autoSettle: true,
+            liveAgents: 0, fanOut: nil, pullRequest: nil
         )
     }
 

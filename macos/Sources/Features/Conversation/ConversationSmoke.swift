@@ -100,10 +100,10 @@ final class ConversationSmoke {
             let items = conversation.items
             guard let info = conversation.info, !info.busy, conversation.queued.isEmpty,
                   let last = items.last, case .assistant(_, false, _, _) = last.kind,
-                  items.contains(where: { if case .user(Self.followUp, _, _) = $0.kind { true } else { false } }),
+                  items.contains(where: { if case .user(Self.followUp, _, _, _) = $0.kind { true } else { false } }),
                   items.contains(where: { if case .tool(_, _, _, _, _, .succeeded, _, _, _, _) = $0.kind { true } else { false } }) else { return }
             guard let anchor = items.lazy.compactMap({ item -> String? in
-                if case .user(Self.prompt, _, let entry) = item.kind { entry } else { nil }
+                if case .user(Self.prompt, _, let entry, _) = item.kind { entry } else { nil }
             }).first else { return }
             for item in items {
                 print("     item \(item.id) turn \(item.turn) \(item.kind)")
@@ -113,7 +113,7 @@ final class ConversationSmoke {
             conversation.editFromHere(entry: anchor)
             move(to: .editing, "follow-up from the queue landed in the transcript; editing from the first prompt")
         case .editing:
-            let rewound = !conversation.items.contains { if case .user(Self.followUp, _, _) = $0.kind { true } else { false } }
+            let rewound = !conversation.items.contains { if case .user(Self.followUp, _, _, _) = $0.kind { true } else { false } }
             guard let thread, rewound, conversation.composer(project: nil).text == Self.prompt, conversation.thread == thread else { return }
             finish(passed: true, "edit from here filled the composer with “\(Self.prompt)”")
         case .finished:

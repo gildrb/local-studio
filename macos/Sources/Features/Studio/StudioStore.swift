@@ -102,6 +102,14 @@ final class StudioStore {
         case .commands(let request, let commands):
             requests.settle(request)
             conversation.setCommands(request: request, commands: commands)
+        case .skills(let request, let skills):
+            requests.settle(request)
+            conversation.setSkills(request: request, skills: skills)
+        case .subagents(let thread, let agents):
+            workspace.setSubagents(thread: thread, agents: agents)
+        case .messageImage(let request, let mimeType, let data):
+            requests.settle(request)
+            conversation.setMessageImage(request: request, mimeType: mimeType, data: data)
         case .notification(let thread, let kind, let title, let body):
             inbox.notify(thread: thread, kind: kind, title: title, body: body)
         case .gitStatus(let project, let status):

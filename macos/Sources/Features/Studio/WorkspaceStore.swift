@@ -34,6 +34,12 @@ final class WorkspaceStore {
         gitStatus[project] = status
     }
 
+    private(set) var subagents: [String: [Subagent]] = [:]
+
+    func setSubagents(thread: String, agents: [Subagent]) {
+        subagents[thread] = agents
+    }
+
     func setBranches(request: String, branches: [Branch], total: UInt32) {
         guard case .branches(let model) = routes.removeValue(forKey: request) else {
             self.branches[request] = branches
