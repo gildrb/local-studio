@@ -22,7 +22,7 @@ pub use model::{
 };
 pub use studio::{DaemonLaunch, Studio, StudioConfig, StudioError, Waker};
 pub use workspace::model::*;
-pub use workspace::terminal_preview;
+pub use workspace::{endpoint_presets, terminal_preview};
 
 #[cfg(feature = "ffi")]
 uniffi::setup_scaffolding!("local_studio_core");

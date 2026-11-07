@@ -59,10 +59,10 @@ extension SnapshotCatalog {
             SnapshotEntry(name: "shell-onboarding-daemon", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready)]) { store in
                 AnyView(OnboardingView(store: store, step: .daemon))
             },
-            SnapshotEntry(name: "shell-onboarding-providers-none", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .providers(providers: ShellFixtures.unconfiguredProviders)]) { store in
+            SnapshotEntry(name: "shell-onboarding-providers-none", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .providers(providers: ShellFixtures.unconfiguredProviders, engines: [], errors: [])]) { store in
                 AnyView(OnboardingView(store: store, step: .providers))
             },
-            SnapshotEntry(name: "shell-onboarding-providers", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .providers(providers: ShellFixtures.providers)]) { store in
+            SnapshotEntry(name: "shell-onboarding-providers", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .providers(providers: ShellFixtures.providers, engines: [], errors: [])]) { store in
                 AnyView(OnboardingView(store: store, step: .providers))
             },
             SnapshotEntry(name: "shell-onboarding-project", size: CGSize(width: 560, height: 440), updates: [.connection(state: .ready), .projects(projects: Array(ShellFixtures.projects.prefix(1)))]) { store in
@@ -234,13 +234,20 @@ enum ShellFixtures {
     ]
 
     static let providers = [
-        ProviderStatus(id: "anthropic", name: "Anthropic", configured: true, modelCount: 6, auth: "configured"),
-        ProviderStatus(id: "openai-codex", name: "OpenAI Codex", configured: true, modelCount: 4, auth: "configured"),
-        ProviderStatus(id: "google", name: "Google", configured: false, modelCount: 5, auth: "missing"),
+        provider("anthropic", "Anthropic", .builtIn, .storedKey, models: 6),
+        provider("openai-codex", "OpenAI Codex", .other, .signedIn, models: 4),
+        provider("google", "Google Gemini", .builtIn, .missing, models: 5),
     ]
 
     static let unconfiguredProviders = providers.map {
-        ProviderStatus(id: $0.id, name: $0.name, configured: false, modelCount: $0.modelCount, auth: "missing")
+        provider($0.id, $0.name, $0.kind, .missing, models: $0.modelCount)
+    }
+
+    static func provider(_ id: String, _ name: String, _ kind: ProviderKind, _ credential: ProviderCredential, models: UInt32) -> ProviderStatus {
+        ProviderStatus(
+            id: id, name: name, kind: kind, configured: credential != .missing, credential: credential,
+            modelCount: models, envVar: nil, baseUrl: nil, api: nil, models: []
+        )
     }
 
     static let scripts = [

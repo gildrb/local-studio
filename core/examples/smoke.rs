@@ -199,6 +199,7 @@ impl Harness {
             | Update::Local { .. }
             | Update::LocalDashboard { .. }
             | Update::Providers { .. }
+            | Update::ProviderModels { .. }
             | Update::Keybindings { .. }
             | Update::RequestDone { .. }
             | Update::ProjectScripts { .. }

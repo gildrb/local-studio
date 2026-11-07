@@ -252,7 +252,7 @@ impl Harness {
             Update::Usage { request, report } => view.usage.push((request, report)),
             Update::Local { request, snapshot } => view.local.push((request, snapshot)),
             Update::LocalDashboard { dashboard } => view.dashboards.push(dashboard),
-            Update::Providers { providers } => view.providers = Some(providers),
+            Update::Providers { providers, .. } => view.providers = Some(providers),
             Update::Settings { settings } => view.settings = Some(settings),
             Update::Keybindings { bindings } => view.keybindings = Some(bindings),
             Update::PullRequestDetail { request, detail } => view.details.push((request, detail)),
@@ -293,7 +293,8 @@ impl Harness {
             | Update::Daemon { .. }
             | Update::Skills { .. }
             | Update::Subagents { .. }
-            | Update::MessageImage { .. } => {}
+            | Update::MessageImage { .. }
+            | Update::ProviderModels { .. } => {}
         }
     }
 }

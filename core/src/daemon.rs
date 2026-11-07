@@ -48,6 +48,13 @@ pub(crate) fn socket_path(explicit: Option<&str>) -> Result<PathBuf, String> {
         .ok_or_else(|| "no daemon socket configured".to_string())
 }
 
+pub(crate) fn agent_dir(launch: Option<&DaemonLaunch>) -> Option<PathBuf> {
+    launch
+        .and_then(|launch| launch.arguments.iter().skip_while(|argument| *argument != "--agent-dir").nth(1))
+        .map(|dir| eukhe_types::platform::dirs::expand_tilde(dir))
+        .or_else(eukhe_types::platform::dirs::agent_dir)
+}
+
 pub(crate) async fn connect(socket: &Path, launch: Option<&DaemonLaunch>) -> anyhow::Result<Connection> {
     match DaemonClient::connect(socket).await {
         Ok(connection) => return Ok(connection),

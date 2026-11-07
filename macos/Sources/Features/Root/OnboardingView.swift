@@ -59,15 +59,16 @@ struct OnboardingView: View {
         case .providers:
             OnboardingPage(symbol: "cpu", title: "Model providers", detail: providerDetail) {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(store.pages.providers.prefix(5), id: \.id) { provider in
+                    ForEach(onboardingProviders, id: \.id) { provider in
                         StatusLine(tint: provider.configured ? Theme.success : Theme.tertiaryText, text: "\(provider.name) · \(provider.modelCount) model\(provider.modelCount == 1 ? "" : "s")")
                     }
                     if configuredProviders == 0 {
-                        Text("Run `eukhe` in Terminal and use `/login` to sign in to a provider, then check again.")
+                        Text("Paste an API key or add an OpenAI-compatible endpoint in Settings → Providers, or run `eukhe` in Terminal and use `/login` for a subscription, then check again.")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                         HStack {
+                            Button("Add Provider…") { store.openProvidersSettings() }
                             Button("Open Terminal") { openTerminal() }
                             Button("Check Again") { store.core.run { $0.loadProviders() } }
                         }
@@ -138,6 +139,11 @@ struct OnboardingView: View {
 
     private var configuredProviders: Int {
         store.pages.providers.filter(\.configured).count
+    }
+
+    private var onboardingProviders: [ProviderStatus] {
+        let configured = store.pages.providers.filter(\.configured)
+        return Array((configured.isEmpty ? store.pages.providers : configured).prefix(5))
     }
 
     private var providerDetail: String {

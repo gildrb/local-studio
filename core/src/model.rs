@@ -1,7 +1,7 @@
 use crate::workspace::model::{
-    Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalDashboard, LocalSnapshot,
-    ProjectScript, ProjectSettings, ProviderStatus, PullRequest, PullRequestDetail, SearchHit, Settings, SetupStage,
-    TerminalFrame, UsageReport,
+    Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalDashboard, LocalEngine,
+    LocalSnapshot, ProjectScript, ProjectSettings, ProviderModel, ProviderStatus, PullRequest, PullRequestDetail,
+    SearchHit, Settings, SetupStage, TerminalFrame, UsageReport,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -443,7 +443,8 @@ pub enum Update {
     Usage { request: String, report: UsageReport },
     Local { request: String, snapshot: LocalSnapshot },
     LocalDashboard { dashboard: LocalDashboard },
-    Providers { providers: Vec<ProviderStatus> },
+    Providers { providers: Vec<ProviderStatus>, engines: Vec<LocalEngine>, errors: Vec<String> },
+    ProviderModels { request: String, base_url: String, models: Vec<ProviderModel> },
     Settings { settings: Settings },
     Keybindings { bindings: Vec<Keybinding> },
     ProjectScripts { project: String, scripts: Vec<ProjectScript> },
