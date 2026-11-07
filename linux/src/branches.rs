@@ -258,7 +258,7 @@ impl BranchBar {
         }
     }
 
-    pub fn set_fixture(&self, worktree: bool, branch: Option<Branch>) {
+    pub fn preset(&self, worktree: bool, branch: Option<Branch>) {
         self.touched.set(true);
         self.mode.set_selected(u32::from(worktree));
         self.pick.replace(branch.map_or(Pick::Fresh, Pick::Branch));

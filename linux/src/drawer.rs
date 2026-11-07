@@ -7,10 +7,6 @@ use vte::prelude::*;
 
 use crate::app::App;
 
-const PALETTE: [&str; 16] = [
-    "#1c1c1e", "#f85149", "#3fb950", "#d29922", "#6e9cf7", "#bc8cff", "#39c5cf", "#c9d1d9", "#6e7681", "#ff7b72",
-    "#56d364", "#e3b341", "#8fb2ff", "#d2a8ff", "#56d4dd", "#f0f6fc",
-];
 const CONTEXT_LINES: usize = 40;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +20,6 @@ pub struct Pane {
     id: RefCell<Option<String>>,
     request: RefCell<Option<String>>,
     size: Cell<(i64, i64)>,
-    startup: RefCell<Option<String>>,
 }
 
 pub struct Drawer {
@@ -130,7 +125,7 @@ impl Drawer {
         self.font.replace(font);
     }
 
-    pub fn add(&self, app: &Rc<App>, layout: Layout) {
+    fn attach(&self, layout: Layout) -> Rc<Pane> {
         let pane = Rc::new(self.pane());
         self.layout.set(layout);
         self.panes.borrow_mut().push(Rc::clone(&pane));
@@ -138,6 +133,11 @@ impl Drawer {
         self.relayout();
         self.root.set_visible(true);
         pane.terminal.grab_focus();
+        pane
+    }
+
+    pub fn add(&self, app: &Rc<App>, layout: Layout) {
+        let pane = self.attach(layout);
         let dir = app.state.borrow().workspace_dir();
         let Some(dir) = dir else {
             pane.terminal.feed(b"\x1b[2mOpen a project thread to start a shell in it.\x1b[0m\r\n");
@@ -150,13 +150,20 @@ impl Drawer {
         app.core.run(|studio| studio.open_terminal(request, dir, cols, rows));
     }
 
-    pub fn run(&self, app: &Rc<App>, name: &str, command: &str) {
-        self.add(app, Layout::SideBySide);
-        let pane = self.panes.borrow().last().cloned();
-        if let Some(pane) = pane {
-            pane.terminal.feed(format!("\x1b[2m▶ {name}\x1b[0m\r\n").as_bytes());
-            pane.startup.replace(Some(command.to_string()));
-        }
+    pub fn run_script(&self, app: &Rc<App>, project: &str, script: &str) {
+        let pane = self.attach(Layout::SideBySide);
+        let name = app
+            .state
+            .borrow()
+            .scripts
+            .get(project)
+            .and_then(|scripts| scripts.iter().find(|known| known.id == script).map(|known| known.name.clone()))
+            .unwrap_or_else(|| script.to_string());
+        pane.terminal.feed(format!("\x1b[2m▶ {name}\x1b[0m\r\n").as_bytes());
+        let request = app.core.request();
+        pane.request.replace(Some(request.clone()));
+        let (project, script) = (project.to_string(), script.to_string());
+        app.core.run(|studio| studio.run_project_script(request, project, script));
     }
 
     pub fn close_focused(&self, app: &Rc<App>) {
@@ -218,16 +225,18 @@ impl Drawer {
         }
     }
 
+    pub fn set_colors(&self, colors: &crate::colors::Colors) {
+        for pane in self.panes.borrow().iter() {
+            paint(&pane.terminal, colors);
+        }
+    }
+
     fn pane(&self) -> Pane {
         let terminal = vte::Terminal::new();
         terminal.set_vexpand(true);
         terminal.set_hexpand(true);
         terminal.add_css_class("ls-terminal");
-        let palette: Vec<gdk::RGBA> = PALETTE.iter().filter_map(|color| gdk::RGBA::parse(*color).ok()).collect();
-        let palette: Vec<&gdk::RGBA> = palette.iter().collect();
-        if let (Ok(foreground), Ok(background)) = (gdk::RGBA::parse("#ececec"), gdk::RGBA::parse("#0d0d0d")) {
-            terminal.set_colors(Some(&foreground), Some(&background), &palette);
-        }
+        paint(&terminal, &crate::colors::current());
         terminal.set_font(Some(&gtk::pango::FontDescription::from_string(&self.font.borrow())));
         let weak = self.app.clone();
         terminal.connect_commit(move |terminal, text, _| {
@@ -306,13 +315,7 @@ impl Drawer {
             crate::actions::popup_menu(&terminal, &model, x, y);
         });
         terminal.add_controller(menu);
-        Pane {
-            terminal,
-            id: RefCell::new(None),
-            request: RefCell::new(None),
-            size: Cell::new((0, 0)),
-            startup: RefCell::new(None),
-        }
+        Pane { terminal, id: RefCell::new(None), request: RefCell::new(None), size: Cell::new((0, 0)) }
     }
 
     fn pane_for(&self, terminal: &vte::Terminal) -> Option<Rc<Pane>> {
@@ -329,10 +332,6 @@ impl Drawer {
         pane.request.replace(None);
         pane.id.replace(Some(terminal.to_string()));
         pane.size.set((0, 0));
-        if let (Some(command), Some(app)) = (pane.startup.take(), self.app.upgrade()) {
-            let (id, data) = (terminal.to_string(), format!("{command}\n").into_bytes());
-            app.core.run(|studio| studio.write_terminal(id, data));
-        }
         true
     }
 
@@ -385,4 +384,20 @@ fn add_to_chat(app: &Rc<App>, terminal: &vte::Terminal) {
     }
     app.composer.extras.add_context("Terminal", text.trim_end());
     app.composer.focus();
+}
+
+fn paint(terminal: &vte::Terminal, colors: &crate::colors::Colors) {
+    let palette: Vec<gdk::RGBA> = colors.ansi.iter().filter_map(|color| gdk::RGBA::parse(*color).ok()).collect();
+    let palette: Vec<&gdk::RGBA> = palette.iter().collect();
+    if let (Ok(foreground), Ok(background)) =
+        (gdk::RGBA::parse(colors.terminal_fg), gdk::RGBA::parse(colors.terminal_bg))
+    {
+        terminal.set_colors(Some(&foreground), Some(&background), &palette);
+    }
+    if let Ok(cursor) = gdk::RGBA::parse(colors.cursor) {
+        terminal.set_color_cursor(Some(&cursor));
+    }
+    if let Ok(selection) = gdk::RGBA::parse(colors.selection) {
+        terminal.set_color_highlight(Some(&selection));
+    }
 }

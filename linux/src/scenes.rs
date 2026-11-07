@@ -21,7 +21,7 @@ pub fn stage(app: &Rc<App>, scene: &str) {
         "16-composer-commands" => {
             app.apply(base());
             app.new_thread(Some(project_id("local-studio")));
-            app.branches.set_fixture(
+            app.branches.preset(
                 true,
                 Some(Branch { name: "feat/gtk-panels".to_string(), remote: false, current: false, worktree: None }),
             );
@@ -203,11 +203,11 @@ pub fn stage(app: &Rc<App>, scene: &str) {
                 },
             ]);
         }
-        _ => {}
+        _ => crate::scenes_workflow::stage(app, scene),
     }
 }
 
-fn swatch() -> Vec<u8> {
+pub fn swatch() -> Vec<u8> {
     let (width, height) = (96_usize, 64_usize);
     let mut pixels = Vec::with_capacity(width * height * 4);
     for y in 0..height {
@@ -244,6 +244,11 @@ fn commands() -> Vec<SlashCommand> {
         name: name.to_string(),
         description: description.to_string(),
         source: source.to_string(),
+        kind: if source == "Skill" {
+            local_studio_core::CommandKind::Skill
+        } else {
+            local_studio_core::CommandKind::Command
+        },
     })
     .collect()
 }

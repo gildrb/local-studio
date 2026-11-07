@@ -143,6 +143,10 @@ impl Header {
         self.badge.set_label(&running.to_string());
     }
 
+    pub fn new_thread(&self) -> &gtk::Button {
+        &self.new_thread
+    }
+
     pub fn bind_split(&self, split: &adw::OverlaySplitView) {
         split.bind_property("show-sidebar", &self.toggle, "active").bidirectional().sync_create().build();
         for widget in [self.toggle.upcast_ref::<gtk::Widget>(), self.new_thread.upcast_ref()] {

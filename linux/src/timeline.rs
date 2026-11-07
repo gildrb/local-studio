@@ -120,6 +120,12 @@ impl Timeline {
         }
     }
 
+    pub fn recolor(&self) {
+        let objects: Vec<glib::BoxedAnyObject> =
+            self.items.borrow().iter().map(|item| glib::BoxedAnyObject::new(item.clone())).collect();
+        self.store.splice(0, self.store.n_items(), &objects);
+    }
+
     pub fn scroll_to_start(&self) {
         self.follow.set(false);
         let list = self.list.clone();
@@ -266,7 +272,9 @@ impl Timeline {
 
 fn item_widget(app: &Weak<App>, item: &Item, expanded: &HashSet<u64>) -> gtk::Widget {
     let widget: gtk::Widget = match &item.kind {
-        ItemKind::User { text, images, entry } => user_widget(app, text, *images, entry.as_deref()),
+        ItemKind::User { text, images, entry, thumbnails } => {
+            user_widget(app, text, *images, entry.as_deref(), thumbnails)
+        }
         ItemKind::Assistant { blocks, streaming, error, changed_files } => {
             assistant_widget(app, item.id, blocks, *streaming, error.as_deref(), changed_files, expanded)
         }
@@ -351,7 +359,13 @@ fn item_widget(app: &Weak<App>, item: &Item, expanded: &HashSet<u64>) -> gtk::Wi
     widget
 }
 
-fn user_widget(app: &Weak<App>, text: &str, images: u32, entry: Option<&str>) -> gtk::Widget {
+fn user_widget(
+    app: &Weak<App>,
+    text: &str,
+    images: u32,
+    entry: Option<&str>,
+    thumbnails: &[local_studio_core::ImageThumbnail],
+) -> gtk::Widget {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 2);
     column.add_css_class("ls-user-row");
     column.set_margin_top(10);
@@ -364,7 +378,30 @@ fn user_widget(app: &Weak<App>, text: &str, images: u32, entry: Option<&str>) ->
     bubble.set_max_width_chars(64);
     bubble.set_halign(gtk::Align::End);
     column.append(&bubble);
-    if images > 0 {
+    if !thumbnails.is_empty() {
+        let strip = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        strip.set_halign(gtk::Align::End);
+        for (index, thumbnail) in thumbnails.iter().enumerate() {
+            let Ok(texture) = gtk::gdk::Texture::from_bytes(&glib::Bytes::from(&thumbnail.data)) else { continue };
+            let picture = gtk::Picture::for_paintable(&texture);
+            picture.set_content_fit(gtk::ContentFit::Cover);
+            picture.set_size_request(72, 72);
+            picture.add_css_class("ls-thumb");
+            let button = gtk::Button::builder().child(&picture).tooltip_text("Open Image").build();
+            button.add_css_class("flat");
+            button.add_css_class("ls-thumb-button");
+            let (weak, entry) = (app.clone(), entry.map(str::to_string));
+            button.connect_clicked(move |_| {
+                let (Some(app), Some(entry)) = (weak.upgrade(), entry.clone()) else { return };
+                let Some(thread) = app.state.borrow().selected.clone() else { return };
+                let request = app.ask(crate::app::Target::MessageImage);
+                let index = u32::try_from(index).unwrap_or(0);
+                app.core.run(|studio| studio.load_message_image(request, thread, entry, index));
+            });
+            strip.append(&button);
+        }
+        column.append(&strip);
+    } else if images > 0 {
         let label = gtk::Label::new(Some(&format!("{images} image{}", if images == 1 { "" } else { "s" })));
         label.add_css_class("ls-meta");
         label.set_halign(gtk::Align::End);
@@ -490,13 +527,14 @@ pub fn markdown_widget(block: Markdown) -> gtk::Widget {
         Markdown::Code(language, code) => {
             let frame = gtk::Box::new(gtk::Orientation::Vertical, 4);
             frame.add_css_class("ls-code");
-            if let Some(language) = language {
-                let label = gtk::Label::new(Some(&language));
+            if let Some(language) = &language {
+                let label = gtk::Label::new(Some(language.as_str()));
                 label.add_css_class("ls-meta");
                 label.set_xalign(0.0);
                 frame.append(&label);
             }
-            let label = gtk::Label::new(Some(&code));
+            let label = gtk::Label::new(None);
+            label.set_markup(&crate::highlight::markup(&code, language.as_deref(), &crate::colors::current().syntax));
             label.set_xalign(0.0);
             label.set_selectable(true);
             label.add_css_class("ls-mono");
@@ -687,7 +725,7 @@ fn minimap(list: &gtk::ListView, scroller: &gtk::ScrolledWindow) -> (gtk::Box, g
     column.set_halign(gtk::Align::End);
     column.set_margin_top(8);
     column.set_margin_bottom(70);
-    column.set_margin_end(4);
+    column.set_margin_end(18);
     for (icon, tooltip, forward) in
         [("go-up-symbolic", "Previous Message", false), ("go-down-symbolic", "Next Message", true)]
     {

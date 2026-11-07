@@ -19,6 +19,9 @@ pub struct DiffView {
     whitespace: gtk::ToggleButton,
     wrap: gtk::ToggleButton,
     collapse: gtk::ToggleButton,
+    tree_toggle: gtk::ToggleButton,
+    tree: gtk::ListBox,
+    tree_box: gtk::ScrolledWindow,
     summary: gtk::Label,
     stack: gtk::Stack,
     stacked: gtk::TextView,
@@ -30,6 +33,7 @@ pub struct DiffView {
     request: RefCell<Option<String>>,
     message: RefCell<Option<String>>,
     syncing: Cell<bool>,
+    diff_colors: Cell<DiffColors>,
     app: Weak<App>,
 }
 
@@ -61,8 +65,9 @@ impl DiffView {
         let whitespace = toggle("Hide whitespace", "Ignore whitespace-only changes");
         let wrap = toggle("Wrap", "Wrap long lines");
         let collapse = toggle("Collapse all", "Collapse every file");
+        let tree_toggle = toggle("Files", "Show the changed files");
         let tools = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        for button in [&split, &whitespace, &wrap, &collapse] {
+        for button in [&tree_toggle, &split, &whitespace, &wrap, &collapse] {
             tools.append(button);
         }
         let bar = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -94,11 +99,25 @@ impl DiffView {
         pair.append(&gtk::Separator::new(gtk::Orientation::Vertical));
         pair.append(&right);
         let stack = gtk::Stack::new();
+        stack.set_hexpand(true);
         stack.add_named(&gtk::ScrolledWindow::builder().vexpand(true).child(&stacked).build(), Some("stacked"));
         stack.add_named(&gtk::ScrolledWindow::builder().vexpand(true).child(&pair).build(), Some("split"));
+        let tree = gtk::ListBox::new();
+        tree.add_css_class("navigation-sidebar");
+        tree.set_selection_mode(gtk::SelectionMode::None);
+        let tree_box = gtk::ScrolledWindow::builder()
+            .hscrollbar_policy(gtk::PolicyType::Never)
+            .width_request(200)
+            .child(&tree)
+            .visible(false)
+            .build();
+        tree_box.add_css_class("ls-diff-tree");
+        let body = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        body.append(&tree_box);
+        body.append(&stack);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 4);
         root.append(&bar);
-        root.append(&stack);
+        root.append(&body);
         let diff = Self {
             root,
             scope,
@@ -109,6 +128,9 @@ impl DiffView {
             whitespace,
             wrap,
             collapse,
+            tree_toggle,
+            tree,
+            tree_box,
             summary,
             stack,
             stacked,
@@ -120,6 +142,7 @@ impl DiffView {
             request: RefCell::new(None),
             message: RefCell::new(None),
             syncing: Cell::new(false),
+            diff_colors: Cell::new(DiffColors::RedGreen),
             app: app.clone(),
         };
         diff.install_tags(DiffColors::RedGreen);
@@ -188,6 +211,21 @@ impl DiffView {
             diff.collapsed.replace(all);
             diff.render();
         });
+        let shown = self.tree_box.clone();
+        self.tree_toggle.connect_toggled(move |button| shown.set_visible(button.is_active()));
+        let weak = app.clone();
+        self.tree.connect_row_activated(move |_, row| {
+            let Some(app) = weak.upgrade() else { return };
+            let index = usize::try_from(row.index()).unwrap_or(0);
+            let path = app.panel.diff.files.borrow().get(index).map(|file| file.path.clone());
+            if let Some(path) = path {
+                app.panel.diff.reveal(&path);
+            }
+        });
+        self.connect_clicks(app);
+    }
+
+    fn connect_clicks(&self, app: &Weak<App>) {
         for view in [&self.stacked, &self.left, &self.right] {
             let click = gtk::GestureClick::new();
             let weak = app.clone();
@@ -198,42 +236,94 @@ impl DiffView {
                 let (bx, by) = view.window_to_buffer_coords(gtk::TextWindowType::Widget, x as i32, y as i32);
                 let Some(iter) = view.iter_at_location(bx, by) else { return };
                 let line = iter.line();
-                let path = app
-                    .panel
-                    .diff
-                    .headers
-                    .borrow()
-                    .iter()
-                    .find(|(header, _)| *header == line)
-                    .map(|(_, path)| path.clone());
-                if let Some(path) = path {
+                let headers = app.panel.diff.headers.borrow().clone();
+                if let Some((_, path)) = headers.iter().find(|(header, _)| *header == line) {
                     {
                         let mut collapsed = app.panel.diff.collapsed.borrow_mut();
-                        if !collapsed.remove(&path) {
-                            collapsed.insert(path);
+                        if !collapsed.remove(path) {
+                            collapsed.insert(path.clone());
                         }
                     }
                     app.panel.diff.render();
+                    return;
                 }
+                let Some((_, path)) = headers.iter().rev().find(|(header, _)| *header < line) else { return };
+                let buffer = view.buffer();
+                let Some(start) = buffer.iter_at_line(line) else { return };
+                let mut end = start;
+                end.forward_to_line_end();
+                let text = buffer.text(&start, &end, false).to_string();
+                if text.trim().is_empty() || text.starts_with("@@") {
+                    return;
+                }
+                comment_popover(&app, &view, path, &text, (x, y));
             });
             view.add_controller(click);
         }
     }
 
+    fn reveal(&self, path: &str) {
+        let line = self.headers.borrow().iter().find(|(_, known)| known == path).map(|(line, _)| *line);
+        let Some(line) = line else { return };
+        let view = if self.split.is_active() { &self.left } else { &self.stacked };
+        if let Some(mut iter) = view.buffer().iter_at_line(line) {
+            view.scroll_to_iter(&mut iter, 0.0, true, 0.0, 0.0);
+        }
+    }
+
+    fn render_tree(&self, files: &[FileDiff]) {
+        self.tree.remove_all();
+        for file in files {
+            let row = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+            row.set_margin_start(4);
+            row.set_margin_end(4);
+            let (directory, name) = file.path.rsplit_once('/').unwrap_or(("", file.path.as_str()));
+            let labels = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            labels.set_hexpand(true);
+            let title = gtk::Label::new(Some(name));
+            title.set_xalign(0.0);
+            title.set_ellipsize(gtk::pango::EllipsizeMode::Middle);
+            labels.append(&title);
+            if !directory.is_empty() {
+                let parent = gtk::Label::new(Some(directory));
+                parent.add_css_class("ls-meta");
+                parent.set_xalign(0.0);
+                parent.set_ellipsize(gtk::pango::EllipsizeMode::Start);
+                labels.append(&parent);
+            }
+            row.append(&labels);
+            let add = gtk::Label::new(Some(&format!("+{}", file.additions)));
+            add.add_css_class("ls-add");
+            let del = gtk::Label::new(Some(&format!("−{}", file.deletions)));
+            del.add_css_class("ls-del");
+            row.append(&add);
+            row.append(&del);
+            row.set_tooltip_text(Some(&file.path));
+            self.tree.append(&row);
+        }
+    }
+
+    pub fn set_colors(&self) {
+        self.install_tags(self.diff_colors.get());
+    }
+
     fn install_tags(&self, colors: DiffColors) {
+        self.diff_colors.set(colors);
+        let palette = crate::colors::current();
         let (add, del, add_bg, del_bg) = match colors {
-            DiffColors::RedGreen => ("#3fb950", "#f85149", "rgba(63,185,80,0.10)", "rgba(248,81,73,0.10)"),
+            DiffColors::RedGreen => (palette.added, palette.removed, palette.added_bg, palette.removed_bg),
             DiffColors::BlueOrange => ("#58a6ff", "#f0883e", "rgba(88,166,255,0.12)", "rgba(240,136,62,0.12)"),
         };
+        let muted = palette.muted;
         for view in [&self.stacked, &self.left, &self.right] {
             let table = view.buffer().tag_table();
             for (name, foreground, background, weight) in [
                 ("file", None, Some("rgba(128,128,128,0.10)"), 700),
-                ("hunk", Some("#8b949e"), Some("rgba(56,189,248,0.06)"), 400),
+                ("hunk", Some(muted), Some("rgba(128,128,128,0.06)"), 400),
                 ("add", Some(add), Some(add_bg), 400),
                 ("del", Some(del), Some(del_bg), 400),
                 ("blank", None, Some("rgba(128,128,128,0.05)"), 400),
-                ("empty", Some("#8b949e"), None, 400),
+                ("empty", Some(muted), None, 400),
             ] {
                 let tag = table.lookup(name).unwrap_or_else(|| {
                     let tag = gtk::TextTag::new(Some(name));
@@ -354,6 +444,7 @@ impl DiffView {
             return;
         }
         let files = self.files.borrow();
+        self.render_tree(&files);
         let additions: u32 = files.iter().map(|file| file.additions).sum();
         let deletions: u32 = files.iter().map(|file| file.deletions).sum();
         self.summary.set_label(&format!(
@@ -446,6 +537,7 @@ impl DiffView {
     pub fn set_fixture(&self, files: &[FileDiff], split: bool) {
         self.syncing.set(true);
         self.split.set_active(split);
+        self.tree_toggle.set_active(true);
         self.syncing.set(false);
         self.request.replace(Some("fixture".to_string()));
         self.show(files);
@@ -459,6 +551,48 @@ fn push(view: &gtk::TextView, text: &str, tag: Option<&str>) {
         Some(tag) => buffer.insert_with_tags_by_name(&mut end, text, &[tag]),
         None => buffer.insert(&mut end, text),
     }
+}
+
+fn comment_popover(app: &Rc<App>, view: &gtk::TextView, path: &str, line: &str, at: (f64, f64)) {
+    let entry = gtk::Entry::builder().placeholder_text("Comment on this line").width_chars(36).build();
+    let quoted = gtk::Label::new(Some(line.trim()));
+    quoted.add_css_class("ls-mono");
+    quoted.add_css_class("ls-meta");
+    quoted.set_xalign(0.0);
+    quoted.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    quoted.set_max_width_chars(44);
+    let hint = gtk::Label::new(Some("Enter adds it to the composer as review context."));
+    hint.add_css_class("ls-meta");
+    hint.set_xalign(0.0);
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    column.set_margin_top(6);
+    column.set_margin_bottom(6);
+    column.set_margin_start(6);
+    column.set_margin_end(6);
+    column.append(&quoted);
+    column.append(&entry);
+    column.append(&hint);
+    let popover = gtk::Popover::builder().child(&column).build();
+    popover.set_parent(view);
+    #[allow(clippy::cast_possible_truncation)]
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(at.0 as i32, at.1 as i32, 1, 1)));
+    let (weak, path, line, closing) = (Rc::downgrade(app), path.to_string(), line.to_string(), popover.clone());
+    entry.connect_activate(move |entry| {
+        let Some(app) = weak.upgrade() else { return };
+        let comment = entry.text().trim().to_string();
+        if comment.is_empty() {
+            return;
+        }
+        app.composer.extras.add_context(&format!("Review comment on {path}"), &format!("{line}\n\n{comment}"));
+        app.toast("Review comment added to the composer");
+        closing.popdown();
+    });
+    popover.connect_closed(|popover| {
+        let popover = popover.clone();
+        gtk::glib::idle_add_local_once(move || popover.unparent());
+    });
+    popover.popup();
+    entry.grab_focus();
 }
 
 pub fn update_setting(app: &Rc<App>, change: impl FnOnce(&mut Settings)) {

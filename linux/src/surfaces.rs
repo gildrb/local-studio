@@ -3,9 +3,7 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{gdk, glib};
-use local_studio_core::{
-    Device, DevicePlatform, FileContent, FileEntry, ItemKind, PullRequest, PullRequestDetail, ToolKind, ToolState,
-};
+use local_studio_core::{Device, DevicePlatform, FileContent, FileEntry, PullRequest, PullRequestDetail};
 use webkit::prelude::*;
 
 use crate::app::{App, Target};
@@ -350,30 +348,40 @@ impl AgentsSurface {
         Self { root, list, status }
     }
 
-    pub fn render(&self, app: &App) {
+    pub fn render(&self, app: &std::rc::Rc<App>) {
         self.list.remove_all();
-        let items = app.timeline.items();
-        let mut count = 0;
-        for item in items.iter() {
-            let ItemKind::Tool { kind: ToolKind::Agent, summary, name, state, output, started_at, ended_at, .. } =
-                &item.kind
-            else {
-                continue;
+        let (thread, agents) = {
+            let state = app.state.borrow();
+            let thread = state.selected.clone();
+            let agents = thread.as_ref().and_then(|thread| state.subagents.get(thread)).cloned().unwrap_or_default();
+            (thread, agents)
+        };
+        let now = format::now_ms();
+        for agent in &agents {
+            let (label, class) = if agent.running {
+                ("Working", "status-working")
+            } else {
+                match agent.status.as_str() {
+                    "failed" | "error" => ("Failed", "status-failed"),
+                    "cancelled" | "canceled" | "aborted" => ("Stopped", "dim-label"),
+                    _ => ("Done", "status-done"),
+                }
             };
-            count += 1;
-            let (label, class) = match state {
-                ToolState::Pending | ToolState::Running => ("Working", "status-working"),
-                ToolState::Succeeded => ("Done", "status-done"),
-                ToolState::Failed => ("Failed", "status-failed"),
-                ToolState::Aborted => ("Stopped", "dim-label"),
-            };
-            let elapsed = started_at
-                .zip(*ended_at)
-                .map(|(start, end)| format::duration(u64::try_from(end - start).unwrap_or(0)))
-                .unwrap_or_default();
+            let elapsed = agent
+                .duration_ms
+                .or_else(|| agent.started_at.map(|start| u64::try_from(now - start).unwrap_or(0)))
+                .map(format::duration);
+            let mut subtitle: Vec<String> = Vec::new();
+            subtitle.extend(agent.model.clone());
+            subtitle.extend(elapsed);
+            if agent.tokens > 0 {
+                subtitle.push(format!("{} tokens", format::tokens(agent.tokens)));
+            }
+            subtitle
+                .extend(agent.current_tool.as_ref().filter(|_| agent.running).map(|tool| format!("running {tool}")));
             let row = adw::ExpanderRow::builder()
-                .title(format::escape(if summary.is_empty() { name } else { summary }))
-                .subtitle(format::escape(&elapsed))
+                .title(format::escape(if agent.title.is_empty() { &agent.id } else { &agent.title }))
+                .subtitle(format::escape(&subtitle.join(" · ")))
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name("avatar-default-symbolic"));
             let pill = gtk::Label::new(Some(label));
@@ -381,7 +389,22 @@ impl AgentsSurface {
             pill.add_css_class(class);
             pill.set_valign(gtk::Align::Center);
             row.add_suffix(&pill);
-            let text = gtk::Label::new(Some(if output.is_empty() { "No output yet." } else { output.trim() }));
+            if agent.running {
+                let cancel =
+                    gtk::Button::builder().icon_name("process-stop-symbolic").tooltip_text("Cancel Subagent").build();
+                cancel.add_css_class("flat");
+                cancel.set_valign(gtk::Align::Center);
+                let (weak, thread, child) = (std::rc::Rc::downgrade(app), thread.clone(), agent.id.clone());
+                cancel.connect_clicked(move |_| {
+                    let (Some(app), Some(thread)) = (weak.upgrade(), thread.clone()) else { return };
+                    let child = child.clone();
+                    app.core.run(|studio| studio.cancel_subagent(thread, child));
+                });
+                row.add_suffix(&cancel);
+            }
+            let body =
+                agent.answer.clone().or_else(|| agent.note.clone()).unwrap_or_else(|| "No output yet.".to_string());
+            let text = gtk::Label::new(Some(body.trim()));
             text.add_css_class("ls-mono");
             text.set_wrap(true);
             text.set_wrap_mode(gtk::pango::WrapMode::WordChar);
@@ -394,8 +417,8 @@ impl AgentsSurface {
             row.add_row(&text);
             self.list.append(&row);
         }
-        self.list.set_visible(count > 0);
-        self.status.set_visible(count == 0);
+        self.list.set_visible(!agents.is_empty());
+        self.status.set_visible(agents.is_empty());
     }
 }
 

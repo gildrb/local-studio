@@ -18,8 +18,9 @@ pub struct Theme {
     pub accent: String,
 }
 
-const BUILTIN: [(&str, bool, &str, &str, &str, &str, &str); 6] = [
+const BUILTIN: [(&str, bool, &str, &str, &str, &str, &str); 7] = [
     ("Local Studio", true, "#0a0a0a", "#111111", "#111111", "#ececec", "#346bf1"),
+    (crate::colors::GILDRB, true, "#110b07", "#17100b", "#1e1711", "#f5eee0", "#d4af5d"),
     ("Midnight", true, "#0b1020", "#0f1529", "#121a33", "#e6e9f2", "#7aa2f7"),
     ("Graphite", true, "#161616", "#1c1c1c", "#202020", "#e8e8e8", "#6cc28b"),
     ("Nord", true, "#2e3440", "#3b4252", "#3b4252", "#eceff4", "#88c0d0"),
@@ -28,6 +29,10 @@ const BUILTIN: [(&str, bool, &str, &str, &str, &str, &str); 6] = [
 ];
 
 impl Theme {
+    pub fn adaptive(&self) -> bool {
+        self.name == crate::colors::GILDRB
+    }
+
     pub fn css(&self) -> String {
         let Theme { canvas, sidebar, card, text, accent, .. } = self;
         format!(

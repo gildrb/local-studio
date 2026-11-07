@@ -75,6 +75,7 @@ impl Sidebar {
             .build();
         header.pack_start(&toggle);
         header.pack_start(&new_thread);
+        crate::flows::new_thread_in_on_shift(&app, &new_thread);
         let brand = gtk::Label::new(Some("Local Studio"));
         brand.add_css_class("ls-brand");
         header.set_title_widget(Some(&brand));
@@ -99,10 +100,13 @@ impl Sidebar {
             .popover(&popover)
             .build();
         filter.add_css_class("flat");
-        let add = gtk::Button::builder()
+        let add_menu = gio::Menu::new();
+        add_menu.append(Some("Add Folder…"), Some("win.add-project"));
+        add_menu.append(Some("Clone Repository…"), Some("win.clone-project"));
+        let add = gtk::MenuButton::builder()
             .icon_name("folder-new-symbolic")
             .tooltip_text("Add Project")
-            .action_name("win.add-project")
+            .menu_model(&add_menu)
             .build();
         add.add_css_class("flat");
         let search_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
@@ -571,13 +575,17 @@ fn install_row_controllers(app: &Weak<App>, item: &gtk::ListItem, holder: &adw::
         }
     });
     holder.add_controller(click);
+    install_row_dnd(app, item, holder);
+}
+
+fn install_row_dnd(app: &Weak<App>, item: &gtk::ListItem, holder: &adw::Bin) {
     let drag = gtk::DragSource::new();
     drag.set_actions(gdk::DragAction::MOVE);
     let item_ref = item.downgrade();
     drag.connect_prepare(move |_, _, _| {
         let item = item_ref.upgrade()?;
         match entry_of(&item) {
-            Some(Entry::Thread(card)) if card.row.pinned => {
+            Some(Entry::Thread(card)) if !card.renaming => {
                 Some(gdk::ContentProvider::for_value(&card.row.id.to_value()))
             }
             _ => None,
@@ -585,19 +593,91 @@ fn install_row_controllers(app: &Weak<App>, item: &gtk::ListItem, holder: &adw::
     });
     holder.add_controller(drag);
     let drop = gtk::DropTarget::new(String::static_type(), gdk::DragAction::MOVE);
-    let (weak, item_ref) = (app.clone(), item.downgrade());
+    let item_ref = item.downgrade();
+    let badge_holder = holder.downgrade();
+    drop.connect_enter(move |_, _, _| {
+        let (Some(item), Some(holder)) = (item_ref.upgrade(), badge_holder.upgrade()) else {
+            return gdk::DragAction::empty();
+        };
+        let verb = match entry_of(&item) {
+            Some(Entry::Thread(card)) => Some(drop_verb(card.row.shelf)),
+            Some(Entry::Shelf { shelf, .. }) => Some(drop_verb(shelf)),
+            _ => None,
+        };
+        match verb {
+            Some(verb) => {
+                holder.set_tooltip_text(Some(verb));
+                holder.add_css_class("ls-drop-target");
+                gdk::DragAction::MOVE
+            }
+            None => gdk::DragAction::empty(),
+        }
+    });
+    let badge_holder = holder.downgrade();
+    drop.connect_leave(move |_| {
+        if let Some(holder) = badge_holder.upgrade() {
+            holder.remove_css_class("ls-drop-target");
+            holder.set_tooltip_text(None);
+        }
+    });
+    let (weak, item_ref, badge_holder) = (app.clone(), item.downgrade(), holder.downgrade());
     drop.connect_drop(move |_, value, _, _| {
+        if let Some(holder) = badge_holder.upgrade() {
+            holder.remove_css_class("ls-drop-target");
+            holder.set_tooltip_text(None);
+        }
         let (Some(app), Some(item), Ok(dragged)) = (weak.upgrade(), item_ref.upgrade(), value.get::<String>()) else {
             return false;
         };
-        let Some(Entry::Thread(card)) = entry_of(&item) else { return false };
-        if !card.row.pinned || card.row.id == dragged {
-            return false;
+        let source = app.state.borrow().row(&dragged).map(|row| row.shelf);
+        let Some(source) = source else { return false };
+        match entry_of(&item) {
+            Some(Entry::Thread(card)) if card.row.id != dragged => {
+                if card.row.pinned && source == Shelf::Pinned {
+                    crate::commands::move_pinned(&app, &dragged, &card.row.id);
+                } else {
+                    move_to_shelf(&app, &dragged, source, card.row.shelf);
+                }
+                true
+            }
+            Some(Entry::Shelf { shelf, .. }) => {
+                move_to_shelf(&app, &dragged, source, shelf);
+                true
+            }
+            _ => false,
         }
-        crate::commands::move_pinned(&app, &dragged, &card.row.id);
-        true
     });
     holder.add_controller(drop);
+}
+
+fn drop_verb(shelf: Shelf) -> &'static str {
+    match shelf {
+        Shelf::Pinned => "Pin",
+        Shelf::Snoozed => "Snooze for a day",
+        Shelf::Settled => "Settle",
+        _ => "Move to Active",
+    }
+}
+
+fn move_to_shelf(app: &Rc<App>, thread: &str, from: Shelf, to: Shelf) {
+    if from == to {
+        return;
+    }
+    let thread = thread.to_string();
+    app.core.run(|studio| {
+        match from {
+            Shelf::Pinned => studio.set_pinned(thread.clone(), false),
+            Shelf::Settled => studio.set_settled(thread.clone(), false),
+            Shelf::Snoozed => studio.snooze(thread.clone(), None),
+            _ => {}
+        }
+        match to {
+            Shelf::Pinned => studio.set_pinned(thread, true),
+            Shelf::Settled => studio.set_settled(thread, true),
+            Shelf::Snoozed => studio.snooze(thread, Some(crate::format::now_ms() + 24 * 60 * 60 * 1000)),
+            _ => {}
+        }
+    });
 }
 
 fn activate(app: &Rc<App>, entry: &Entry, modifiers: gdk::ModifierType) {
@@ -820,6 +900,17 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
     if row.pinned {
         top.append(&small_icon("view-pin-symbolic", "ls-meta"));
     }
+    if let Some(group) = &row.fan_out {
+        let marker = small_icon("view-dual-symbolic", "ls-meta");
+        marker.set_tooltip_text(Some(&format!("Part of a model comparison ({group})")));
+        top.append(&marker);
+    }
+    if row.live_agents > 0 {
+        let agents = gtk::Label::new(Some(&format!("{} agents", row.live_agents)));
+        agents.add_css_class("ls-meta");
+        agents.add_css_class("status-working");
+        top.append(&agents);
+    }
     if let Some(hint) = &hint {
         top.append(hint);
     } else if let Some((icon, label, class)) = format::status(row.status) {
@@ -836,7 +927,7 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
     column.append(&top);
     column.append(&title);
     let branch = row.branch.clone().filter(|branch| !branch.is_empty());
-    if branch.is_some() || row.additions > 0 || row.deletions > 0 {
+    if branch.is_some() || row.additions > 0 || row.deletions > 0 || row.pull_request.is_some() {
         let bottom = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         let label = gtk::Label::new(branch.as_deref());
         label.add_css_class("ls-meta");
@@ -847,6 +938,22 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
             label.set_tooltip_text(row.worktree.as_deref());
         }
         bottom.append(&label);
+        if let Some(pull) = &row.pull_request {
+            let badge = gtk::Label::new(Some(&format!("#{}", pull.number)));
+            badge.add_css_class("ls-pr-badge");
+            badge.add_css_class(match pull.state.to_ascii_lowercase().as_str() {
+                "merged" => "merged",
+                "closed" => "closed",
+                "draft" => "draft",
+                _ => "open",
+            });
+            badge.set_tooltip_text(Some(&format!(
+                "{} · {}",
+                pull.title,
+                format::capitalize(&pull.state.to_lowercase())
+            )));
+            bottom.append(&badge);
+        }
         if row.additions > 0 || row.deletions > 0 {
             let add = gtk::Label::new(Some(&format!("+{}", row.additions)));
             add.add_css_class("ls-add");

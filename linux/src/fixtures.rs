@@ -14,7 +14,7 @@ use crate::app::{App, Dirty};
 use crate::format;
 use crate::state::{Page, State};
 
-pub const SCENES: [&str; 38] = [
+pub const SCENES: [&str; 53] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -53,6 +53,21 @@ pub const SCENES: [&str; 38] = [
     "36-theme-midnight",
     "37-scroll-pill-minimap",
     "38-worktree-setup-scripts",
+    "39-subagents-panel",
+    "40-goal-fast-mode",
+    "41-fan-out-compare",
+    "42-skills-trigger",
+    "43-project-defaults",
+    "44-project-scripts",
+    "45-clone-repository",
+    "46-storage-settings",
+    "47-banners-wide-sidebar",
+    "48-snooze-custom",
+    "49-commit-dialog",
+    "50-review-comment",
+    "51-palette-grouped",
+    "52-theme-gildrb",
+    "53-theme-gildrb-light",
 ];
 
 pub const FOCUSED: &str = "t-sidebar";
@@ -188,6 +203,7 @@ pub fn teardown(app: &Rc<App>) {
     app.sidebar.reset();
     app.composer.reset();
     app.composer.tools.set_fixture(&[]);
+    crate::scenes_workflow::reset(app);
     app.branches.reset();
     app.timeline.clear();
     *app.state.borrow_mut() = State::default();
@@ -296,6 +312,9 @@ fn row(id: &str, project: &str, title: &str, shelf: Shelf, status: ThreadStatus,
         note: None,
         archived: false,
         auto_settle: true,
+        live_agents: 0,
+        fan_out: None,
+        pull_request: None,
     }
 }
 
@@ -320,6 +339,8 @@ fn threads() -> Vec<ThreadRow> {
                 row.branch = Some("linux/gtk".to_string());
                 row.additions = 412;
                 row.deletions = 37;
+                row.live_agents = 2;
+                row.pull_request = Some(pull(412, "Linux client on GTK4 and libadwaita", "OPEN"));
             }
             "t-release" => row.branch = Some("main".to_string()),
             "t-approval" => {
@@ -332,6 +353,11 @@ fn threads() -> Vec<ThreadRow> {
                 row.branch = Some("feat/fleet-chart".to_string());
                 row.additions = 96;
                 row.deletions = 41;
+                row.pull_request = Some(pull(409, "Fleet chart uses the shared palette", "MERGED"));
+            }
+            "t-idle" => {
+                row.status = ThreadStatus::Monitoring;
+                row.fan_out = Some("compare-1".to_string());
             }
             "t-snooze-1" => row.snoozed_until = Some(now + 2 * 60 * MINUTE),
             "t-snooze-2" => row.snoozed_until = Some(now + 3 * 24 * 60 * MINUTE),
@@ -369,6 +395,11 @@ fn models() -> Vec<ModelOption> {
         thinking_levels: if reasoning { levels.clone() } else { Vec::new() },
         context_window: 200_000,
         configured: true,
+        service_tiers: if provider == "openai" {
+            vec!["auto".to_string(), "flex".to_string(), "priority".to_string()]
+        } else {
+            Vec::new()
+        },
     })
     .collect()
 }
@@ -396,6 +427,30 @@ fn info(live: bool) -> ThreadInfo {
         context: Some(ContextUsage { tokens: 48_200, window: 200_000 }),
         branch: Some("linux/gtk".to_string()),
         worktree: None,
+        service_tier: None,
+        service_tiers: Vec::new(),
+        goal: None,
+    }
+}
+
+fn pull(number: u64, title: &str, state: &str) -> local_studio_core::PullRequest {
+    local_studio_core::PullRequest {
+        number,
+        title: title.to_string(),
+        url: format!("https://github.com/gildrb/local-studio/pull/{number}"),
+        state: state.to_string(),
+        checks: "passing".to_string(),
+        head: "linux/gtk".to_string(),
+        base: "main".to_string(),
+    }
+}
+
+fn thumbnail() -> local_studio_core::ImageThumbnail {
+    local_studio_core::ImageThumbnail {
+        mime_type: "image/png".to_string(),
+        data: crate::scenes::swatch(),
+        width: 96,
+        height: 64,
     }
 }
 
@@ -431,6 +486,7 @@ fn transcript(live: bool) -> Vec<Item> {
             text: "Sketch the sidebar inbox for the Linux client: one list across projects with Pinned, Active, Snoozed and Settled shelves.".to_string(),
             images: 0,
             entry: Some("entry-1".to_string()),
+            thumbnails: Vec::new(),
         }),
         item(2, 1, 29, ItemKind::Assistant {
             blocks: vec![Block::Text {
@@ -442,8 +498,9 @@ fn transcript(live: bool) -> Vec<Item> {
         }),
         item(3, 2, 22, ItemKind::User {
             text: "Good. Build it, wire the context menu to the core, and run clippy.".to_string(),
-            images: 0,
+            images: 1,
             entry: Some("entry-2".to_string()),
+            thumbnails: vec![thumbnail()],
         }),
         item(4, 2, 21, ItemKind::Assistant {
             blocks: vec![
@@ -501,6 +558,7 @@ fn transcript(live: bool) -> Vec<Item> {
                 text: "Make the sidebar toggle stay put when the sidebar collapses.".to_string(),
                 images: 0,
                 entry: None,
+                thumbnails: Vec::new(),
             },
         ));
         items.push(item(13, 3, 1, ItemKind::Assistant {

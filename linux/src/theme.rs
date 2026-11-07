@@ -35,6 +35,7 @@ window, dialog { font-size: 13px; }
 .status-failed { color: #f85149; }
 .status-done { color: #34d399; }
 .status-woke { color: #a78bfa; }
+.status-monitoring { color: #38bdf8; }
 .ls-crumb-project { color: alpha(currentColor, 0.55); }
 .ls-crumb-title { font-weight: 600; }
 .ls-bubble { background: alpha(currentColor, 0.08); border-radius: 16px; padding: 9px 13px; }
@@ -111,6 +112,26 @@ window, dialog { font-size: 13px; }
 .ls-minimap-button { min-width: 18px; min-height: 18px; padding: 0; }
 .ls-small-toggle { font-size: 12px; font-weight: normal; min-height: 24px; padding: 0 8px; }
 .ls-setup { background: var(--card-bg-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 10px 12px; }
+.ls-drop-hint { margin: 10px; border: 2px dashed alpha(var(--accent-bg-color), 0.7); border-radius: 16px; background: alpha(var(--accent-bg-color), 0.08); font-weight: 600; }
+.ls-sidebar-handle { background: transparent; }
+.ls-sidebar-handle:hover { background: alpha(var(--accent-bg-color), 0.35); }
+.ls-pr-badge { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 0 6px; }
+.ls-pr-badge.open { color: #34d399; background: alpha(#34d399, 0.12); }
+.ls-pr-badge.merged { color: #a78bfa; background: alpha(#a78bfa, 0.12); }
+.ls-pr-badge.closed { color: #f87171; background: alpha(#f87171, 0.12); }
+.ls-pr-badge.draft { color: alpha(currentColor, 0.6); background: alpha(currentColor, 0.08); }
+.ls-goal { background: alpha(var(--accent-bg-color), 0.08); border: 1px solid alpha(var(--accent-bg-color), 0.3); border-radius: 10px; padding: 6px 10px; }
+.ls-goal.active { border-color: alpha(var(--accent-bg-color), 0.6); }
+.ls-compare-on { color: var(--accent-color); }
+.ls-thumb { border-radius: 10px; }
+.ls-thumb-button { padding: 0; border-radius: 10px; }
+.ls-banner-error { background: alpha(#f87171, 0.14); }
+.ls-drop-target { box-shadow: inset 0 0 0 2px alpha(var(--accent-bg-color), 0.7); border-radius: 10px; }
+.ls-diff-tree { border-right: 1px solid var(--border-color); }
+.ls-palette-group { font-size: 11px; font-weight: 700; color: alpha(currentColor, 0.5); padding: 10px 12px 4px 12px; }
+.ls-emoji { font-size: 18px; min-width: 36px; min-height: 36px; padding: 0; }
+.ls-commit-box { border: 1px solid var(--border-color); border-radius: 10px; background: alpha(currentColor, 0.03); }
+.ls-commit-box textview, .ls-commit-box textview text { background: transparent; }
 ";
 
 const DARK: &str = r"
@@ -161,6 +182,14 @@ pub fn install() {
     };
     apply(&manager);
     manager.connect_dark_notify(apply);
+    manager.connect_dark_notify(|_| {
+        let last = SETTINGS.with(|last| last.borrow().clone());
+        if let Some(settings) =
+            last.filter(|settings| crate::themes::find(settings).is_none_or(|theme| theme.adaptive()))
+        {
+            self::apply(&settings);
+        }
+    });
     if let Some(settings) = gtk::Settings::default() {
         settings.set_gtk_enable_animations(false);
     }
@@ -174,10 +203,18 @@ pub fn color_scheme(scheme: local_studio_core::ColorScheme) {
     });
 }
 
+type Listener = Box<dyn Fn(&crate::colors::Colors)>;
+
 thread_local! {
     static DYNAMIC: gtk::CssProvider = gtk::CssProvider::new();
     static INSTALLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static LAST: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) };
+    static SETTINGS: std::cell::RefCell<Option<local_studio_core::Settings>> = const { std::cell::RefCell::new(None) };
+    static LISTENERS: std::cell::RefCell<Vec<Listener>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+pub fn on_colors(listener: impl Fn(&crate::colors::Colors) + 'static) {
+    LISTENERS.with(|listeners| listeners.borrow_mut().push(Box::new(listener)));
 }
 
 pub fn preview(theme: &crate::themes::Theme) {
@@ -191,17 +228,29 @@ pub fn preview(theme: &crate::themes::Theme) {
 }
 
 pub fn apply(settings: &local_studio_core::Settings) {
+    SETTINGS.with(|last| last.replace(Some(settings.clone())));
     let theme = crate::themes::find(settings);
-    if let Some(theme) = &theme {
-        adw::StyleManager::default().set_color_scheme(if theme.dark {
-            adw::ColorScheme::ForceDark
-        } else {
-            adw::ColorScheme::ForceLight
-        });
+    match &theme {
+        Some(theme) if !theme.adaptive() => {
+            adw::StyleManager::default().set_color_scheme(if theme.dark {
+                adw::ColorScheme::ForceDark
+            } else {
+                adw::ColorScheme::ForceLight
+            });
+        }
+        _ => color_scheme(settings.color_scheme),
     }
+    let dark = match &theme {
+        Some(theme) if !theme.adaptive() => theme.dark,
+        _ => adw::StyleManager::default().is_dark(),
+    };
+    let colors = crate::colors::resolve(settings.theme.as_deref(), dark);
+    crate::colors::set_current(&colors);
     let mut css = settings_css(settings);
-    if let Some(theme) = &theme {
-        css.push_str(&theme.css());
+    match &theme {
+        Some(theme) if theme.adaptive() => css.push_str(&crate::colors::css(&colors)),
+        Some(theme) => css.push_str(&theme.css()),
+        None => {}
     }
     write!(
         css,
@@ -220,6 +269,11 @@ pub fn apply(settings: &local_studio_core::Settings) {
                     gtk::STYLE_PROVIDER_PRIORITY_APPLICATION + 2,
                 );
             }
+        }
+    });
+    LISTENERS.with(|listeners| {
+        for listener in listeners.borrow().iter() {
+            listener(&colors);
         }
     });
     if let Some(gtk_settings) = gtk::Settings::default() {
