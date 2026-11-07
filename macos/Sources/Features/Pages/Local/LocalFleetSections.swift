@@ -2,32 +2,6 @@ import Charts
 import LocalStudioKit
 import SwiftUI
 
-struct LocalPage: View {
-    let store: StudioStore
-    var leadingInset: CGFloat = 0
-    var initiallyOpen: [String] = []
-
-    var body: some View {
-        SettingsForm {
-            LocalFleetSections(store: store, initiallyOpen: initiallyOpen)
-        }
-        .pageHeader {
-            PageHeader("Local", subtitle: subtitle, leadingInset: leadingInset) {
-                ChromeIconButton("Refresh", symbol: "arrow.clockwise") { store.pages.refreshLocal() }
-            }
-        }
-        .background(Theme.canvas)
-        .localPolling(store.pages)
-    }
-
-    private var subtitle: String {
-        let controllers = store.pages.local?.controllers ?? []
-        guard !controllers.isEmpty else { return LocalControllerAddress.effective(store.pages.settings) }
-        let online = controllers.filter(\.reachable).count
-        return "\(online) of \(controllers.count) machine\(controllers.count == 1 ? "" : "s") online"
-    }
-}
-
 struct LocalPolling: ViewModifier {
     let pages: PagesStore
 
@@ -58,14 +32,9 @@ struct MachineUI: Equatable {
 
 struct LocalFleetSections: View {
     let store: StudioStore
-    @State private var machines: [String: MachineUI]
+    @State private var machines: [String: MachineUI] = [:]
     @State private var scanned = false
     @Environment(\.settingsQuery) private var query
-
-    init(store: StudioStore, initiallyOpen: [String] = []) {
-        self.store = store
-        _machines = State(initialValue: Dictionary(uniqueKeysWithValues: initiallyOpen.map { ($0, MachineUI(open: true)) }))
-    }
 
     private var pages: PagesStore { store.pages }
     private var snapshot: LocalSnapshot? { pages.local }
