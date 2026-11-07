@@ -34,7 +34,7 @@ struct ArchivePage: View {
 
     @ViewBuilder private var content: some View {
         if !pages.archiveLoaded {
-            PageEmptyState(symbol: "archivebox", title: "Loading archived threads…")
+            PageEmptyState.loading("Loading archived threads…")
         } else if pages.archived.isEmpty {
             PageEmptyState(symbol: "archivebox", title: "No archived threads", message: "Archived threads leave the sidebar and wait here until you restore or delete them.")
         } else {

@@ -364,18 +364,29 @@ struct PanelToolbar<Content: View>: View {
 }
 
 struct PanelMessage: View {
-    let symbol: String
+    let symbol: String?
     let title: String
     var detail: String?
     var actionTitle: String?
     var action: (() -> Void)?
 
+    static func loading(_ title: String) -> PanelMessage {
+        PanelMessage(symbol: nil, title: title)
+    }
+
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
-                .accessibilityHidden(true)
+            Group {
+                if let symbol {
+                    Image(systemName: symbol)
+                        .font(.system(size: 22, weight: .light))
+                        .foregroundStyle(Theme.chromeIcon)
+                } else {
+                    LogoMark(style: .coin)
+                        .frame(width: 26, height: 26)
+                }
+            }
+            .accessibilityHidden(true)
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .multilineTextAlignment(.center)
@@ -507,11 +518,18 @@ private struct AgentRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 8) {
-                Image(systemName: style.symbol)
-                    .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(style.tint)
-                    .frame(width: 18, height: 18)
-                    .accessibilityHidden(true)
+                Group {
+                    if agent.running {
+                        LogoMark()
+                            .frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: style.symbol)
+                            .font(.system(size: 13, weight: .light))
+                            .foregroundStyle(style.tint)
+                    }
+                }
+                .frame(width: 18, height: 18)
+                .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(agent.title)
                         .font(.system(size: 13))

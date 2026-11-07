@@ -120,7 +120,7 @@ struct PullRequestsPage: View {
                 }
             }
         } else {
-            PageEmptyState(symbol: "arrow.triangle.pull", title: "Loading pull requests…")
+            PageEmptyState.loading("Loading pull requests…")
         }
     }
 }
@@ -289,7 +289,7 @@ private struct PullDetailView: View {
         } else if let error {
             PageEmptyState(symbol: "exclamationmark.triangle", title: "Couldn’t load the pull request", message: error)
         } else {
-            PageEmptyState(symbol: "arrow.triangle.pull", title: "Loading #\(pull.number)…")
+            PageEmptyState.loading("Loading #\(pull.number)…")
         }
     }
 

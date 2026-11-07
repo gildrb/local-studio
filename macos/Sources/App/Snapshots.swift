@@ -42,6 +42,12 @@ enum Snapshots {
                 print("snapshot \(url.path)")
             }
         }
+        if filter.map({ "logo".contains($0) || $0.contains("logo") }) ?? true {
+            for url in LogoStrip.write(into: directory) {
+                written += 1
+                print("snapshot \(url.path)")
+            }
+        }
         print("PASS snapshots: \(written) images")
         return 0
     }

@@ -52,9 +52,9 @@ struct DeviceSurfaceView: View {
     @ViewBuilder private var content: some View {
         switch model.phase {
         case .idle:
-            PanelMessage(symbol: "clock", title: "Looking for devices…")
+            PanelMessage.loading("Looking for devices…")
         case .loading where model.devices.isEmpty:
-            PanelMessage(symbol: "clock", title: "Looking for devices…")
+            PanelMessage.loading("Looking for devices…")
         case .failed(let message) where model.devices.isEmpty:
             PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t list devices.", detail: message, actionTitle: "Try Again") { model.load() }
         default:

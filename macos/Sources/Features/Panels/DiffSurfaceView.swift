@@ -104,7 +104,7 @@ struct DiffSurfaceView: View {
         } else if model.files.isEmpty {
             switch model.phase {
             case .idle, .loading:
-                PanelMessage(symbol: "clock", title: "Loading changes…")
+                PanelMessage.loading("Loading changes…")
             case .loaded, .failed:
                 PanelMessage(symbol: "checkmark.circle", title: model.emptyMessage)
             }

@@ -55,15 +55,25 @@ extension View {
 }
 
 struct PageEmptyState: View {
-    let symbol: String
+    let symbol: String?
     let title: String
     var message: String?
 
+    static func loading(_ title: String) -> PageEmptyState {
+        PageEmptyState(symbol: nil, title: title)
+    }
+
     var body: some View {
         VStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 24, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+            if let symbol {
+                Image(systemName: symbol)
+                    .font(.system(size: 24, weight: .light))
+                    .foregroundStyle(Theme.chromeIcon)
+            } else {
+                LogoMark(style: .coin)
+                    .frame(width: 30, height: 30)
+                    .accessibilityHidden(true)
+            }
             Text(title)
                 .font(.system(size: 13, weight: .medium))
             if let message {

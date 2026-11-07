@@ -443,7 +443,11 @@ private struct ToolStateGlyph: View {
         case .pending:
             glyph("clock", Theme.secondaryText, "Pending")
         case .running:
-            glyph("circle.dotted", Theme.secondaryText, "Running")
+            LogoMark(tint: Theme.secondaryText)
+                .frame(width: 12, height: 12)
+                .frame(width: 14)
+                .help("Running")
+                .accessibilityLabel("Running")
         case .succeeded:
             glyph("checkmark", Theme.secondaryText.opacity(0.7), "Succeeded")
         case .failed:
@@ -765,9 +769,16 @@ struct WorkingRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(waitingForApproval ? Color.orange : Theme.primary)
-                .frame(width: 6, height: 6)
+            if waitingForApproval {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 6, height: 6)
+                    .frame(width: 16)
+            } else {
+                LogoMark()
+                    .frame(width: 16, height: 16)
+                    .accessibilityHidden(true)
+            }
             if let started = info.runStartedAt, !waitingForApproval, !info.compacting, info.retryAttempt == 0 {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
                     Text("Working for \(elapsed(since: started, now: context.date))")

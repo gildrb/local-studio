@@ -183,7 +183,7 @@ struct BrowserContent: View {
                 Theme.canvas
                 PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t open this page.", detail: failure, actionTitle: "Try Again") { model.reload() }
             } else if model.current == nil, model.loading {
-                PanelMessage(symbol: "clock", title: "Loading \(model.address)…")
+                PanelMessage.loading("Loading \(model.address)…")
             } else if model.current == nil {
                 PanelMessage(symbol: "globe", title: "Preview a page", detail: "Enter a URL, such as localhost:3000, to open it here.")
             }
