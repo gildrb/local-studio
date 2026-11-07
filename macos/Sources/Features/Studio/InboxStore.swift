@@ -51,6 +51,11 @@ struct InboxSearchEntry: Identifiable, Equatable {
     let updatedAt: Int64?
 }
 
+struct FanOutPosition: Equatable {
+    let index: Int
+    let count: Int
+}
+
 @MainActor
 @Observable
 final class InboxStore {
@@ -133,6 +138,7 @@ final class InboxStore {
 
     private(set) var projectScripts: [String: [ProjectScript]] = [:]
     private(set) var projectSettings: [String: (settings: ProjectSettings, effective: Settings)] = [:]
+    private(set) var fanOut: [String: FanOutPosition] = [:]
 
     func setProjectScripts(project: String, scripts: [ProjectScript]) {
         projectScripts[project] = scripts
@@ -206,7 +212,44 @@ final class InboxStore {
         self.threads = threads
         index = Dictionary(threads.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         selection.formIntersection(index.keys)
+        var groups: [String: [ThreadRow]] = [:]
+        for row in threads {
+            if let group = row.fanOut { groups[group, default: []].append(row) }
+        }
+        var positions: [String: FanOutPosition] = [:]
+        for members in groups.values where members.count > 1 {
+            for (offset, row) in members.sorted(by: { $0.id < $1.id }).enumerated() {
+                positions[row.id] = FanOutPosition(index: offset + 1, count: members.count)
+            }
+        }
+        if positions != fanOut { fanOut = positions }
         rebuild()
+    }
+
+    func restart(_ id: String) {
+        core.run { $0.restartThread(thread: id) }
+    }
+
+    func loadProjectSettings(_ project: String) {
+        core.run { $0.loadProjectSettings(project: project) }
+    }
+
+    func updateProjectSettings(_ project: String, _ settings: ProjectSettings) {
+        core.run { $0.updateProjectSettings(project: project, settings: settings) }
+    }
+
+    func saveProjectScripts(_ project: String, _ scripts: [ProjectScript]) {
+        core.run { $0.setProjectScripts(project: project, scripts: scripts) }
+    }
+
+    func importProjectScripts(_ project: String, done: @escaping (RequestOutcome) -> Void) {
+        let request = requests.issue(onOutcome: done)
+        core.run { $0.importProjectScripts(request: request, project: project) }
+    }
+
+    func cloneProject(url: String, parent: String, done: @escaping (RequestOutcome) -> Void) {
+        let request = requests.issue(onOutcome: done)
+        core.run { $0.cloneProject(request: request, url: url, parentDir: parent) }
     }
 
     func notify(thread: String, kind: NotificationKind, title: String, body: String) {

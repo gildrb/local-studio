@@ -123,6 +123,22 @@ extension SnapshotCatalog {
             panelEntry("panels-pr-checks", size: size, updates: PanelFixtures.base) { store in
                 PanelFixtures.openDetail(store, tab: .checks)
             },
+            panelEntry("panels-pr-checked-out", size: size, updates: PanelFixtures.base) { store in
+                PanelFixtures.openDetail(store, tab: .summary)
+                guard case .pullRequest(let model) = store.workspace.panels.activeContent?.content else { return }
+                model.actions.checkOut(store, project: PanelFixtures.project, number: model.pull.number)
+                if let request = model.actions.request {
+                    store.receive([.requestDone(request: request, message: "/Users/demo/Library/Application Support/Local Studio/worktrees/local-studio/pr-412")])
+                }
+            },
+            panelEntry("panels-pr-merge-failed", size: size, updates: PanelFixtures.base) { store in
+                PanelFixtures.openDetail(store, tab: .checks)
+                guard case .pullRequest(let model) = store.workspace.panels.activeContent?.content else { return }
+                model.actions.merge(store, project: PanelFixtures.project, number: model.pull.number, method: .squash) {}
+                if let request = model.actions.request {
+                    store.receive([.requestFailed(request: request, message: "GraphQL: Pull request is not mergeable: required status check \"SwiftLint\" is failing.")])
+                }
+            },
             panelEntry("panels-pr-error", size: size, updates: PanelFixtures.base) { store in
                 store.workspace.panels.openSurface(.pullRequest)
                 guard case .pullRequest(let model) = store.workspace.panels.activeContent?.content, let request = model.request else { return }
@@ -158,6 +174,12 @@ extension SnapshotCatalog {
             },
             panelEntry("panels-agents", size: size, focus: PanelFixtures.thread, updates: PanelFixtures.base + PanelFixtures.thread(agents: true)) { store in
                 store.workspace.panels.openSurface(.agents)
+            },
+            panelEntry("panels-agents-detail", size: size, focus: PanelFixtures.thread, updates: PanelFixtures.base + PanelFixtures.thread(agents: true)) { store in
+                let panels = store.workspace.panels
+                panels.openSurface(.agents)
+                panels.cancelSubagent("child-2")
+                panels.expandedAgents = ["child-3"]
             },
             drawerEntry("drawer-single") { store in
                 store.workspace.panels.terminalOpen = true
@@ -351,27 +373,39 @@ enum PanelFixtures {
             branch: "feat/panels", worktree: nil, provider: "anthropic", model: "claude-opus", additions: 214, deletions: 37,
             note: nil, archived: false, autoSettle: true, liveAgents: agents ? 2 : 0, fanOut: nil, pullRequest: nil
         )
-        var items: [Item] = [
+        let items: [Item] = [
             Item(id: 1, turn: 1, createdAt: now - 900_000, kind: .user(text: "Build the panels", images: 0, entry: nil, thumbnails: [])),
             Item(id: 2, turn: 1, createdAt: now - 600_000, kind: .turnSummary(turn: 1, durationMs: 192_000, toolCount: 14)),
             Item(id: 3, turn: 2, createdAt: now - 400_000, kind: .turnSummary(turn: 2, durationMs: 64_000, toolCount: 5)),
         ]
-        if agents {
-            items += [
-                agent(4, "Audit split diff pairing against git output", state: .running, started: now - 140_000, ended: nil, output: "Reading core/src/workspace/diff.rs\nComparing 3 hunks…"),
-                agent(5, "Port drawer height clamp from ThreadTerminalDrawer.logic.ts", state: .running, started: now - 40_000, ended: nil, output: ""),
-                agent(6, "Find every caller of open_terminal", state: .succeeded, started: now - 500_000, ended: now - 452_000, output: "core/src/workspace/api.rs:211\nmacos/Sources/Features/Studio/WorkspaceStore.swift:118"),
-                agent(7, "Check SwiftTerm license", state: .failed, started: now - 700_000, ended: now - 691_000, output: "Network unavailable."),
-            ]
-        }
-        return [.threads(threads: [row]), .transcript(thread: thread, op: .reset(items: items))]
-    }
-
-    private static func agent(_ id: UInt64, _ summary: String, state: ToolState, started: Int64, ended: Int64?, output: String) -> Item {
-        Item(id: id, turn: 3, createdAt: started, kind: .tool(
-            callId: "call-\(id)", name: "Task", kind: .agent, summary: summary, arguments: "{}", state: state,
-            output: output, fileChange: nil, startedAt: started, endedAt: ended
-        ))
+        let children: [Subagent] = agents ? [
+            Subagent(
+                id: "child-1", title: "Audit split diff pairing against git output", status: "Running", running: true,
+                startedAt: now - 140_000, durationMs: nil, tokens: 18_420, currentTool: "read core/src/workspace/diff.rs",
+                note: nil, model: "claude-sonnet", answer: nil
+            ),
+            Subagent(
+                id: "child-2", title: "Port drawer height clamp from ThreadTerminalDrawer.logic.ts", status: "Running", running: true,
+                startedAt: now - 40_000, durationMs: nil, tokens: 3_100, currentTool: "bash rg TERMINAL_MAX_DRAWER_HEIGHT_RATIO",
+                note: nil, model: "claude-haiku", answer: nil
+            ),
+            Subagent(
+                id: "child-3", title: "Find every caller of open_terminal", status: "Done", running: false,
+                startedAt: now - 500_000, durationMs: 48_000, tokens: 9_870, currentTool: nil,
+                note: "Searched core and macos.", model: "claude-haiku",
+                answer: "Two callers:\n\n- `core/src/workspace/api.rs:211`\n- `macos/Sources/Features/Studio/WorkspaceStore.swift:118`"
+            ),
+            Subagent(
+                id: "child-4", title: "Check SwiftTerm license", status: "Failed", running: false,
+                startedAt: now - 700_000, durationMs: 9_000, tokens: 1_240, currentTool: nil,
+                note: "Network unavailable.", model: "claude-haiku", answer: nil
+            ),
+        ] : []
+        return [
+            .threads(threads: [row]),
+            .transcript(thread: thread, op: .reset(items: items)),
+            .subagents(thread: thread, agents: children),
+        ]
     }
 
     static let diffFiles: [FileDiff] = [

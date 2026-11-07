@@ -41,6 +41,17 @@ extension StudioStore {
         }
     }
 
+    func openPullRequest(_ pull: PullRequest, for row: ThreadRow) {
+        let branchPull = gitProject(for: row).flatMap { workspace.gitStatus[$0]?.pullRequest }
+        guard branchPull?.number == pull.number else {
+            GitRunner.openURL(pull.url)
+            return
+        }
+        open(row.id)
+        panels.focus(row.id)
+        panels.openSurface(.pullRequest)
+    }
+
     func newThread(in project: String?) {
         if conversation.thread != nil {
             shell.record(from: conversation.thread, to: nil)

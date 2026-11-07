@@ -49,7 +49,6 @@ struct ComposerSuggestion: Identifiable {
         case insert(String)
         case models
         case compact
-        case skill(String)
         case pullRequest(PullRequest)
     }
 
@@ -77,26 +76,24 @@ struct ComposerSuggestionSource {
                 items.append(ComposerSuggestion(id: "builtin:compact", title: "/compact", detail: "Compact the conversation context", symbol: "command", badge: "Built-in", action: .compact))
             }
             let showsSkills = store.pages.settings?.showSkillsInSlashMenu ?? true
-            for command in conversation.commands where showsSkills || command.source != "skill" {
+            for command in conversation.commands where showsSkills || command.kind != .skill {
                 let name = Self.bare(command.name)
                 guard name != "model", name != "compact" || conversation.thread == nil else { continue }
                 items.append(ComposerSuggestion(
                     id: "command:\(command.source):\(name)",
                     title: "/" + name,
                     detail: command.description,
-                    symbol: command.source == "skill" ? "book" : "command",
-                    badge: Self.kind(command.source),
+                    symbol: command.kind == .skill ? "book" : command.kind == .template ? "text.alignleft" : "command",
+                    badge: Self.kind(command.kind),
                     action: .insert("/" + name + " ")
                 ))
             }
             return Self.ranked(items, query: query) { String($0.title.dropFirst()) }
         case .skill:
-            let items = conversation.commands.filter { $0.source == "skill" }.map { command in
-                let name = Self.bare(command.name)
-                let skill = name.hasPrefix("skill:") ? String(name.dropFirst(6)) : name
-                return ComposerSuggestion(
-                    id: "skill:\(name)", title: "$" + skill, detail: command.description, symbol: "book",
-                    badge: "Skill", action: .skill(name)
+            let items = conversation.skills.map { skill in
+                ComposerSuggestion(
+                    id: "skill:\(skill.path)", title: "$" + skill.name, detail: skill.description, symbol: "book",
+                    badge: Self.source(skill.source), action: .insert("$" + skill.name + " ")
                 )
             }
             return Self.ranked(items, query: query) { String($0.title.dropFirst()) }
@@ -132,7 +129,7 @@ struct ComposerSuggestionSource {
         case .command:
             return conversation.commandsLoaded ? "No matching command." : "Loading commands…"
         case .skill:
-            return conversation.commandsLoaded ? "No matching skill." : "Loading skills…"
+            return conversation.skillsLoaded ? "No matching skill." : "Loading skills…"
         case .mention:
             return conversation.mentionRequest.flatMap { store.workspace.searchResults[$0] } == nil
                 ? "Searching workspace files…" : "No matching files or folders."
@@ -149,13 +146,21 @@ struct ComposerSuggestionSource {
         name.hasPrefix("/") ? String(name.dropFirst()) : name
     }
 
-    private static func kind(_ source: String) -> String {
+    private static func kind(_ kind: CommandKind) -> String {
+        switch kind {
+        case .command: "Command"
+        case .template: "Template"
+        case .skill: "Skill"
+        }
+    }
+
+    private static func source(_ source: SkillSource) -> String {
         switch source {
-        case "": "Command"
-        case "extension": "Extension"
-        case "prompt": "Prompt"
-        case "skill": "Skill"
-        default: source.capitalized
+        case .app: "App"
+        case .repo: "Repo"
+        case .project: "Project"
+        case .personal: "Personal"
+        case .system: "System"
         }
     }
 

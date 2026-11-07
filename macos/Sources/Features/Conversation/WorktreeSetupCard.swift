@@ -5,6 +5,8 @@ struct WorktreeSetupCard: View {
     let stages: [SetupStage]
     let done: Bool
     let error: String?
+    let cancel: () -> Void
+    let workLocally: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -28,6 +30,16 @@ struct WorktreeSetupCard: View {
                     .foregroundStyle(.red)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            if !done || error != nil {
+                HStack(spacing: 8) {
+                    Spacer(minLength: 0)
+                    Button("Cancel", action: cancel)
+                        .help("Stop setting up the worktree and keep the draft")
+                    Button("Work Locally", action: workLocally)
+                        .help("Skip the worktree and start the thread in the project checkout")
+                }
+                .controlSize(.small)
             }
         }
         .padding(12)

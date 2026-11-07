@@ -213,6 +213,11 @@ final class TerminalGroup: Identifiable {
         return session
     }
 
+    func insert(_ session: TerminalSession) {
+        sessions.append(session)
+        focused = session.id
+    }
+
     func close(_ session: TerminalSession) {
         session.close()
         sessions.removeAll { $0.id == session.id }
@@ -261,6 +266,14 @@ final class TerminalDeck {
         groups.append(group)
         active = group.id
         return session
+    }
+
+    func adopt(_ make: (Int) -> TerminalSession) {
+        ordinal += 1
+        let group = TerminalGroup(deck: self)
+        group.insert(make(ordinal))
+        groups.append(group)
+        active = group.id
     }
 
     func split(_ axis: TerminalAxis) {

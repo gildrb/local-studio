@@ -199,8 +199,6 @@ async fn run_script(
         .current_dir(worktree)
         .env("LOCAL_STUDIO_PROJECT_ROOT", project)
         .env("LOCAL_STUDIO_WORKTREE_PATH", worktree)
-        .env("T3CODE_PROJECT_ROOT", project)
-        .env("T3CODE_WORKTREE_PATH", worktree)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

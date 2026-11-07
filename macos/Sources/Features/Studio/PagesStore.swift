@@ -231,4 +231,10 @@ final class PagesStore {
     func setHiddenModel(provider: String, model: String, hidden: Bool) {
         core.run { $0.setHiddenModel(provider: provider, model: model, hidden: hidden) }
     }
+
+    func cleanupWorktrees(_ finished: @escaping (RequestOutcome) -> Void) {
+        let request = requests.issue(onOutcome: finished)
+        core.run { $0.cleanupWorktrees(request: request) }
+    }
+
 }

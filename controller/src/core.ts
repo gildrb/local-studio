@@ -21,8 +21,16 @@ export const Config = Schema.Struct({
 });
 export type Config = typeof Config.Type;
 
-export const home = process.env.LOCAL_STUDIO_T3_HOME ?? join(homedir(), ".local-studio-t3");
-export const port = Number(process.env.LOCAL_STUDIO_T3_PORT ?? 18091);
+export const LEGACY_DIR = ".local-studio-t3";
+const LEGACY_HOME = join(homedir(), LEGACY_DIR);
+const resolveHome = (): string => {
+  const configured = process.env.LOCAL_STUDIO_CONTROLLER_HOME;
+  if (configured) return configured;
+  const fresh = join(homedir(), ".local-studio-controller");
+  return !existsSync(fresh) && existsSync(join(LEGACY_HOME, "config.json")) ? LEGACY_HOME : fresh;
+};
+export const home = resolveHome();
+export const port = Number(process.env.LOCAL_STUDIO_CONTROLLER_PORT ?? 18091);
 const configPath = join(home, "config.json");
 
 export const writeJson = (path: string, value: unknown): void => {

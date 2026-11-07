@@ -68,6 +68,8 @@ struct ProjectSettingsPane: View {
                 } header: {
                     Text("Checkout")
                 }
+                ProjectDefaultsSection(store: store, project: project.id)
+                ProjectScriptsSection(store: store, project: project.id)
                 Section {
                     Button("Remove Project…", role: .destructive) { confirmRemove = true }
                 } footer: {
@@ -83,7 +85,9 @@ struct ProjectSettingsPane: View {
             }
         }
         .task(id: project?.id) {
-            if let project, project.isGit, store.workspace.gitStatus[project.id] == nil {
+            guard let project else { return }
+            store.inbox.loadProjectSettings(project.id)
+            if project.isGit, store.workspace.gitStatus[project.id] == nil {
                 store.core.run { $0.gitStatus(project: project.id) }
             }
         }
@@ -105,7 +109,7 @@ struct ProjectSettingsPane: View {
     }
 }
 
-private struct ProjectIconPicker: View {
+struct ProjectIconPicker: View {
     let current: String?
     let choose: (String?) -> Void
     @State private var emoji = ""

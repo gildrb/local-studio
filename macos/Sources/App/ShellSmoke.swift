@@ -81,6 +81,23 @@ final class ShellSmoke {
             Step(name: "reset project icon", act: { $0.store.inbox.setProjectIcon($0.project, nil) }, done: { smoke in
                 smoke.store.inbox.project(smoke.project).map { $0.icon == nil } ?? false
             }),
+            Step(name: "load project settings", act: { $0.store.inbox.loadProjectSettings($0.project) }, done: { smoke in
+                smoke.store.inbox.projectSettings[smoke.project] != nil && smoke.store.inbox.projectScripts[smoke.project] != nil
+            }),
+            Step(name: "project override", act: { smoke in
+                let overrides = ProjectSettings(defaultProvider: nil, defaultModel: nil, defaultThinkingLevel: nil, defaultAccess: .fullAccess, newThreadWorkspace: .local, newWorktreesStartFromOrigin: nil)
+                smoke.store.inbox.updateProjectSettings(smoke.project, overrides)
+            }, done: { smoke in
+                let entry = smoke.store.inbox.projectSettings[smoke.project]
+                return entry?.settings.defaultAccess == .fullAccess && entry?.effective.defaultAccess == .fullAccess
+            }),
+            Step(name: "project script", act: { smoke in
+                let script = ProjectScript(id: "smoke", name: "Smoke", command: "echo smoke", icon: "play", keybinding: "cmd+shift+y", runOnWorktreeSetup: false, waitForSetup: false)
+                smoke.store.inbox.saveProjectScripts(smoke.project, [script])
+            }, done: { $0.store.inbox.projectScripts[$0.project]?.map(\.name) == ["Smoke"] }),
+            Step(name: "clear project script", act: { $0.store.inbox.saveProjectScripts($0.project, []) }, done: { smoke in
+                smoke.store.inbox.projectScripts[smoke.project]?.isEmpty == true
+            }),
             Step(name: "start thread", act: { smoke in
                 smoke.store.newThread(in: smoke.project)
                 smoke.store.conversation.send("run the smoke command", project: smoke.project, steer: false)

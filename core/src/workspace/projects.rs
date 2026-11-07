@@ -10,7 +10,7 @@ use super::model::{ProjectScript, ProjectSettings, Settings};
 use super::{files, settings, ProjectAdder, Workspace};
 use crate::model::{NoticeLevel, Update};
 
-const PROJECT_FILES: [&str; 2] = ["t3.json", "local-studio.json"];
+const PROJECT_FILE: &str = "local-studio.json";
 const MAX_SCRIPTS: usize = 50;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -162,19 +162,19 @@ fn remove_trailing_commas(text: &str) -> String {
     out
 }
 
-pub(crate) fn import(root: &Path) -> Result<(Vec<ProjectScript>, Vec<String>), String> {
-    let mut scripts = Vec::new();
-    let mut found = Vec::new();
-    for name in PROJECT_FILES {
-        let path = root.join(name);
-        let Ok(text) = std::fs::read_to_string(&path) else { continue };
-        let value: Value =
-            serde_json::from_str(&strip_jsonc(&text)).map_err(|error| format!("{name} is not valid JSON: {error}"))?;
-        found.push(name.to_string());
-        for entry in value.get("scripts").and_then(Value::as_array).map_or(&[][..], Vec::as_slice) {
+pub(crate) fn import(root: &Path) -> Result<Vec<ProjectScript>, String> {
+    let Ok(text) = std::fs::read_to_string(root.join(PROJECT_FILE)) else {
+        return Err(format!("No {PROJECT_FILE} at the project root."));
+    };
+    let value: Value = serde_json::from_str(&strip_jsonc(&text))
+        .map_err(|error| format!("{PROJECT_FILE} is not valid JSON: {error}"))?;
+    let entries = value.get("scripts").and_then(Value::as_array).map_or(&[][..], Vec::as_slice);
+    Ok(entries
+        .iter()
+        .map(|entry| {
             let text = |key: &str| entry.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
             let flag = |key: &str| entry.get(key).and_then(Value::as_bool);
-            scripts.push(ProjectScript {
+            ProjectScript {
                 id: text("id"),
                 name: text("name"),
                 command: text("command"),
@@ -187,13 +187,9 @@ pub(crate) fn import(root: &Path) -> Result<(Vec<ProjectScript>, Vec<String>), S
                     .map(|background| !background)
                     .or_else(|| flag("waitForSetup"))
                     .unwrap_or(false),
-            });
-        }
-    }
-    if found.is_empty() {
-        return Err("No t3.json or local-studio.json at the project root.".to_string());
-    }
-    Ok((scripts, found))
+            }
+        })
+        .collect())
 }
 
 pub(crate) fn merge_imported(existing: &[ProjectScript], imported: Vec<ProjectScript>) -> Vec<ProjectScript> {
@@ -300,13 +296,13 @@ impl Workspace {
         let reply = request.clone();
         self.answer(request, async move {
             let root = files::root(&project)?;
-            let (imported, found) =
+            let imported =
                 tokio::task::spawn_blocking(move || import(&root)).await.map_err(|error| error.to_string())??;
             let count = imported.len();
             let existing = workspace.project_entry(&project).scripts;
             let merged = merge_imported(&existing, imported);
             workspace.edit_project(project, move |entry| entry.scripts = merged);
-            let message = format!("Imported {count} script(s) from {}.", found.join(" and "));
+            let message = format!("Imported {count} script(s) from {PROJECT_FILE}.");
             Ok(vec![Update::RequestDone { request: reply, message }])
         });
     }

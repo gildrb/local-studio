@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { LocalTailnet } from "./contracts.ts";
-import { type Config, decodeJson, exec, fail, fetchJson, lastLine } from "./core.ts";
+import { type Config, decodeJson, exec, fail, fetchJson, lastLine, LEGACY_DIR } from "./core.ts";
 import { normUrl } from "./graph.ts";
 
 const Peer = Schema.Struct({ HostName: Schema.String, OS: Schema.String, Online: Schema.Boolean, TailscaleIPs: Schema.Array(Schema.String) });
@@ -38,21 +38,21 @@ const RELEASE = process.env.LOCAL_STUDIO_CONTROLLER_RELEASE ?? "https://github.c
 const quote = (v: string) => `'${v.replaceAll("'", `'\\''`)}'`;
 const SCRIPT = `set -e
 case "$(uname -s)-$(uname -m)" in Linux-x86_64) T=linux-x64;; Linux-aarch64|Linux-arm64) T=linux-arm64;; Darwin-arm64) T=darwin-arm64;; Darwin-x86_64) T=darwin-x64;; *) echo "unsupported $(uname -sm)" >&2; exit 2;; esac
-D="$HOME/.local-studio-t3"; B="$HOME/.local/bin/local-studio-controller"
-if [ -e "$D/config.json" ] || curl -s -m 2 -o /dev/null "http://$HOST:18091/api/health"; then echo "a controller is already set up on this machine; connect it instead" >&2; exit 3; fi
+D="$HOME/.local-studio-controller"; L="$HOME/${LEGACY_DIR}"; B="$HOME/.local/bin/local-studio-controller"
+if [ -e "$D/config.json" ] || [ -e "$L/config.json" ] || curl -s -m 2 -o /dev/null "http://$HOST:18091/api/health"; then echo "a controller is already set up on this machine; connect it instead" >&2; exit 3; fi
 mkdir -p "$D" "$HOME/.local/bin" && chmod 700 "$D"
 curl -fsSL "$RELEASE/local-studio-controller-$T" -o "$B.tmp" && chmod 755 "$B.tmp" && mv "$B.tmp" "$B"
 umask 077 && printf '%s\\n' "$CFG" > "$D/config.json"
 if [ "$(uname -s)" = Linux ]; then
   mkdir -p "$HOME/.config/systemd/user"
-  printf '[Unit]\\nDescription=Local Studio controller\\n[Service]\\nEnvironment=LOCAL_STUDIO_T3_HOST=%s\\nExecStart=%s\\nRestart=always\\n[Install]\\nWantedBy=default.target\\n' "$HOST" "$B" > "$HOME/.config/systemd/user/local-studio-controller.service"
+  printf '[Unit]\\nDescription=Local Studio controller\\n[Service]\\nEnvironment=LOCAL_STUDIO_CONTROLLER_HOST=%s\\nExecStart=%s\\nRestart=always\\n[Install]\\nWantedBy=default.target\\n' "$HOST" "$B" > "$HOME/.config/systemd/user/local-studio-controller.service"
   loginctl enable-linger "$(id -un)" 2>/dev/null || true
   export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
   if systemctl --user daemon-reload 2>/dev/null; then systemctl --user enable local-studio-controller && systemctl --user restart local-studio-controller
-  else pkill -f "$B" 2>/dev/null || true; LOCAL_STUDIO_T3_HOST="$HOST" setsid nohup "$B" > "$D/controller.log" 2>&1 < /dev/null & fi
+  else pkill -f "$B" 2>/dev/null || true; LOCAL_STUDIO_CONTROLLER_HOST="$HOST" setsid nohup "$B" > "$D/controller.log" 2>&1 < /dev/null & fi
 else
   P="$HOME/Library/LaunchAgents/ai.localstudio.controller.plist" && mkdir -p "$(dirname "$P")"
-  printf '<?xml version="1.0" encoding="UTF-8"?>\\n<plist version="1.0"><dict><key>Label</key><string>ai.localstudio.controller</string><key>ProgramArguments</key><array><string>%s</string></array><key>EnvironmentVariables</key><dict><key>LOCAL_STUDIO_T3_HOST</key><string>%s</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>\\n' "$B" "$HOST" > "$P"
+  printf '<?xml version="1.0" encoding="UTF-8"?>\\n<plist version="1.0"><dict><key>Label</key><string>ai.localstudio.controller</string><key>ProgramArguments</key><array><string>%s</string></array><key>EnvironmentVariables</key><dict><key>LOCAL_STUDIO_CONTROLLER_HOST</key><string>%s</string></dict><key>RunAtLoad</key><true/><key>KeepAlive</key><true/></dict></plist>\\n' "$B" "$HOST" > "$P"
   launchctl bootout "gui/$(id -u)/ai.localstudio.controller" 2>/dev/null || true
   launchctl bootstrap "gui/$(id -u)" "$P" || launchctl bootstrap "user/$(id -u)" "$P"
 fi`;

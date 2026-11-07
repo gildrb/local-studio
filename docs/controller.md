@@ -12,7 +12,7 @@ The controller is a small Bun service (`controller/`). It watches the inference 
 
 ## Configuration
 
-`~/.local-studio-t3/config.json` is written on first start with mode 0600:
+`~/.local-studio-controller/config.json` is written on first start with mode 0600. Older installs that keep their data in `~/.local-studio-t3` keep working: when only that directory has a `config.json`, the controller reads and writes it in place.
 
 | Field                   | Meaning                                                                          |
 | ----------------------- | -------------------------------------------------------------------------------- |
@@ -28,14 +28,14 @@ The following environment variables change the defaults:
 
 | Variable                          | Default                                                                    |
 | --------------------------------- | -------------------------------------------------------------------------- |
-| `LOCAL_STUDIO_T3_HOME`            | `~/.local-studio-t3`                                                       |
-| `LOCAL_STUDIO_T3_PORT`            | `18091`                                                                    |
-| `LOCAL_STUDIO_T3_HOST`            | `127.0.0.1`                                                                |
+| `LOCAL_STUDIO_CONTROLLER_HOME`    | `~/.local-studio-controller`                                               |
+| `LOCAL_STUDIO_CONTROLLER_PORT`    | `18091`                                                                    |
+| `LOCAL_STUDIO_CONTROLLER_HOST`    | `127.0.0.1`                                                                |
 | `LOCAL_STUDIO_CONTROLLER_RELEASE` | `https://github.com/sybil-solutions/local-studio/releases/latest/download` |
 
 To link machines by hand:
 
-1. Bind each controller to its tailnet address with `LOCAL_STUDIO_T3_HOST`.
+1. Bind each controller to its tailnet address with `LOCAL_STUDIO_CONTROLLER_HOST`.
 2. Set `url` to that address.
 3. Give every machine the same `fleetKey`.
 4. Link the peers with `POST /api/peers`.
@@ -45,13 +45,13 @@ To link machines by hand:
 `GET /api/tailnet` lists online Linux and macOS devices from `tailscale status`, with or without a controller. `POST /api/tailnet/deploy` installs one, from your machine's controller:
 
 1. `ssh <tailnet-ip> sh -s` with `BatchMode`, so key-based access is required. A new host key is accepted.
-2. On the remote machine, it refuses if `~/.local-studio-t3/config.json` exists or anything answers on port 18091. An existing controller is never replaced.
+2. On the remote machine, it refuses if `~/.local-studio-controller/config.json` or `~/.local-studio-t3/config.json` exists or anything answers on port 18091. An existing controller is never replaced.
 3. It downloads the matching binary from `LOCAL_STUDIO_CONTROLLER_RELEASE`.
 4. It writes a config with your fleet key and the device's tailnet URL.
 5. It installs and starts the user service.
 6. It waits until `/api/health` answers, then adds the device to your peers.
 
-To remove a controller, stop the user service on that machine and delete `~/.local/bin/local-studio-controller` and `~/.local-studio-t3`. Then unlink the peer with `POST /api/peers`.
+To remove a controller, stop the user service on that machine and delete `~/.local/bin/local-studio-controller` and `~/.local-studio-controller`. Then unlink the peer with `POST /api/peers`.
 
 ## API
 

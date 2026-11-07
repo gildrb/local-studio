@@ -72,6 +72,7 @@ enum ThreadActions {
             nodes.append(.action("Rename Thread", symbol: "pencil") { store.inbox.renaming = id })
         }
         nodes.append(.action("Regenerate Title", symbol: "sparkles") { store.inbox.regenerateTitles([id]) })
+        nodes.append(.action("Restart Agent Session", symbol: "arrow.clockwise") { store.inbox.restart(id) })
         nodes.append(.action(row.unread ? "Mark as Read" : "Mark as Unread", symbol: "circle.fill") { store.inbox.markUnread([id], !row.unread) })
         if let project = row.project {
             if store.inbox.projectFilter == project {

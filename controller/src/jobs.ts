@@ -9,7 +9,8 @@ import { LocalJob, type LocalRunRequest } from "./contracts.ts";
 import { type Config, exec, fail, fetchJson, home, lastLine, now, readJson, writeJson } from "./core.ts";
 import { archivedReason, type Catalog, dockerFlags, type Entry, launchBlock, weightsOf } from "./registry.ts";
 
-const LABEL = "local-studio-t3";
+const LABEL = "local-studio-controller";
+const LEGACY_LABEL = "local-studio-t3";
 const ACTIVE = new Set(["pending", "pulling", "downloading", "starting", "ready"]);
 const PORTS: [number, number] = [18100, 18299];
 const jobsPath = join(home, "jobs.json");
@@ -59,7 +60,7 @@ export const makeJobs = (deps: Deps) => {
       while (port <= PORTS[1] && taken.has(port)) port++;
       if (port > PORTS[1]) return yield* fail(503, "NO_PORT", "no free port in 18100-18299");
       const cfg = deps.config();
-      const name = `lst3-${id}`;
+      const name = `local-studio-${id}`;
       const weights = weightsOf(l).map((w) => (w.layout === "hub" ? { w, hub: true, host: hfHome } : { w, hub: false, host: join(cfg.modelsDir, `${w.repo.split("/")[1] ?? w.repo}-${w.revision.slice(0, 8)}`) }));
       const configFile = l.config ? { path: join(home, "runs", id, basename(l.config.at)), at: l.config.at, text: l.config.text } : null;
       const ep = Array.isArray(l.entrypoint) ? [...l.entrypoint] : l.entrypoint ? [l.entrypoint] : [];
@@ -175,8 +176,8 @@ export const makeJobs = (deps: Deps) => {
         const j = jobs.get(id);
         if (!j) return yield* fail(404, "JOB_NOT_FOUND", `no owned job ${id}`);
         aborts.get(id)?.abort();
-        const label = yield* exec(["docker", "inspect", "-f", `{{index .Config.Labels "${LABEL}.job"}}`, j.container], 10_000);
-        if (label.code === 0 && label.stdout.trim() === id) {
+        const label = yield* exec(["docker", "inspect", "-f", `{{index .Config.Labels "${LABEL}.job"}} {{index .Config.Labels "${LEGACY_LABEL}.job"}}`, j.container], 10_000);
+        if (label.code === 0 && label.stdout.trim().split(/\s+/).includes(id)) {
           const r = yield* exec(["docker", "rm", "-f", j.container], 120_000);
           if (r.code !== 0) return yield* fail(500, "STOP_FAILED", r.stderr.trim().slice(0, 300));
         }
