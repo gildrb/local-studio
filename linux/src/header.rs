@@ -7,6 +7,7 @@ pub struct Header {
     pub bar: adw::HeaderBar,
     toggle: gtk::ToggleButton,
     new_thread: gtk::Button,
+    back: gtk::Button,
     crumb: gtk::MenuButton,
     project: gtk::Label,
     slash: gtk::Label,
@@ -37,6 +38,13 @@ impl Header {
             .build();
         bar.pack_start(&toggle);
         bar.pack_start(&new_thread);
+        let back = gtk::Button::builder()
+            .icon_name("go-previous-symbolic")
+            .tooltip_text("Back to Threads")
+            .action_name("win.back-to-thread")
+            .visible(false)
+            .build();
+        bar.pack_start(&back);
         let project = gtk::Label::new(None);
         project.add_css_class("ls-crumb-project");
         let slash = gtk::Label::new(Some("/"));
@@ -113,6 +121,7 @@ impl Header {
             bar,
             toggle,
             new_thread,
+            back,
             crumb,
             project,
             slash,
@@ -141,10 +150,25 @@ impl Header {
         }
     }
 
+    fn render_scripts(&self, state: &State, project: Option<&str>, workspace: bool) {
+        let scripts = project.and_then(|project| state.scripts.get(project)).filter(|scripts| !scripts.is_empty());
+        self.scripts.set_visible(workspace && scripts.is_some());
+        if let Some(scripts) = scripts {
+            let menu = gtk::gio::Menu::new();
+            for script in scripts {
+                let item = gtk::gio::MenuItem::new(Some(&script.name), None);
+                item.set_action_and_target_value(Some("win.run-script"), Some(&script.id.to_variant()));
+                menu.append_item(&item);
+            }
+            self.scripts.set_menu_model(Some(&menu));
+        }
+    }
+
     pub fn render(&self, state: &State) {
         let on_thread = state.page == Page::Thread;
         self.crumb.set_visible(on_thread);
         self.page_title.set_visible(!on_thread);
+        self.back.set_visible(!on_thread);
         let workspace = on_thread && state.workspace_dir().is_some();
         self.panel.set_visible(on_thread);
         self.terminal.set_visible(workspace);
@@ -166,18 +190,7 @@ impl Header {
         let project_name = state.project_name(project.as_deref());
         self.project.set_label(project_name.as_deref().unwrap_or_default());
         self.slash.set_visible(project_name.is_some());
-        let scripts =
-            project.as_ref().and_then(|project| state.scripts.get(project)).filter(|scripts| !scripts.is_empty());
-        self.scripts.set_visible(workspace && scripts.is_some());
-        if let Some(scripts) = scripts {
-            let menu = gtk::gio::Menu::new();
-            for script in scripts {
-                let item = gtk::gio::MenuItem::new(Some(&script.name), None);
-                item.set_action_and_target_value(Some("win.run-script"), Some(&script.id.to_variant()));
-                menu.append_item(&item);
-            }
-            self.scripts.set_menu_model(Some(&menu));
-        }
+        self.render_scripts(state, project.as_deref(), workspace);
         self.project.set_visible(project_name.is_some());
         let title = match &state.selected {
             Some(thread) => state

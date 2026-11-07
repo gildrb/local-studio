@@ -70,10 +70,31 @@ pub fn apply(app: &App) {
     }
 }
 
+fn install_usage_keys(app: &Rc<App>) {
+    let keys = gtk::EventControllerKey::new();
+    let weak = Rc::downgrade(app);
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let Some(app) = weak.upgrade() else { return glib::Propagation::Proceed };
+        if app.state.borrow().page != Page::Usage || !modifiers.is_empty() {
+            return glib::Propagation::Proceed;
+        }
+        let mode = match key.to_unicode() {
+            Some('c') => "cost",
+            Some('t') => "tokens",
+            Some('l') => "limits",
+            _ => return glib::Propagation::Proceed,
+        };
+        app.usage.set_mode(mode);
+        glib::Propagation::Stop
+    });
+    app.window.add_controller(keys);
+}
+
 pub fn install(app: &Rc<App>) {
-    let plain: [(&str, AppAction); 15] = [
+    let plain: [(&str, AppAction); 16] = [
         ("nav-back", |app| app.navigate(-1)),
         ("nav-forward", |app| app.navigate(1)),
+        ("back-to-thread", |app| app.open_page(Page::Thread)),
         ("preview-toggle", |app| app.panel.toggle("browser")),
         ("theme-select", |app| app.open_settings(Some("appearance"))),
         ("stash", |app| app.composer.tools.stash_current(app)),
@@ -132,6 +153,7 @@ pub fn install(app: &Rc<App>) {
         app.usage.set_period(&app, period);
     });
     app.window.add_action(&period);
+    install_usage_keys(app);
     for (action, accel) in [
         ("win.nav-back", "<Control>bracketleft"),
         ("win.nav-forward", "<Control>bracketright"),
