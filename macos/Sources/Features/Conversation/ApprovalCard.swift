@@ -11,6 +11,7 @@ struct ApprovalCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "hand.raised")
                         .font(.system(size: 12, weight: .light))
+                        .accessibilityHidden(true)
                     Text("Command approval")
                         .font(.system(size: 12.5, weight: .semibold))
                     if let agent = approval.agent, !agent.isEmpty {

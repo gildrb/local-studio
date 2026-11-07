@@ -61,7 +61,7 @@ enum PanelSurfaceKind: String, CaseIterable, Identifiable {
     }
 
     var description: String? {
-        self == .device ? "Watch an iOS Simulator or Android Emulator." : nil
+        self == .device ? "Simulators and emulators on this Mac." : nil
     }
 
     var unavailableHint: String {
@@ -71,7 +71,7 @@ enum PanelSurfaceKind: String, CaseIterable, Identifiable {
         case .diff, .pullRequests: "Available for Git repositories."
         case .pullRequest: "No pull request on this branch yet."
         case .agents: "Available from a thread."
-        case .device: "Device mirroring is not available yet."
+        case .device: "Available on this Mac."
         case .file: "Open a file from Files."
         }
     }
@@ -92,9 +92,10 @@ enum PanelSurfaceContent {
     case files(FilesModel)
     case diff(DiffModel)
     case file(FilePreviewModel)
-    case pullRequest(PullRequest)
+    case pullRequest(PullRequestDetailModel)
     case pullRequests(PullRequestsModel)
     case agents
+    case device(DeviceModel)
 }
 
 @MainActor
@@ -112,6 +113,7 @@ struct PanelSurface: Identifiable {
         case .pullRequest: .pullRequest
         case .pullRequests: .pullRequests
         case .agents: .agents
+        case .device: .device
         }
     }
 
@@ -122,9 +124,10 @@ struct PanelSurface: Identifiable {
         case .files: "Files"
         case .diff: "Diff"
         case .file(let model): (model.relative as NSString).lastPathComponent
-        case .pullRequest(let pull): "#\(pull.number)"
+        case .pullRequest(let model): "#\(model.pull.number)"
         case .pullRequests: "Pull requests"
         case .agents: "Agents"
+        case .device: "Devices"
         }
     }
 
@@ -145,7 +148,7 @@ struct PanelSurface: Identifiable {
             group.closeAll()
         case .browser(let model):
             model.stop()
-        case .files, .diff, .file, .pullRequest, .pullRequests, .agents:
+        case .files, .diff, .file, .pullRequest, .pullRequests, .agents, .device:
             break
         }
     }
@@ -232,7 +235,9 @@ final class DiffModel {
 
     @ObservationIgnored private(set) var request: String?
     @ObservationIgnored private(set) var branchesRequest: String?
-    @ObservationIgnored private let collapseByDefault: Bool
+    @ObservationIgnored private var collapseByDefault: Bool
+    @ObservationIgnored private var loadedScope: String?
+    @ObservationIgnored private var pendingScope: String?
     @ObservationIgnored private var pendingFocus: String?
     @ObservationIgnored private weak var workspace: WorkspaceStore?
 
@@ -281,6 +286,7 @@ final class DiffModel {
         }
         phase = .loading
         let project = project
+        pendingScope = scopeKey
         request = workspace.issue(.diff(self)) { studio, id in
             studio.loadDiff(request: id, project: project, scope: coreScope)
         }
@@ -296,6 +302,11 @@ final class DiffModel {
 
     func loaded(_ files: [FileDiff], request: String?) {
         guard request == self.request else { return }
+        if pendingScope != loadedScope {
+            loadedScope = pendingScope
+            self.files = []
+            collapsed = []
+        }
         let known = Set(self.files.map(\.path))
         if collapseByDefault {
             collapsed.formUnion(files.map(\.path).filter { !known.contains($0) })
@@ -312,7 +323,24 @@ final class DiffModel {
 
     private func settleEmpty() {
         request = nil
+        pendingScope = scopeKey
         loaded([], request: nil)
+    }
+
+    func show(_ files: [FileDiff]) {
+        request = nil
+        pendingScope = "static"
+        loaded(files, request: nil)
+    }
+
+    func setCollapseDefault(_ collapsed: Bool) {
+        guard collapsed != collapseByDefault else { return }
+        collapseByDefault = collapsed
+        setAllCollapsed(collapsed)
+    }
+
+    private var scopeKey: String {
+        "\(scope.label)|\(base ?? "")"
     }
 
     func failed(_ message: String, request: String) {
@@ -611,18 +639,40 @@ final class PullRequestsModel {
     let project: String
     private(set) var phase: LoadPhase = .idle
     private(set) var pulls: [PullRequest] = []
-    var selection: UInt64?
+    private(set) var selectedDetail: PullRequestDetailModel?
+    var selection: UInt64? {
+        didSet { if selection != oldValue { updateDetail() } }
+    }
 
     @ObservationIgnored private(set) var request: String?
+    @ObservationIgnored private var details: [UInt64: PullRequestDetailModel] = [:]
+    @ObservationIgnored private let settings: Settings?
     @ObservationIgnored private weak var workspace: WorkspaceStore?
 
-    init(project: String, workspace: WorkspaceStore) {
+    init(project: String, workspace: WorkspaceStore, settings: Settings?) {
         self.project = project
         self.workspace = workspace
+        self.settings = settings
     }
 
     var selected: PullRequest? {
         pulls.first { $0.number == selection }
+    }
+
+    private func updateDetail() {
+        guard let pull = selected else {
+            selectedDetail = nil
+            return
+        }
+        if let model = details[pull.number] {
+            selectedDetail = model
+            return
+        }
+        guard let workspace else { return }
+        let model = PullRequestDetailModel(project: project, pull: pull, workspace: workspace, settings: settings)
+        details[pull.number] = model
+        model.load()
+        selectedDetail = model
     }
 
     func load() {
@@ -637,8 +687,12 @@ final class PullRequestsModel {
     func loaded(_ pulls: [PullRequest], request: String) {
         guard request == self.request else { return }
         self.pulls = pulls
+        details = details.filter { number, _ in pulls.contains { $0.number == number } }
         if selection == nil || !pulls.contains(where: { $0.number == selection }) {
             selection = pulls.first?.number
+        }
+        if selectedDetail == nil {
+            updateDetail()
         }
         phase = .loaded
     }
@@ -646,5 +700,140 @@ final class PullRequestsModel {
     func failed(_ message: String, request: String) {
         guard request == self.request else { return }
         phase = .failed(message)
+    }
+}
+
+enum PullRequestTab: String, CaseIterable, Identifiable {
+    case summary = "Summary"
+    case code = "Code"
+    case timeline = "Timeline"
+    case checks = "Checks"
+
+    var id: String { rawValue }
+}
+
+@MainActor
+@Observable
+final class PullRequestDetailModel {
+    let project: String
+    let pull: PullRequest
+    var tab = PullRequestTab.summary
+    private(set) var phase: LoadPhase = .idle
+    private(set) var detail: PullRequestDetail?
+    let code: DiffModel
+
+    @ObservationIgnored private(set) var request: String?
+    @ObservationIgnored private weak var workspace: WorkspaceStore?
+
+    init(project: String, pull: PullRequest, workspace: WorkspaceStore, settings: Settings?) {
+        self.project = project
+        self.pull = pull
+        self.workspace = workspace
+        code = DiffModel(project: project, thread: nil, workspace: workspace, settings: settings)
+    }
+
+    var current: PullRequest {
+        detail?.pull ?? pull
+    }
+
+    func load() {
+        guard let workspace else { return }
+        phase = .loading
+        let project = project
+        let number = pull.number
+        request = workspace.issue(.pullDetail(self)) { studio, id in
+            studio.loadPullRequest(request: id, project: project, number: number)
+        }
+    }
+
+    func loaded(_ detail: PullRequestDetail, request: String) {
+        guard request == self.request else { return }
+        self.detail = detail
+        code.show(detail.files)
+        phase = .loaded
+    }
+
+    func failed(_ message: String, request: String) {
+        guard request == self.request else { return }
+        phase = .failed(message)
+    }
+}
+
+@MainActor
+@Observable
+final class DeviceModel {
+    private(set) var phase: LoadPhase = .idle
+    private(set) var devices: [Device] = []
+    private(set) var busy: Set<String> = []
+    private(set) var status: String?
+    private(set) var actionFailed = false
+    var reason: String?
+
+    @ObservationIgnored private(set) var request: String?
+    @ObservationIgnored private weak var workspace: WorkspaceStore?
+
+    init(workspace: WorkspaceStore) {
+        self.workspace = workspace
+    }
+
+    var simulators: [Device] {
+        Self.ordered(devices.filter { $0.platform == .iosSimulator })
+    }
+
+    var android: [Device] {
+        Self.ordered(devices.filter { $0.platform != .iosSimulator })
+    }
+
+    func load() {
+        guard let workspace else { return }
+        phase = .loading
+        request = workspace.issue(.devices(self)) { studio, id in
+            studio.listDevices(request: id)
+        }
+    }
+
+    func loaded(_ devices: [Device], request: String) {
+        guard request == self.request else { return }
+        self.devices = devices
+        if !devices.isEmpty {
+            reason = nil
+        }
+        phase = .loaded
+    }
+
+    func failed(_ message: String, request: String) {
+        guard request == self.request else { return }
+        phase = .failed(message)
+    }
+
+    func boot(_ device: Device) {
+        perform(device) { studio, id in studio.bootDevice(request: id, device: device.id) }
+    }
+
+    func shutDown(_ device: Device) {
+        perform(device) { studio, id in studio.shutdownDevice(request: id, device: device.id) }
+    }
+
+    func actionFinished(device: String, message: String, failed: Bool) {
+        busy.remove(device)
+        status = message
+        actionFailed = failed
+        load()
+    }
+
+    private func perform(_ device: Device, _ call: (Studio, String) -> Void) {
+        guard let workspace, !busy.contains(device.id) else { return }
+        busy.insert(device.id)
+        status = nil
+        _ = workspace.issue(.deviceAction(self, device.id), call)
+    }
+
+    private static func ordered(_ devices: [Device]) -> [Device] {
+        devices.enumerated().sorted { left, right in
+            let leftBooted = left.element.state == "Booted"
+            let rightBooted = right.element.state == "Booted"
+            return leftBooted != rightBooted ? leftBooted : left.offset < right.offset
+        }
+        .map(\.element)
     }
 }

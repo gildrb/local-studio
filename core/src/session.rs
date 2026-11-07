@@ -184,19 +184,21 @@ pub(crate) fn model_options(data: &Value) -> anyhow::Result<Vec<ModelOption>> {
     }
     let catalog = Catalog::deserialize(data)?;
     let mut options: Vec<ModelOption> = faux_option().into_iter().collect();
-    options.extend(catalog.models.into_iter().map(|entry| ModelOption {
-        configured: catalog.configured_providers.contains(&entry.model.provider),
-        thinking_levels: entry
-            .thinking_levels
-            .iter()
-            .filter_map(|level| serde_json::to_value(level).ok())
-            .filter_map(|level| level.as_str().map(str::to_string))
-            .collect(),
-        context_window: entry.model.context_window,
-        reasoning: entry.model.reasoning,
-        provider: entry.model.provider,
-        id: entry.model.id,
-        name: entry.model.name,
+    options.extend(catalog.models.into_iter().map(|entry| {
+        ModelOption {
+            configured: catalog.configured_providers.contains(&entry.model.provider),
+            thinking_levels: entry
+                .thinking_levels
+                .iter()
+                .filter_map(|level| serde_json::to_value(level).ok())
+                .filter_map(|level| level.as_str().map(str::to_string))
+                .collect(),
+            context_window: entry.model.context_window,
+            reasoning: entry.model.reasoning,
+            provider: entry.model.provider,
+            id: entry.model.id,
+            name: entry.model.name,
+        }
     }));
     Ok(options)
 }

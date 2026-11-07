@@ -71,7 +71,7 @@ enum PagesFixtures {
             .projects(projects: projects),
             .settings(settings: settings),
             .keybindings(bindings: keybindings),
-            .models(models: models, favorites: favorites, hidden: []),
+            .models(models: models, favorites: favorites, hidden: [ModelKey(provider: "anthropic", model: "claude-opus-4-1")]),
             .providers(providers: providers),
         ]
     }
@@ -118,6 +118,60 @@ enum PagesFixtures {
             ],
             daily: daily,
             limits: []
+        )
+    }
+
+    static var usageWithLimits: UsageReport {
+        var report = usage
+        report.limits = [
+            UsageLimit(provider: "openai-codex", window: "quota park", usedPercent: 100, resetsAt: now + 2 * 3_600_000 + 1_200_000, parked: true),
+            UsageLimit(provider: "anthropic", window: "quota park", usedPercent: 100, resetsAt: nil, parked: true),
+        ]
+        return report
+    }
+
+    static var pullDetail: PullRequestDetail {
+        let file = FileDiff(
+            path: "macos/Sources/Features/Pages/Settings/SettingsView.swift", oldPath: nil, status: "modified", additions: 4, deletions: 2, binary: false,
+            hunks: [DiffHunk(header: "@@ -51,9 +51,11 @@ struct SettingsView: View {", lines: [
+                DiffLine(kind: .context, oldLine: 51, newLine: 51, text: "        .background(Theme.canvas)"),
+                DiffLine(kind: .removed, oldLine: 52, newLine: nil, text: "        .navigationTitle(selection?.title ?? \"Settings\")"),
+                DiffLine(kind: .removed, oldLine: 53, newLine: nil, text: "        .toolbar {"),
+                DiffLine(kind: .added, oldLine: nil, newLine: 52, text: "        .navigationTitle(selection?.title ?? \"Settings\")"),
+                DiffLine(kind: .added, oldLine: nil, newLine: 53, text: "        .toolbar(removing: .title)"),
+                DiffLine(kind: .added, oldLine: nil, newLine: 54, text: "        .toolbar {"),
+                DiffLine(kind: .added, oldLine: nil, newLine: 55, text: "            ToolbarItem(placement: .navigation) {"),
+                DiffLine(kind: .context, oldLine: 54, newLine: 56, text: "                ControlGroup {"),
+            ])]
+        )
+        let added = FileDiff(
+            path: "macos/Sources/Features/Pages/UsagePage.swift", oldPath: nil, status: "added", additions: 2, deletions: 0, binary: false,
+            hunks: [DiffHunk(header: "@@ -0,0 +1,2 @@", lines: [
+                DiffLine(kind: .added, oldLine: nil, newLine: 1, text: "import LocalStudioKit"),
+                DiffLine(kind: .added, oldLine: nil, newLine: 2, text: "import SwiftUI"),
+            ])]
+        )
+        return PullRequestDetail(
+            pull: pulls[0],
+            body: "Native **Settings** window with grouped forms.\n\n- Rex-style sidebar with search\n- Every control writes through `updateSettings`\n- Snapshot catalog for each pane",
+            author: "gildrb", createdAt: now - 3 * 86_400_000,
+            files: [file, added],
+            comments: [
+                PrComment(author: "reviewer", body: "Looks great. Could the search also match keybindings?", createdAt: now - 2 * 86_400_000, path: nil, line: nil),
+                PrComment(author: "gildrb", body: "Done: keybinding titles match too.", createdAt: now - 86_400_000, path: "macos/Sources/Features/Pages/Settings/SettingsView.swift", line: 112),
+            ],
+            timeline: [
+                PrEvent(kind: "opened", actor: "gildrb", createdAt: now - 3 * 86_400_000, text: "Native settings window with grouped forms"),
+                PrEvent(kind: "commit", actor: "gildrb", createdAt: now - 3 * 86_400_000 + 600_000, text: "feat(macos): settings window"),
+                PrEvent(kind: "comment", actor: "reviewer", createdAt: now - 2 * 86_400_000, text: "Looks great. Could the search also match keybindings?"),
+                PrEvent(kind: "review", actor: "reviewer", createdAt: now - 86_400_000, text: "APPROVED"),
+            ],
+            checks: [
+                PrCheck(name: "build (macos-26)", state: "success", url: "https://github.com/gildrb/local-studio/actions/runs/1"),
+                PrCheck(name: "swiftlint", state: "success", url: nil),
+                PrCheck(name: "smoke", state: "in_progress", url: "https://github.com/gildrb/local-studio/actions/runs/2"),
+                PrCheck(name: "cargo clippy", state: "failure", url: "https://github.com/gildrb/local-studio/actions/runs/3"),
+            ]
         )
     }
 

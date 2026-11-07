@@ -47,12 +47,17 @@ final class ConversationSmoke {
             guard store.connection == .ready else { return }
             move(to: .project, "connected")
             store.inbox.addProject(path: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory())
+            conversation.loadModels()
         case .project:
-            guard let project = store.inbox.currentProject, !store.inbox.projects.isEmpty else { return }
+            guard let project = store.inbox.currentProject, !store.inbox.projects.isEmpty, conversation.modelsLoaded else { return }
+            guard !conversation.providerUnavailable, let model = conversation.currentModel(settings: store.pages.settings) else {
+                finish(passed: false, "the draft composer found no default model in \(conversation.models.count) models")
+                return
+            }
             conversation.newThread.access = .supervised
             conversation.composer(project: project).text = Self.prompt
             conversation.submit(project: project, steer: false, settings: store.pages.settings)
-            move(to: .opening, "composer started a supervised thread in \(project)")
+            move(to: .opening, "composer started a supervised thread in \(project) with default model \(model.provider)/\(model.id)")
         case .opening:
             guard let thread = conversation.thread else { return }
             self.thread = thread

@@ -11,6 +11,7 @@ struct StatusBadge: View {
             HStack(spacing: 4) {
                 Image(systemName: glyph.symbol)
                     .font(.system(size: 11, weight: .regular))
+                    .accessibilityHidden(true)
                 Text(label(glyph.title))
                     .font(.system(size: 11.5))
                     .monospacedDigit()
@@ -18,7 +19,8 @@ struct StatusBadge: View {
             .foregroundStyle(glyph.tint)
             .lineLimit(1)
             .fixedSize()
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(label(glyph.title))
         } else {
             Text(RelativeAge.text(millis: row.updatedAt, now: now))
                 .font(.system(size: 11.5))
@@ -69,6 +71,7 @@ struct RowActionButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .regular))
                 .foregroundStyle(Theme.chromeIcon)
+                .accessibilityHidden(true)
                 .frame(width: 20, height: 20)
                 .contentShape(Rectangle())
         }
@@ -89,6 +92,7 @@ struct RowSnoozeMenu: View {
             Image(systemName: "clock")
                 .font(.system(size: 12, weight: .regular))
                 .foregroundStyle(Theme.chromeIcon)
+                .accessibilityHidden(true)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -126,10 +130,30 @@ struct InboxRowView: View {
         .onHover { hovering = $0 }
         .onTapGesture { click() }
         .contextMenu { MenuNodes(nodes: ThreadActions.menu(store, for: row.id)) }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        .draggable(row.id) {
+            Text(row.title.isEmpty ? "Untitled thread" : row.title)
+                .font(.system(size: 13, weight: .medium))
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .accessibilityElement(children: store.inbox.renaming == row.id ? .contain : .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(highlighted ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { store.open(row.id) }
+        .accessibilityAction(named: row.pinned ? "Unpin" : "Pin") { store.togglePin([row.id]) }
+        .accessibilityAction(named: row.shelf == .settled ? "Un-settle" : "Settle") { store.toggleSettle([row.id]) }
         .help(tooltip)
+    }
+
+    private var accessibilityText: String {
+        var parts = [row.title.isEmpty ? "Untitled thread" : row.title, store.inbox.projectName(row.project)]
+        if let glyph = StatusBadge.glyph(row.status) { parts.append(glyph.title) }
+        if row.pinned { parts.append("Pinned") }
+        if row.unread { parts.append("Unread") }
+        if row.shelf == .snoozed, let until = row.snoozedUntil { parts.append("Wakes in \(RelativeAge.countdown(millis: until, now: now))") }
+        if let branch = row.branch { parts.append("Branch \(branch)") }
+        return parts.joined(separator: ", ")
     }
 
     private var card: some View {
@@ -145,7 +169,7 @@ struct InboxRowView: View {
                     Image(systemName: "pin")
                         .font(.system(size: 10))
                         .foregroundStyle(Theme.tertiaryText)
-                        .accessibilityLabel("Pinned")
+                        .accessibilityHidden(true)
                 }
                 trailing
             }
@@ -172,6 +196,7 @@ struct InboxRowView: View {
                 Image(systemName: "pin")
                     .font(.system(size: 10))
                     .foregroundStyle(Theme.tertiaryText)
+                    .accessibilityHidden(true)
             }
             Spacer(minLength: 4)
             if let jump {
@@ -252,6 +277,7 @@ struct InboxRowView: View {
             if let branch = row.branch {
                 Image(systemName: row.worktree == nil ? "arrow.triangle.branch" : "folder")
                     .font(.system(size: 9.5))
+                    .accessibilityHidden(true)
                 Text(branch)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -369,6 +395,7 @@ struct DraftRow: View {
                 .font(.system(size: 12, weight: .light))
                 .foregroundStyle(Theme.chromeIcon)
                 .frame(width: 14)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("New thread")
                     .font(.system(size: 13, weight: .medium))
@@ -401,6 +428,7 @@ struct ShelfHeader: View {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .frame(width: 10)
+                    .accessibilityHidden(true)
                 Text(shelf.title)
                     .font(.system(size: 11.5, weight: .semibold))
                 Text("\(count)")
@@ -415,5 +443,46 @@ struct ShelfHeader: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(shelf.title), \(count) threads, \(expanded ? "expanded" : "collapsed")")
+    }
+}
+
+private struct PinnedDropTarget: ViewModifier {
+    let store: StudioStore
+    let before: String?
+    @Binding var target: String?
+
+    private var key: String {
+        before ?? "pinned-end"
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay(alignment: .top) {
+                if target == key {
+                    Capsule()
+                        .fill(Theme.primary)
+                        .frame(height: 2)
+                        .offset(y: -2)
+                        .accessibilityHidden(true)
+                }
+            }
+            .dropDestination(for: String.self) { items, _ in
+                target = nil
+                guard let id = items.first, store.inbox.thread(id) != nil else { return false }
+                store.inbox.movePinned(id, before: before)
+                return true
+            } isTargeted: { inside in
+                if inside {
+                    target = key
+                } else if target == key {
+                    target = nil
+                }
+            }
+    }
+}
+
+extension View {
+    func pinnedDropTarget(store: StudioStore, before: String?, target: Binding<String?>) -> some View {
+        modifier(PinnedDropTarget(store: store, before: before, target: target))
     }
 }

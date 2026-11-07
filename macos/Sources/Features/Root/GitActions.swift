@@ -4,6 +4,9 @@ import SwiftUI
 
 enum GitPrimaryAction: Equatable {
     case commit
+    case pull
+    case sync
+    case publish
     case push
     case createPullRequest
     case viewPullRequest(String)
@@ -12,6 +15,9 @@ enum GitPrimaryAction: Equatable {
     var title: String {
         switch self {
         case .commit: "Commit"
+        case .pull: "Pull"
+        case .sync: "Sync"
+        case .publish: "Publish"
         case .push: "Push"
         case .createPullRequest: "Create PR"
         case .viewPullRequest: "View PR"
@@ -22,6 +28,9 @@ enum GitPrimaryAction: Equatable {
     var symbol: String {
         switch self {
         case .commit: "checkmark.circle"
+        case .pull: "arrow.down.circle"
+        case .sync: "arrow.triangle.2.circlepath"
+        case .publish: "icloud.and.arrow.up"
         case .push: "arrow.up.circle"
         case .createPullRequest, .viewPullRequest: "arrow.trianglehead.pull"
         case .upToDate: "checkmark"
@@ -30,24 +39,33 @@ enum GitPrimaryAction: Equatable {
 
     static func resolve(_ status: GitStatus) -> GitPrimaryAction {
         if status.dirty || status.changedFiles > 0 { return .commit }
-        if status.branch != nil, status.upstream == nil || status.ahead > 0 { return .push }
+        if canPull(status) { return status.ahead > 0 ? .sync : .pull }
+        if !status.hasRemote { return .publish }
+        if canPush(status) { return .push }
         if let pull = status.pullRequest { return .viewPullRequest(pull.url) }
         if canCreatePullRequest(status) { return .createPullRequest }
         return .upToDate
     }
 
+    static func canPull(_ status: GitStatus) -> Bool {
+        status.upstream != nil && status.behind > 0
+    }
+
     static func canPush(_ status: GitStatus) -> Bool {
-        status.branch != nil && (status.upstream == nil || status.ahead > 0)
+        status.hasRemote && status.branch != nil && (status.upstream == nil || status.ahead > 0)
     }
 
     static func canCreatePullRequest(_ status: GitStatus) -> Bool {
-        guard let branch = status.branch, status.pullRequest == nil else { return false }
+        guard status.hasRemote, let branch = status.branch, status.pullRequest == nil else { return false }
         return branch != (status.defaultBranch ?? "main")
     }
 
     static func hint(_ status: GitStatus) -> String {
         switch resolve(status) {
         case .commit: "Commit \(status.changedFiles) changed file\(status.changedFiles == 1 ? "" : "s")"
+        case .pull: "Pull \(status.behind) commit\(status.behind == 1 ? "" : "s") from \(status.upstream ?? "upstream")"
+        case .sync: "Pull \(status.behind) and push \(status.ahead) commit\(status.ahead == 1 ? "" : "s")"
+        case .publish: "Publish this repository to GitHub"
         case .push: status.upstream == nil ? "Publish \(status.branch ?? "branch") to origin" : "Push \(status.ahead) commit\(status.ahead == 1 ? "" : "s")"
         case .createPullRequest: "Create a pull request for \(status.branch ?? "this branch")"
         case .viewPullRequest: "Open the pull request in the browser"
@@ -64,21 +82,31 @@ struct GitActionsButton: View {
         if let status = store.workspace.gitStatus[project], status.isRepo {
             let action = GitPrimaryAction.resolve(status)
             Menu {
-                Button("Commit…", systemImage: "checkmark.circle") { store.shell.commitProject = project }
+                Button("Commit…") { store.shell.commitProject = project }
                     .disabled(!(status.dirty || status.changedFiles > 0))
-                Button(status.upstream == nil ? "Publish Branch" : "Push", systemImage: "arrow.up.circle") { GitRunner.push(store, project) }
+                Button(status.upstream == nil ? "Publish Branch" : "Push") { GitRunner.push(store, project) }
                     .disabled(!GitPrimaryAction.canPush(status))
-                if let pull = status.pullRequest {
-                    Button("View Pull Request #\(pull.number)", systemImage: "arrow.trianglehead.pull") { GitRunner.openURL(pull.url) }
-                } else {
-                    Button("Create Pull Request…", systemImage: "arrow.trianglehead.pull") { store.shell.pullRequestProject = project }
-                        .disabled(!GitPrimaryAction.canCreatePullRequest(status))
+                Button("Pull") { GitRunner.pull(store, project, thenPush: false) }
+                    .disabled(!GitPrimaryAction.canPull(status))
+                if GitPrimaryAction.canPull(status), status.ahead > 0 {
+                    Button("Sync (Pull, then Push)") { GitRunner.pull(store, project, thenPush: true) }
                 }
                 Divider()
-                Button("Refresh Status", systemImage: "arrow.clockwise") { store.core.run { $0.gitStatus(project: project) } }
+                if let pull = status.pullRequest {
+                    Button("View Pull Request #\(pull.number)") { GitRunner.openURL(pull.url) }
+                } else {
+                    Button("Create Pull Request…") { store.shell.pullRequestProject = project }
+                        .disabled(!GitPrimaryAction.canCreatePullRequest(status))
+                }
+                if !status.hasRemote {
+                    Button("Publish Repository…") { store.shell.publishProject = project }
+                }
+                Divider()
+                Button("Refresh Status") { store.core.run { $0.gitStatus(project: project) } }
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: action.symbol)
+                        .accessibilityHidden(true)
                     Text(action.title)
                 }
             } primaryAction: {
@@ -88,12 +116,17 @@ struct GitActionsButton: View {
             .buttonStyle(.borderless)
             .fixedSize()
             .help(GitPrimaryAction.hint(status))
+            .accessibilityLabel("Git: \(action.title)")
+            .accessibilityHint(GitPrimaryAction.hint(status))
         }
     }
 
     private func perform(_ action: GitPrimaryAction) {
         switch action {
         case .commit: store.shell.commitProject = project
+        case .pull: GitRunner.pull(store, project, thenPush: false)
+        case .sync: GitRunner.pull(store, project, thenPush: true)
+        case .publish: store.shell.publishProject = project
         case .push: GitRunner.push(store, project)
         case .createPullRequest: store.shell.pullRequestProject = project
         case .viewPullRequest(let url): GitRunner.openURL(url)
@@ -109,6 +142,22 @@ enum GitRunner {
             report(store, outcome)
         }
         store.core.run { $0.push(request: request, project: project) }
+    }
+
+    static func pull(_ store: StudioStore, _ project: String, thenPush: Bool) {
+        let request = store.requests.issue { outcome in
+            report(store, outcome)
+            if thenPush, case .done = outcome { push(store, project) }
+        }
+        store.core.run { $0.pull(request: request, project: project) }
+    }
+
+    static func publish(_ store: StudioStore, _ project: String, name: String, isPrivate: Bool, done: @escaping (Bool) -> Void) {
+        let request = store.requests.issue { outcome in
+            report(store, outcome)
+            if case .done = outcome { done(true) } else { done(false) }
+        }
+        store.core.run { $0.publishRepository(request: request, project: project, name: name, private: isPrivate) }
     }
 
     static func commit(_ store: StudioStore, _ project: String, message: String?, thenPush: Bool, done: @escaping (Bool) -> Void) {
@@ -250,5 +299,50 @@ struct PullRequestSheet: View {
         let body = bodyText
         let draft = draft
         store.core.run { $0.createPullRequest(request: id, project: project, title: title, body: body, draft: draft) }
+    }
+}
+
+struct PublishRepositorySheet: View {
+    let store: StudioStore
+    let project: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var isPrivate = true
+    @State private var busy = false
+
+    var body: some View {
+        Form {
+            Section {
+                TextField("Repository name", text: $name)
+                Toggle("Private repository", isOn: $isPrivate)
+            } header: {
+                Text("Publish repository")
+            } footer: {
+                Text("Creates the repository on GitHub with the GitHub CLI, adds it as `origin` and pushes the current branch.")
+                    .foregroundStyle(Theme.secondaryText)
+            }
+        }
+        .formStyle(.grouped)
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(busy ? "Publishing…" : "Publish") { publish() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(16)
+        }
+        .frame(width: 440, height: 260)
+        .onAppear { name = (project as NSString).lastPathComponent }
+    }
+
+    private func publish() {
+        busy = true
+        GitRunner.publish(store, project, name: name.trimmingCharacters(in: .whitespaces), isPrivate: isPrivate) { success in
+            busy = false
+            if success { dismiss() }
+        }
     }
 }

@@ -82,32 +82,23 @@ struct ComposerView: View {
         CGFloat(store.pages.settings?.promptFontSize ?? 14)
     }
 
-    private var providerReady: Bool {
-        let models = store.conversation.models
-        return models.isEmpty || models.contains(where: \.configured)
-    }
-
     private var placeholder: String {
         let conversation = store.conversation
-        switch store.connection {
-        case .connecting: return "Connecting to Eukhe…"
-        case .lost(let reason): return reason
-        case .ready: break
-        }
         if !conversation.approvals.isEmpty {
             return "Resolve this approval request to continue"
         }
-        if !providerReady {
+        if conversation.providerUnavailable {
             return "Enable a provider in Settings to send a message"
         }
-        if conversation.busy {
-            return "Queue a follow-up, or press ⌥↩ to steer"
+        if store.connection != .ready {
+            return "Ask for changes, send follow-ups, or attach images"
         }
-        return "Ask anything, @tag files, or / for commands"
+        return "Ask anything, @tag files/folders, or / for commands"
     }
 
     private func canSend(_ draft: ComposerDraft) -> Bool {
-        store.connection == .ready && store.conversation.approvals.isEmpty && providerReady && !draft.isEmpty
+        store.connection == .ready && store.conversation.approvals.isEmpty
+            && !store.conversation.providerUnavailable && !draft.isEmpty
     }
 
     private func submit(steer: Bool) {
@@ -375,6 +366,7 @@ private struct SuggestionRow: View {
                     .font(.system(size: 12, weight: .light))
                     .foregroundStyle(Theme.secondaryText)
                     .frame(width: 16)
+                    .accessibilityHidden(true)
                 Text(suggestion.title)
                     .font(.system(size: 13))
                     .lineLimit(1)
@@ -411,12 +403,15 @@ private struct AttachmentStrip: View {
                             } else {
                                 Image(systemName: "photo")
                                     .foregroundStyle(Theme.secondaryText)
+                                    .accessibilityHidden(true)
                             }
                         }
                         .frame(width: 52, height: 52)
                         .background(Theme.message)
                         .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.hairline))
+                        .accessibilityElement()
+                        .accessibilityLabel("Attached image")
                         RemoveBadge(title: "Remove image") {
                             draft.images.removeAll { $0.id == image.id }
                         }
@@ -430,6 +425,7 @@ private struct AttachmentStrip: View {
                         Image(systemName: "doc")
                             .font(.system(size: 11.5, weight: .light))
                             .foregroundStyle(Theme.secondaryText)
+                            .accessibilityHidden(true)
                         Text(URL(fileURLWithPath: file).lastPathComponent)
                             .font(.system(size: 12))
                             .lineLimit(1)
@@ -442,6 +438,7 @@ private struct AttachmentStrip: View {
                         }
                         .buttonStyle(.plain)
                         .help("Remove file")
+                        .accessibilityLabel("Remove \(URL(fileURLWithPath: file).lastPathComponent)")
                     }
                     .padding(.horizontal, 9)
                     .frame(height: 26)

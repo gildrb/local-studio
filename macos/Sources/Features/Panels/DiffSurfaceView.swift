@@ -13,6 +13,11 @@ struct DiffSurfaceView: View {
             content(settings)
         }
         .onChange(of: settings?.hideWhitespace) { model.load() }
+        .onChange(of: settings?.diffFilesCollapsed) { _, collapsed in
+            if let collapsed {
+                model.setCollapseDefault(collapsed)
+            }
+        }
         .onChange(of: panels.gitStatus(model.project)) {
             if model.scope == .workingTree || model.scope == .branch {
                 model.load()
@@ -109,11 +114,11 @@ struct DiffSurfaceView: View {
     }
 }
 
-private struct DiffList: View {
+struct DiffList: View {
     let model: DiffModel
     let palette: PanelPalette.Diff
     let fontSize: CGFloat
-    let panels: PanelState
+    let panels: PanelState?
     @State private var viewport: CGFloat = 0
 
     var body: some View {
@@ -174,7 +179,7 @@ private struct DiffFileHeaderView: View {
     let header: DiffFileHeader
     let palette: PanelPalette.Diff
     let project: String
-    let panels: PanelState
+    let panels: PanelState?
     let toggle: () -> Void
     @State private var hovering = false
 
@@ -187,10 +192,12 @@ private struct DiffFileHeaderView: View {
                     .font(.system(size: 9.5, weight: .semibold))
                     .foregroundStyle(Theme.secondaryText)
                     .frame(width: 12)
+                    .accessibilityHidden(true)
                 Text(statusLetter)
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
                     .foregroundStyle(statusColor)
                     .frame(width: 12)
+                    .accessibilityHidden(true)
                 HStack(spacing: 0) {
                     if !directory.isEmpty {
                         Text(directory + "/")
@@ -224,15 +231,23 @@ private struct DiffFileHeaderView: View {
         .onTapGesture(perform: toggle)
         .onHover { hovering = $0 }
         .help(header.path)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(header.path)
+        .accessibilityValue("\(header.status), \(header.additions) additions, \(header.deletions) deletions, \(header.collapsed ? "collapsed" : "expanded")")
+        .accessibilityAction(named: header.collapsed ? "Expand" : "Collapse", toggle)
+        .accessibilityAction { toggle() }
         .contextMenu {
             Button("Copy Path") {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(header.path, forType: .string)
             }
-            Button("Open File") {
-                panels.openFile(project: project, relative: header.path, line: nil)
+            if let panels {
+                Button("Open File") {
+                    panels.openFile(project: project, relative: header.path, line: nil)
+                }
+                .disabled(header.status == "deleted")
             }
-            .disabled(header.status == "deleted")
             Divider()
             Button(header.collapsed ? "Expand" : "Collapse", action: toggle)
         }

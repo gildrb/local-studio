@@ -53,7 +53,10 @@ enum Snapshots {
         }
         store.receive(entry.updates)
         let frame = NSRect(origin: .zero, size: entry.size)
-        let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        let style: NSWindow.StyleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        let window = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         let host = NSHostingView(rootView: entry.view(store)

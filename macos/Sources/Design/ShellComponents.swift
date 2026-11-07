@@ -25,6 +25,7 @@ struct ProjectTile: View {
         }
         .frame(width: size, height: size)
         .background(color.gradient, in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+        .accessibilityHidden(true)
     }
 
     private var initials: String {
@@ -137,7 +138,7 @@ struct MenuNodes: View {
                         perform()
                     } label: {
                         if let symbol = node.symbol {
-                            Label(node.label, systemImage: symbol)
+                            Label { Text(node.label) } icon: { Image(systemName: symbol).accessibilityHidden(true) }
                         } else {
                             Text(node.label)
                         }
@@ -149,7 +150,7 @@ struct MenuNodes: View {
                     MenuNodes(nodes: children)
                 } label: {
                     if let symbol = node.symbol {
-                        Label(node.title, systemImage: symbol)
+                        Label { Text(node.title) } icon: { Image(systemName: symbol).accessibilityHidden(true) }
                     } else {
                         Text(node.title)
                     }
@@ -194,14 +195,14 @@ enum NativeMenu {
                 item.isEnabled = node.enabled
                 item.state = node.checked ? .on : .off
                 if let symbol = node.symbol {
-                    item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                    item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: node.title)
                 }
                 menu.addItem(item)
             case .submenu(let children):
                 let item = NSMenuItem(title: node.title, action: nil, keyEquivalent: "")
                 item.isEnabled = node.enabled
                 if let symbol = node.symbol {
-                    item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+                    item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: node.title)
                 }
                 item.submenu = build(children)
                 menu.addItem(item)

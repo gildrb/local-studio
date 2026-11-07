@@ -6,6 +6,7 @@ struct SidebarView: View {
     @State private var viewport: CGFloat = 0
     @State private var highlighted = 0
     @FocusState private var searchFocused: Bool
+    @State private var dropTarget: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -60,6 +61,12 @@ struct SidebarView: View {
                     }
                     ForEach(sections.pinned, id: \.id) { row in
                         InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
+                            .pinnedDropTarget(store: store, before: row.id, target: $dropTarget)
+                    }
+                    if !sections.pinned.isEmpty {
+                        Color.clear
+                            .frame(height: 6)
+                            .pinnedDropTarget(store: store, before: nil, target: $dropTarget)
                     }
                     ForEach(sections.active, id: \.id) { row in
                         InboxRowView(store: store, row: row, variant: .card, now: now, jump: hints[row.id])
@@ -109,7 +116,7 @@ struct SidebarView: View {
     }
 
     private func handleSearchKey(_ key: SearchKey) -> Bool {
-        let results = store.inbox.searchResults
+        let results = store.inbox.searchEntries
         switch key {
         case .down:
             guard !results.isEmpty else { return false }
@@ -151,6 +158,7 @@ struct SidebarSearchField: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12, weight: .light))
                 .foregroundStyle(Theme.secondaryText)
+                .accessibilityHidden(true)
             TextField("Search", text: $text)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
@@ -179,20 +187,26 @@ struct SearchResultsList: View {
     let highlighted: Int
 
     var body: some View {
-        let results = store.inbox.searchResults
+        let results = store.inbox.searchEntries
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    if results.isEmpty {
+                    ForEach(Array(results.enumerated()), id: \.element.id) { offset, entry in
+                        SearchResultRow(store: store, entry: entry, query: store.inbox.query, highlighted: offset == highlighted)
+                            .id(entry.id)
+                    }
+                    if store.inbox.searchingMessages {
+                        Text("Searching thread messages…")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(Theme.secondaryText)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    } else if results.isEmpty {
                         Text("No threads found")
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.secondaryText)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 24)
-                    }
-                    ForEach(Array(results.enumerated()), id: \.element.id) { offset, row in
-                        SearchResultRow(store: store, row: row, query: store.inbox.query, highlighted: offset == highlighted)
-                            .id(row.id)
                     }
                 }
                 .padding(.horizontal, Theme.Metrics.sidebarInset)
@@ -205,56 +219,91 @@ struct SearchResultsList: View {
                 }
             }
         }
+        .task(id: store.inbox.query) {
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            store.inbox.searchMessages()
+        }
     }
 }
 
 struct SearchResultRow: View {
     let store: StudioStore
-    let row: ThreadRow
+    let entry: InboxSearchEntry
     let query: String
     let highlighted: Bool
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 8) {
-            ProjectTile(project: store.inbox.project(row.project), size: 14)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(Self.highlight(row.title, query))
-                    .font(.system(size: 13))
-                    .lineLimit(1)
-                Text(store.inbox.projectName(row.project) + (row.branch.map { " · \($0)" } ?? ""))
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.secondaryText)
-                    .lineLimit(1)
+        HStack(alignment: .top, spacing: 8) {
+            ProjectTile(project: store.inbox.project(entry.project), size: 14)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(Self.highlight(entry.title.isEmpty ? "Untitled thread" : entry.title, query, size: 13))
+                        .font(.system(size: 13))
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if let updatedAt = entry.updatedAt {
+                        Text(RelativeAge.text(millis: updatedAt))
+                            .font(.system(size: 11.5))
+                            .monospacedDigit()
+                            .foregroundStyle(Theme.secondaryText)
+                    }
+                }
+                if let snippet = entry.snippet, !snippet.isEmpty {
+                    Text(Self.highlight(Self.excerpt(snippet, around: query), query, size: 11.5))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(2)
+                } else {
+                    Text(store.inbox.projectName(entry.project) + (entry.branch.map { " · \($0)" } ?? ""))
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
             }
-            Spacer(minLength: 4)
-            Text(RelativeAge.text(millis: row.updatedAt))
-                .font(.system(size: 11.5))
-                .monospacedDigit()
-                .foregroundStyle(Theme.secondaryText)
         }
         .padding(.horizontal, 10)
-        .frame(height: 44)
+        .padding(.vertical, 7)
+        .frame(minHeight: 44)
         .contentShape(Rectangle())
         .rowSurface(selected: highlighted, hovering: hovering)
         .onHover { hovering = $0 }
         .onTapGesture {
-            store.open(row.id)
+            store.open(entry.id)
             store.inbox.query = ""
         }
-        .contextMenu { MenuNodes(nodes: ThreadActions.menu(store, for: row.id, includeRename: false)) }
+        .contextMenu {
+            if store.inbox.thread(entry.id) != nil {
+                MenuNodes(nodes: ThreadActions.menu(store, for: entry.id, includeRename: false))
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
     }
 
-    static func highlight(_ title: String, _ query: String) -> AttributedString {
-        var text = AttributedString(title.isEmpty ? "Untitled thread" : title)
+    static func highlight(_ text: String, _ query: String, size: CGFloat) -> AttributedString {
+        var result = AttributedString(text)
         let needle = query.trimmingCharacters(in: .whitespaces)
-        if !needle.isEmpty, let range = text.range(of: needle, options: .caseInsensitive) {
-            text[range].font = .system(size: 13, weight: .semibold)
-            text[range].foregroundColor = Theme.primary
+        guard !needle.isEmpty else { return result }
+        var searchStart = result.startIndex
+        while searchStart < result.endIndex, let range = result[searchStart...].range(of: needle, options: .caseInsensitive) {
+            result[range][AttributeScopes.SwiftUIAttributes.FontAttribute.self] = .system(size: size, weight: .semibold)
+            result[range][AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = Theme.primary
+            searchStart = range.upperBound
         }
-        return text
+        return result
+    }
+
+    static func excerpt(_ snippet: String, around query: String) -> String {
+        let flat = snippet.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let needle = query.trimmingCharacters(in: .whitespaces)
+        guard !needle.isEmpty, let range = flat.range(of: needle, options: .caseInsensitive) else { return flat }
+        let lead = flat.distance(from: flat.startIndex, to: range.lowerBound)
+        guard lead > 32 else { return flat }
+        let start = flat.index(range.lowerBound, offsetBy: -24)
+        return "…" + flat[start...].trimmingCharacters(in: .whitespaces)
     }
 }
 
@@ -288,6 +337,7 @@ struct NoProjectsSidebar: View {
             Image(systemName: "folder")
                 .font(.system(size: 22, weight: .light))
                 .foregroundStyle(Theme.chromeIcon)
+                .accessibilityHidden(true)
             Text("No projects yet")
                 .font(.system(size: 13, weight: .medium))
             Text("Add a folder to start a thread in it.")
