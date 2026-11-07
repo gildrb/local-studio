@@ -475,7 +475,7 @@ final class TerminalSurfaceView: NSView, @preconcurrency NSTextInputClient, NSMe
     }
 
     private func sendKey(_ event: NSEvent, _ action: TerminalKeyAction, text: String?, composing: Bool) {
-        let unshifted = event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0
+        let unshifted = event.type == .flagsChanged ? 0 : event.characters(byApplyingModifiers: [])?.unicodeScalars.first?.value ?? 0
         session?.key(TerminalKey(action: action, code: UInt32(event.keyCode), mods: mods(event.modifierFlags), text: text, unshifted: unshifted, composing: composing))
         blinkVisible = true
     }
