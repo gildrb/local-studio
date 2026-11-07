@@ -112,6 +112,7 @@ final class ConversationStore {
         followsEnd = true
         scrollTop = nil
         focusedPending = draft
+        keepTimeline(draft)
     }
 
     func startFailed(draft: String, message: String) {
@@ -257,10 +258,13 @@ final class ConversationStore {
     @ObservationIgnored private var infoCache: [String: ThreadInfo] = [:]
     @ObservationIgnored private var transcripts: [String: CachedTranscript] = [:]
     @ObservationIgnored private var recency: [String] = []
+    @ObservationIgnored private var timelineUse: [String] = []
     @ObservationIgnored private var awaitingReset = false
     @ObservationIgnored var scrollTop: UInt64?
+    private(set) var timelines: [String] = []
 
     static let cachedThreads = 12
+    static let liveTimelines = 8
 
     func focus(_ thread: String?, row: ThreadRow? = nil) {
         guard thread != self.thread || focusedPending != nil else { return }
@@ -280,6 +284,25 @@ final class ConversationStore {
         followsEnd = cached?.scroll.followsEnd ?? true
         scrollTop = cached?.scroll.top
         awaitingReset = cached != nil
+        keepTimeline(thread)
+    }
+
+    func cachedRows(_ thread: String) -> [TimelineRow] {
+        transcripts[thread]?.rows ?? []
+    }
+
+    private func keepTimeline(_ id: String?) {
+        guard let id else { return }
+        timelineUse.removeAll { $0 == id }
+        timelineUse.insert(id, at: 0)
+        timelineUse = Array(timelineUse.prefix(Self.liveTimelines))
+        var next = timelines.filter(timelineUse.contains)
+        if !next.contains(id) {
+            next.append(id)
+        }
+        if next != timelines {
+            timelines = next
+        }
     }
 
     var restoredScroll: ThreadScroll {
