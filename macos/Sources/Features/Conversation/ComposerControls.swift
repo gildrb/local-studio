@@ -274,6 +274,11 @@ struct ModelPickerPanel: View {
                 .frame(height: 34)
                 .help("Start one thread per selected model, each in its own worktree")
             }
+            Rectangle().fill(Theme.hairline).frame(height: 1)
+            AddProviderRow {
+                dismiss()
+                store.openProvidersSettings()
+            }
         }
         .frame(width: 320)
         .modifier(ModelPickerJumpCommands(store: store, models: jumps) { model in
@@ -326,7 +331,7 @@ struct ModelPickerPanel: View {
             return "Loading models…"
         }
         if configured.isEmpty {
-            return "No configured providers. Sign in to a provider to choose a model."
+            return "No configured providers. Add a key or an endpoint to choose a model."
         }
         if hiddenCount == configured.count, !showsHidden {
             return "Every model is hidden."
@@ -366,6 +371,35 @@ struct ModelPickerPanel: View {
 
     private func providerName(_ provider: String) -> String {
         store.pages.providers.first { $0.id == provider }?.name ?? provider.capitalized
+    }
+}
+
+private struct AddProviderRow: View {
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .light))
+                    .foregroundStyle(Theme.chromeIcon)
+                    .frame(width: 16)
+                    .accessibilityHidden(true)
+                Text("Add Provider…")
+                    .font(.system(size: 13))
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .padding(4)
+        .help("Add an API key or a custom endpoint in Settings → Providers")
+        .accessibilityLabel("Add Provider")
     }
 }
 

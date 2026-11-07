@@ -24,20 +24,79 @@ extension SnapshotCatalog {
                 view: { store in AnyView(ProvidersSettings(store: store, expanded: ["anthropic"])) }
             ),
             SnapshotEntry(
-                name: "pages-local-populated",
-                size: CGSize(width: 1000, height: 1500),
-                updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.localSnapshot)],
-                view: { store in AnyView(LocalPage(store: store, initiallyOpen: [PagesFixtures.studio.url, PagesFixtures.laptop.url])) }
+                name: "pages-settings-providers-full",
+                size: CGSize(width: 720, height: 1900),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(ProvidersSettings(store: store, expanded: ["ollama"])) }
             ),
             SnapshotEntry(
-                name: "pages-local-collapsed",
-                size: CGSize(width: 1000, height: 760),
-                updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.localSnapshot)],
+                name: "pages-settings-providers-errors",
+                size: CGSize(width: 720, height: 520),
+                updates: PagesFixtures.base + [
+                    .providers(
+                        providers: PagesFixtures.providers, engines: [],
+                        errors: ["models.json providers.broken: \"baseUrl\" is required when defining custom models."]
+                    ),
+                ],
+                view: { store in AnyView(ProvidersSettings(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-add-endpoint",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(EndpointSheet(pages: store.pages, editing: nil)) }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-add-endpoint-tested",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in
+                    AnyView(EndpointSheet(pages: store.pages, editing: nil, seed: EndpointSeed(
+                        name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", discovered: PagesFixtures.endpointModels
+                    )))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-add-endpoint-error",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in
+                    AnyView(EndpointSheet(pages: store.pages, editing: nil, seed: EndpointSeed(
+                        name: "Gateway", baseUrl: "https://llm.example.com/v1",
+                        error: "https://llm.example.com/v1/models rejected the API key (HTTP 401)."
+                    )))
+                }
+            ),
+            SnapshotEntry(
+                name: "pages-providers-edit-endpoint",
+                size: CGSize(width: 500, height: 600),
+                updates: PagesFixtures.base,
+                view: { store in AnyView(EndpointSheet(pages: store.pages, editing: PagesFixtures.providers[9])) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-dashboard",
+                size: dashboardSize,
+                updates: PagesFixtures.base + dashboardUpdates,
                 view: { store in AnyView(LocalPage(store: store)) }
             ),
             SnapshotEntry(
-                name: "pages-local-offline",
-                size: CGSize(width: 1000, height: 760),
+                name: "pages-local-offline-machine",
+                size: CGSize(width: 1100, height: 640),
+                updates: PagesFixtures.base + dashboardUpdates,
+                view: { store in AnyView(LocalPage(store: store, selected: PagesFixtures.dgxSpark.url)) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-idle",
+                size: dashboardSize,
+                updates: PagesFixtures.base + [
+                    .local(request: "fixture", snapshot: PagesFixtures.idleSnapshot),
+                    .localDashboard(dashboard: PagesFixtures.idleDashboard),
+                ],
+                view: { store in AnyView(LocalPage(store: store)) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-unreachable",
+                size: CGSize(width: 1000, height: 560),
                 updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.offlineSnapshot)],
                 view: { store in AnyView(LocalPage(store: store)) }
             ),
@@ -105,10 +164,15 @@ extension SnapshotCatalog {
                 updates: PagesFixtures.base + [.archivedThreads(request: "fixture", threads: [])],
                 view: { store in AnyView(ArchivePage(store: store)) }
             ),
-        ] + themeEntries
+        ] + themeEntries + dashboardThemeEntries
     }
 
     private static let settingsSize = CGSize(width: 860, height: 680)
+    private static let dashboardSize = CGSize(width: 1740, height: 940)
+
+    private static var dashboardUpdates: [Update] {
+        [.local(request: "fixture", snapshot: PagesFixtures.dashboardSnapshot), .localDashboard(dashboard: PagesFixtures.dashboard)]
+    }
 
     @MainActor private static func themed(_ id: String, custom: [ThemeDefinition] = []) -> [Update] {
         var settings = PagesFixtures.settings
@@ -116,6 +180,17 @@ extension SnapshotCatalog {
         settings.colorScheme = .system
         settings.customThemes = ThemeLibrary.encodeCustom(custom)
         return PagesFixtures.base + [.settings(settings: settings)]
+    }
+
+    @MainActor private static var dashboardThemeEntries: [SnapshotEntry] {
+        [
+            SnapshotEntry(
+                name: "pages-local-dashboard-gildrb",
+                size: dashboardSize,
+                updates: themed("gildrb") + dashboardUpdates,
+                view: { store in AnyView(LocalPage(store: store)) }
+            ),
+        ]
     }
 
     @MainActor private static var themeEntries: [SnapshotEntry] {
@@ -282,6 +357,7 @@ extension SnapshotCatalog {
                     size: CGSize(width: 1280, height: 820),
                     updates: PagesFixtures.base + [
                         .local(request: "fixture", snapshot: PagesFixtures.localSnapshot),
+                        .localDashboard(dashboard: PagesFixtures.dashboard),
                         .archivedThreads(request: "fixture", threads: PagesFixtures.archived),
                         .pullRequests(request: "fixture", pulls: PagesFixtures.pulls),
                     ],
@@ -305,12 +381,11 @@ extension SnapshotCatalog {
         return [
             SnapshotEntry(
                 name: "pages-local-live",
-                size: CGSize(width: 1000, height: 1200),
+                size: dashboardSize,
                 updates: [],
                 view: { store in
                     captureLiveLocal(store)
-                    let open = store.pages.local?.controllers.filter(\.reachable).map(\.url) ?? []
-                    return AnyView(LocalPage(store: store, initiallyOpen: open))
+                    return AnyView(LocalPage(store: store))
                 }
             ),
         ]
@@ -332,11 +407,15 @@ extension SnapshotCatalog {
         }
         store.pages.refreshLocal()
         pump(90) { store.pages.local != nil || store.pages.localError != nil }
-        let registryReady = { store.pages.local?.registry.map { $0.error != "loading" } ?? false }
-        for _ in 0..<8 where !registryReady() {
-            pump(3) { false }
-            store.pages.refreshLocal()
-            pump(10, registryReady)
+        let controllers = store.pages.local?.controllers ?? []
+        guard let machine = controllers.first(where: { $0.reachable && !$0.endpoints.isEmpty }) ?? controllers.first(where: \.reachable) else {
+            store.stop()
+            return
+        }
+        store.pages.watchLocalDashboard(machine.target)
+        pump(90) {
+            guard let dashboard = store.pages.localDashboard else { return false }
+            return dashboard.error != nil || (dashboard.decodeTps != nil && (dashboard.tokens.daily.last ?? 0) > 0)
         }
         store.stop()
     }

@@ -156,8 +156,13 @@ final class StudioStore {
         case .local(let request, let snapshot):
             requests.settle(request)
             pages.setLocal(request: request, snapshot: snapshot)
-        case .providers(let providers):
-            pages.setProviders(providers)
+        case .localDashboard(let dashboard):
+            pages.setLocalDashboard(dashboard)
+        case .providers(let providers, let engines, let errors):
+            pages.setProviders(providers, engines: engines, errors: errors)
+        case .providerModels(let request, let baseUrl, let models):
+            requests.settle(request)
+            pages.discovered(request: request, baseUrl: baseUrl, models: models)
         case .settings(let settings):
             pages.setSettings(settings)
         case .keybindings(let bindings):

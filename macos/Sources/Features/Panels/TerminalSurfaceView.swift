@@ -28,7 +28,6 @@ final class TerminalSurfaceView: NSView, @preconcurrency NSTextInputClient, NSMe
     private var keyTexts: [String]?
     private var marked = NSMutableAttributedString()
     private var scrollRemainder: CGFloat = 0
-    private var observers: [NSObjectProtocol] = []
 
     init(palette: ThemePalette, fontName: String, fontSize: CGFloat) {
         self.palette = TerminalPalette(palette)
@@ -93,24 +92,29 @@ final class TerminalSurfaceView: NSView, @preconcurrency NSTextInputClient, NSMe
         }
     }
 
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if let window {
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: window)
+            NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: window)
+        }
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        for observer in observers {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        observers = []
         guard let window else {
             stopBlink()
             return
         }
-        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.focusChanged() }
-            })
-        }
+        NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged(_:)), name: NSWindow.didBecomeKeyNotification, object: window)
+        NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged(_:)), name: NSWindow.didResignKeyNotification, object: window)
         if window.backingScaleFactor != fonts.scale {
             rebuildFonts()
         }
+        focusChanged()
+    }
+
+    @objc private func windowKeyChanged(_ notification: Notification) {
         focusChanged()
     }
 
@@ -325,9 +329,7 @@ final class TerminalSurfaceView: NSView, @preconcurrency NSTextInputClient, NSMe
             return
         }
         if blinkTimer == nil {
-            let timer = Timer(timeInterval: Self.blinkInterval, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.toggleBlink() }
-            }
+            let timer = Timer(timeInterval: Self.blinkInterval, target: self, selector: #selector(blinkTick(_:)), userInfo: nil, repeats: true)
             timer.tolerance = Self.blinkInterval / 4
             RunLoop.main.add(timer, forMode: .common)
             blinkTimer = timer
@@ -341,6 +343,10 @@ final class TerminalSurfaceView: NSView, @preconcurrency NSTextInputClient, NSMe
             blinkVisible = true
             setNeedsDisplay(cursorRect(session.grid.cursor))
         }
+    }
+
+    @objc private func blinkTick(_ timer: Timer) {
+        toggleBlink()
     }
 
     private func toggleBlink() {

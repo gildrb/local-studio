@@ -20,6 +20,7 @@ mod watch;
 mod writer;
 
 pub use self::api::terminal_preview;
+pub use self::providers::endpoint_presets;
 pub(crate) use self::setup::PreparedWorktree;
 
 use std::collections::{BTreeMap, HashMap};
@@ -41,13 +42,16 @@ use self::setup::Setups;
 use self::terminal::{Launch, Message, Terminals};
 use self::watch::GitWatcher;
 use crate::daemon::DaemonQuery;
-use crate::model::{ModelOption, NoticeLevel, Update};
+use crate::model::{NoticeLevel, Update};
 use crate::oneshot::TextGen;
 use crate::studio::Mailbox;
 
 const PULL_REQUEST_TTL: Duration = Duration::from_secs(60);
+const DASHBOARD_EVERY: Duration = Duration::from_secs(3);
 
 type ProjectAdder = Arc<dyn Fn(String) + Send + Sync>;
+
+type ModelsReloader = Arc<dyn Fn(Option<(String, String)>) + Send + Sync>;
 
 type CachedPullRequest = (Instant, Option<PullRequest>);
 
@@ -55,6 +59,7 @@ struct Inner {
     runtime: Handle,
     mailbox: Arc<Mailbox>,
     data_dir: PathBuf,
+    agent_dir: Option<PathBuf>,
     daemon: DaemonQuery,
     settings: channel::Sender<Settings>,
     save_lock: tokio::sync::Mutex<()>,
@@ -64,10 +69,13 @@ struct Inner {
     terminals: Terminals,
     devices: Devices,
     local: Local,
+    dashboard: Mutex<Option<tokio::task::AbortHandle>>,
     watcher: GitWatcher,
     watch_lock: tokio::sync::Mutex<()>,
     pull_requests: Mutex<HashMap<(String, String), CachedPullRequest>>,
-    providers: Mutex<Option<Vec<model::ProviderStatus>>>,
+    providers: Mutex<providers::ProviderState>,
+    providers_lock: tokio::sync::Mutex<()>,
+    models_reloader: Mutex<Option<ModelsReloader>>,
     stopped: AtomicBool,
     project_file: Mutex<ProjectFile>,
     setups: Setups,
@@ -87,6 +95,7 @@ impl Workspace {
         runtime: Handle,
         mailbox: Arc<Mailbox>,
         data_dir: PathBuf,
+        agent_dir: Option<PathBuf>,
         daemon: DaemonQuery,
         controller_main: Option<PathBuf>,
         text: TextGen,
@@ -108,10 +117,12 @@ impl Workspace {
         let (notify, notifications) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner {
             local: Local::new(&data_dir, controller_main),
+            dashboard: Mutex::new(None),
             devices: Devices::default(),
             runtime,
             mailbox,
             data_dir,
+            agent_dir,
             daemon,
             settings: channel::Sender::new(loaded),
             save_lock: tokio::sync::Mutex::new(()),
@@ -122,7 +133,9 @@ impl Workspace {
             watcher: GitWatcher::new(notify),
             watch_lock: tokio::sync::Mutex::new(()),
             pull_requests: Mutex::new(HashMap::new()),
-            providers: Mutex::new(None),
+            providers: Mutex::new(providers::ProviderState::default()),
+            providers_lock: tokio::sync::Mutex::new(()),
+            models_reloader: Mutex::new(None),
             stopped: AtomicBool::new(false),
             project_file: Mutex::new(project_file),
             setups: Setups::default(),
@@ -174,12 +187,6 @@ impl Workspace {
         for project in touched {
             self.git_status(project);
         }
-    }
-
-    pub(crate) fn models_loaded(&self, models: &[ModelOption]) {
-        let statuses = providers::statuses(models);
-        *self.inner.providers.lock().unwrap_or_else(PoisonError::into_inner) = Some(statuses.clone());
-        self.inner.mailbox.push(Update::Providers { providers: statuses });
     }
 
     pub(crate) async fn create_worktree_path(
@@ -608,6 +615,7 @@ impl Workspace {
         let reply = request.clone();
         self.answer(request, async move {
             let snapshot = workspace.inner.local.snapshot(&workspace.current_settings()).await?;
+            workspace.fleet_seen(snapshot.controllers.clone());
             Ok(vec![Update::Local { request: reply, snapshot }])
         });
     }
@@ -617,15 +625,27 @@ impl Workspace {
         let reply = request.clone();
         self.answer(request, async move {
             let snapshot = workspace.inner.local.act(&workspace.current_settings(), action).await?;
+            workspace.fleet_seen(snapshot.controllers.clone());
             Ok(vec![Update::Local { request: reply, snapshot }])
         });
     }
 
-    pub(crate) fn push_cached_providers(&self) {
-        let cached = self.inner.providers.lock().unwrap_or_else(PoisonError::into_inner).clone();
-        if let Some(providers) = cached {
-            self.push(Update::Providers { providers });
+    pub(crate) fn watch_local_dashboard(&self, controller: Option<String>) {
+        let mut slot = self.inner.dashboard.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(previous) = slot.take() {
+            previous.abort();
         }
+        let Some(controller) = controller else { return };
+        let workspace = self.clone();
+        let task = self.inner.runtime.spawn(async move {
+            let mut watch = local::dashboard::DashboardWatch::new(controller);
+            while !workspace.inner.stopped.load(Ordering::SeqCst) {
+                let dashboard = workspace.inner.local.dashboard(&workspace.current_settings(), &mut watch).await;
+                workspace.push(Update::LocalDashboard { dashboard });
+                tokio::time::sleep(DASHBOARD_EVERY).await;
+            }
+        });
+        *slot = Some(task.abort_handle());
     }
 
     pub(crate) fn update_settings(&self, settings: Settings) {

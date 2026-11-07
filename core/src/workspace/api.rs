@@ -1,6 +1,6 @@
 use super::model::{
-    DiffScope, LocalAction, MergeMethod, ProjectScript, ProjectSettings, Settings, TerminalFrame, TerminalKey,
-    TerminalMouse, TerminalScroll, TerminalSelect, TerminalSize, UsagePeriod,
+    CustomProvider, DiffScope, LocalAction, MergeMethod, ProjectScript, ProjectSettings, ProviderApi, Settings,
+    TerminalFrame, TerminalKey, TerminalMouse, TerminalScroll, TerminalSelect, TerminalSize, UsagePeriod,
 };
 use super::terminal::{self, Message};
 use crate::studio::Studio;
@@ -148,9 +148,48 @@ impl Studio {
         self.workspace.local_action(request, action);
     }
 
+    pub fn watch_local_dashboard(&self, controller: Option<String>) {
+        self.workspace.watch_local_dashboard(controller);
+    }
+
     pub fn load_providers(&self) {
-        self.workspace.push_cached_providers();
+        self.workspace.load_providers();
         self.load_models();
+    }
+
+    pub fn discover_provider_models(
+        &self,
+        request: String,
+        base_url: String,
+        api: ProviderApi,
+        key: Option<String>,
+        provider: Option<String>,
+    ) {
+        self.workspace.discover_provider_models(request, base_url, api, key, provider);
+    }
+
+    pub fn add_custom_provider(&self, request: String, provider: CustomProvider) {
+        self.workspace.add_custom_provider(request, provider);
+    }
+
+    pub fn update_custom_provider(&self, request: String, id: String, provider: CustomProvider) {
+        self.workspace.update_custom_provider(request, id, provider);
+    }
+
+    pub fn remove_custom_provider(&self, request: String, id: String) {
+        self.workspace.remove_custom_provider(request, id);
+    }
+
+    pub fn refresh_provider_models(&self, request: String, id: String) {
+        self.workspace.refresh_provider_models(request, id);
+    }
+
+    pub fn set_provider_key(&self, request: String, provider: String, key: Option<String>) {
+        self.workspace.set_provider_key(request, provider, key);
+    }
+
+    pub fn use_local_engine(&self, request: String, engine: String) {
+        self.workspace.use_local_engine(request, engine);
     }
 
     pub fn update_settings(&self, settings: Settings) {

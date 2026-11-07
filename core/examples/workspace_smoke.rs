@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,12 +10,12 @@ use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
     AccessMode, Branch, ColorScheme, Connection, DaemonLaunch, Device, DiffLineKind, DiffScope, FileContent, FileDiff,
-    FileEntry, GitStatus, Keybinding, LocalSnapshot, MergeMethod, NewThreadWorkspace, ProjectScript, ProjectSettings,
-    PromptDraft, ProviderStatus, PullRequestDetail, SearchHit, SendShortcut, Settings, SetupStage, SetupStageState,
-    Shelf, SnapshotSound, Studio, StudioConfig, TerminalColor, TerminalFrame, TerminalKey, TerminalKeyAction,
-    TerminalMods, TerminalMouse, TerminalMouseAction, TerminalMouseButton, TerminalPoint, TerminalRow, TerminalScroll,
-    TerminalSelect, TerminalSize, ThreadRow, ThreadSettings, ThreadStatus, Update, UsagePeriod, UsageReport, Waker,
-    WorktreeChoice,
+    FileEntry, GitStatus, Keybinding, LocalDashboard, LocalSnapshot, MergeMethod, NewThreadWorkspace, ProjectScript,
+    ProjectSettings, PromptDraft, ProviderStatus, PullRequestDetail, SearchHit, SendShortcut, Settings, SetupStage,
+    SetupStageState, Shelf, SnapshotSound, Studio, StudioConfig, TerminalColor, TerminalFrame, TerminalKey,
+    TerminalKeyAction, TerminalMods, TerminalMouse, TerminalMouseAction, TerminalMouseButton, TerminalPoint,
+    TerminalRow, TerminalScroll, TerminalSelect, TerminalSize, ThreadRow, ThreadSettings, ThreadStatus, Update,
+    UsagePeriod, UsageReport, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
@@ -68,6 +69,7 @@ struct View {
     exited: Vec<(String, Option<i32>)>,
     usage: Vec<(String, UsageReport)>,
     local: Vec<(String, LocalSnapshot)>,
+    dashboards: Vec<LocalDashboard>,
     providers: Option<Vec<ProviderStatus>>,
     settings: Option<Settings>,
     keybindings: Option<Vec<Keybinding>>,
@@ -249,7 +251,8 @@ impl Harness {
             Update::TerminalExited { terminal, code } => view.exited.push((terminal, code)),
             Update::Usage { request, report } => view.usage.push((request, report)),
             Update::Local { request, snapshot } => view.local.push((request, snapshot)),
-            Update::Providers { providers } => view.providers = Some(providers),
+            Update::LocalDashboard { dashboard } => view.dashboards.push(dashboard),
+            Update::Providers { providers, .. } => view.providers = Some(providers),
             Update::Settings { settings } => view.settings = Some(settings),
             Update::Keybindings { bindings } => view.keybindings = Some(bindings),
             Update::PullRequestDetail { request, detail } => view.details.push((request, detail)),
@@ -290,7 +293,8 @@ impl Harness {
             | Update::Daemon { .. }
             | Update::Skills { .. }
             | Update::Subagents { .. }
-            | Update::MessageImage { .. } => {}
+            | Update::MessageImage { .. }
+            | Update::ProviderModels { .. } => {}
         }
     }
 }
@@ -386,6 +390,62 @@ index 0000000..1111111
 
 const REVIEW_COMMENTS: &str = r#"[{"user":{"login":"dave"},"body":"nit: name","created_at":"2026-11-01T11:00:00Z","path":"src/lib.rs","line":2}]"#;
 
+const FAKE_NVIDIA_SMI: &str = r"#!/bin/sh
+case $1 in --query-gpu=*)
+  printf '0, GPU-smoke-0, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 95000, 97887, 275.40, 275.00, 65, 100\n'
+  printf '1, GPU-smoke-1, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 96000, 97887, 276.00, 275.00, 48, 100\n' ;;
+esac
+";
+
+fn serve_stub_engine(listener: &TcpListener, born: Instant) {
+    for mut stream in listener.incoming().flatten() {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 1024];
+        while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+            match stream.read(&mut buffer) {
+                Ok(0) | Err(_) => break,
+                Ok(read) => request.extend_from_slice(&buffer[..read]),
+            }
+        }
+        let head = String::from_utf8_lossy(&request);
+        let path = head.split_whitespace().nth(1).unwrap_or_default();
+        let elapsed = born.elapsed().as_millis();
+        let ttft_millis = elapsed / 1000 * 346;
+        let (kind, body) = match path {
+            "/v1/models" => ("application/json", r#"{"data":[{"id":"smoke-model"}]}"#.to_string()),
+            "/metrics" => (
+                "text/plain; version=0.0.4",
+                format!(
+                    "vllm:generation_tokens_total{{model_name=\"smoke-model\"}} {}\nvllm:prompt_tokens_total{{model_name=\"smoke-model\"}} {}\nvllm:num_requests_running 4\nvllm:num_requests_waiting 0\nvllm:kv_cache_usage_perc 0.04\nvllm:time_to_first_token_seconds_sum {}.{:03}\nvllm:time_to_first_token_seconds_count {}\n",
+                    elapsed * 2 / 5,
+                    elapsed * 2,
+                    ttft_millis / 1000,
+                    ttft_millis % 1000,
+                    elapsed / 1000,
+                ),
+            ),
+            _ => ("application/json", "{}".to_string()),
+        };
+        let reply = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: {kind}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(reply.as_bytes());
+    }
+}
+
+fn start_stub_engine(bin: &Path) -> anyhow::Result<u16> {
+    use std::os::unix::fs::PermissionsExt;
+    let smi = bin.join("nvidia-smi");
+    std::fs::write(&smi, FAKE_NVIDIA_SMI)?;
+    std::fs::set_permissions(&smi, std::fs::Permissions::from_mode(0o755))?;
+    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    let born = Instant::now();
+    std::thread::spawn(move || serve_stub_engine(&listener, born));
+    Ok(port)
+}
+
 fn install_fake_gh(root: &Path) -> anyhow::Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
     let bin = root.join("bin");
@@ -420,6 +480,8 @@ fn main() -> anyhow::Result<()> {
     let repo = repo.canonicalize()?;
     let port = free_port()?;
     install_fake_gh(&root)?;
+    let engine = start_stub_engine(&root.join("bin"))?;
+    println!("     stub engine on port {engine}");
     let script = root.join("faux-script.json");
     std::fs::write(&script, FAUX_SCRIPT)?;
     std::env::set_var("EUKHE_FAUX_SCRIPT", &script);
@@ -1242,9 +1304,62 @@ fn local(harness: &mut Harness, port: u16) -> anyhow::Result<()> {
                 .any(|controller| controller.name == "smoke-box")),
             "rename reflected"
         );
+        local_dashboard(harness)?;
     } else {
         println!("skip Local snapshot: bun is not installed");
     }
+    Ok(())
+}
+
+fn local_dashboard(harness: &mut Harness) -> anyhow::Result<()> {
+    harness.studio.watch_local_dashboard(Some(String::new()));
+    harness.pump_until("live dashboard from the stub engine's /metrics and the fake nvidia-smi", |view| {
+        view.dashboards.last().is_some_and(|dashboard| {
+            dashboard.error.is_none()
+                && dashboard.decode_tps.is_some_and(|tps| (tps - 400.0).abs() < 60.0)
+                && dashboard.running == Some(4)
+                && dashboard.kv_percent.is_some_and(|kv| (kv - 4.0).abs() < 0.01)
+                && dashboard.first_token_ms.is_some_and(|ms| (ms - 346.0).abs() < 1.0)
+                && dashboard.gpus.len() == 2
+                && dashboard.power_watts.is_some_and(|watts| (watts - 551.4).abs() < 0.01)
+                && dashboard
+                    .engines
+                    .iter()
+                    .any(|engine| engine.models == ["smoke-model"] && engine.loaded_at_ms.is_some())
+        })
+    })?;
+    harness.studio.watch_local_dashboard(Some(String::new()));
+    harness.pump_until("dashboard history: 24 h decode series and today's tokens", |view| {
+        view.dashboards.last().is_some_and(|dashboard| {
+            dashboard.decode_series.len() == 288
+                && dashboard.tokens.daily.last().is_some_and(|today| *today > 0)
+                && dashboard.tokens.read > dashboard.tokens.written
+                && dashboard.tokens.active_days == 1
+        })
+    })?;
+    let dashboard = harness.view.dashboards.last().cloned().context("dashboard")?;
+    println!(
+        "     dashboard decode {:?} tok/s, per request {:?}, first token {:?} ms (best {:?}), in flight {:?} (peak {:?}), kv {:?}% (peak {:?}), {} × {}, {} of {} bytes, {:?} W of {:?} W, tokens {} ({} read, {} written) since {:?}",
+        dashboard.decode_tps,
+        dashboard.per_request_tps,
+        dashboard.first_token_ms,
+        dashboard.first_token_best_ms,
+        dashboard.running,
+        dashboard.running_peak,
+        dashboard.kv_percent,
+        dashboard.kv_peak_percent,
+        dashboard.gpus.len(),
+        dashboard.gpu_name,
+        dashboard.memory_used_bytes,
+        dashboard.memory_total_bytes,
+        dashboard.power_watts,
+        dashboard.power_limit_watts,
+        dashboard.tokens.total,
+        dashboard.tokens.read,
+        dashboard.tokens.written,
+        dashboard.tokens.since_day,
+    );
+    harness.studio.watch_local_dashboard(None);
     Ok(())
 }
 

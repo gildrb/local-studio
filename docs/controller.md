@@ -62,6 +62,7 @@ All routes except `/api/health` require the fleet key.
 | `GET /api/health`                                                                                 | Identity and version                                                  |
 | `GET /v1/models`, `POST /v1/chat/completions`, `/v1/completions`, `/v1/messages`, `/v1/responses` | Gateway across the whole fleet; `auto` selects the busiest live model |
 | `GET /api/snapshot`, `/api/node`, `/api/recipes`                                                  | State for the Local settings page                                     |
+| `GET /api/telemetry`, `/api/telemetry?history=1`                                                  | Live engine and GPU figures for the Local page; history adds series   |
 | `GET /api/tailnet`, `POST /api/tailnet/deploy`                                                    | Tailnet scan and install                                              |
 | `POST /api/recipes/<id>/run`, `/api/runs/<id>/stop`, `/api/ports/<port>/stop`                     | Launch and stop engines                                               |
 | `POST /api/name`, `/api/peers`                                                                    | Rename, link and unlink                                               |
@@ -75,3 +76,18 @@ The registry backs captured fleet configurations up next to the catalog. They ar
 `GET /api/registry` reads `data/registry` from the same checkout. It matches each machine's GPUs, or an Apple Silicon chip and its unified memory, to registry hardware records within 1 GB, groups recipes by Hugging Face repository, and keeps one variant per hardware, engine, format and precision. `GET /api/registry/records/<id>` returns the full recipe, model instance, model and hardware records, and `POST /api/registry/download` runs `hf download` at the pinned revision on that machine.
 
 `GET /api/registry/share?port=<port>` builds registry records from a running server's launch command or container, sends one short validation request, scrubs credentials, home paths, hostnames, private addresses and device IDs, and validates the records against the registry's JSON Schemas at the checked-out commit. Nothing is sent until `POST /api/registry/share`; the controller then forks `0xSero/local-ai-registry` and opens the pull request with your `gh` CLI login. `"dryRun": true` lists the `gh` calls without running them.
+
+## Telemetry
+
+Every 5 seconds the controller reads `nvidia-smi` (memory, power draw and limit, temperature, utilization per GPU) and the Prometheus `/metrics` of each live engine on the machine. It understands vLLM (`vllm:`), SGLang (`sglang:`) and llama.cpp (`llamacpp:`, started with `--metrics`) names, summed across labels:
+
+| Figure        | Metric                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------- |
+| Decode tok/s  | Rate of `generation_tokens_total` / `tokens_predicted_total` over the last 16 seconds             |
+| First token   | `time_to_first_token_seconds` sum ÷ count over the last hour (24 hours when idle); best is the lowest minute |
+| In flight     | `num_requests_running` / `num_running_reqs` / `requests_processing`; peak over 24 hours           |
+| KV cache      | `kv_cache_usage_perc` (or `gpu_cache_usage_perc`) / `token_usage` / `kv_cache_usage_ratio`; peak over 24 hours |
+| Tokens per day | `prompt_tokens_total` (read) and `generation_tokens_total` (written), per UTC day                |
+
+`telemetry.json` in the controller's data directory keeps per-minute figures for 24 hours, per-day token counts for 800 days, and the last counter values per engine process, so a controller restart counts what the engine produced meanwhile and an engine restart is not counted twice. Engines without `/metrics` (Ollama, LM Studio, ExLlama) show their GPUs but no engine figures.
+

@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var commandHold: DispatchWorkItem?
     private var panelSmoke: PanelSmoke?
     private var stress: StressHarness?
+    private var providersSmoke: ProvidersSmoke?
 
     override init() {
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
@@ -68,6 +69,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             harness.start()
             stress = harness
         }
+        if arguments.contains("+smoke-providers") {
+            let smoke = ProvidersSmoke(store: store)
+            smoke.start()
+            providersSmoke = smoke
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -93,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var automated: Bool {
-        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || stress != nil
+        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil || stress != nil
     }
 
     private static func quitShortcutPressed() -> Bool {

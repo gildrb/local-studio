@@ -101,14 +101,58 @@ enum PagesFixtures {
         ModelOption(provider: "anthropic", id: "claude-opus-4-1", name: "Claude Opus 4.1", reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true, serviceTiers: []),
         ModelOption(provider: "openai-codex", id: "gpt-5-codex", name: "GPT-5 Codex", reasoning: true, thinkingLevels: ["minimal", "low", "medium", "high"], contextWindow: 400_000, configured: true, serviceTiers: ["auto", "flex", "priority"]),
         ModelOption(provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", reasoning: true, thinkingLevels: [], contextWindow: 1_000_000, configured: false, serviceTiers: []),
+        ModelOption(provider: "ollama", id: "qwen3-coder:30b", name: "qwen3-coder:30b", reasoning: false, thinkingLevels: [], contextWindow: 131_072, configured: true, serviceTiers: []),
+        ModelOption(provider: "ollama", id: "llama3.3:70b", name: "llama3.3:70b", reasoning: false, thinkingLevels: [], contextWindow: 131_072, configured: true, serviceTiers: []),
     ]
 
     static let favorites = [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")]
 
+    static func builtIn(_ id: String, _ name: String, _ env: String, _ credential: ProviderCredential = .missing, models: UInt32 = 0) -> ProviderStatus {
+        ProviderStatus(
+            id: id, name: name, kind: .builtIn, configured: credential != .missing, credential: credential,
+            modelCount: models, envVar: env, baseUrl: nil, api: nil, models: []
+        )
+    }
+
+    static let endpointModels = [
+        ProviderModel(id: "qwen3-coder:30b", name: "qwen3-coder:30b", contextWindow: 131_072),
+        ProviderModel(id: "llama3.3:70b", name: "llama3.3:70b", contextWindow: 131_072),
+    ]
+
+    static let ollama = ProviderStatus(
+        id: "ollama", name: "Ollama", kind: .custom, configured: true, credential: .notRequired, modelCount: 2,
+        envVar: nil, baseUrl: "http://127.0.0.1:11434/v1", api: .openAiCompatible, models: endpointModels
+    )
+
     static let providers: [ProviderStatus] = [
-        ProviderStatus(id: "anthropic", name: "Anthropic", configured: true, modelCount: 2, auth: "configured"),
-        ProviderStatus(id: "openai-codex", name: "OpenAI Codex", configured: true, modelCount: 1, auth: "configured"),
-        ProviderStatus(id: "google", name: "Google", configured: false, modelCount: 1, auth: "missing"),
+        builtIn("openai", "OpenAI", "OPENAI_API_KEY", models: 38),
+        builtIn("anthropic", "Anthropic", "ANTHROPIC_API_KEY", .storedKey, models: 2),
+        builtIn("google", "Google Gemini", "GEMINI_API_KEY", models: 1),
+        builtIn("openrouter", "OpenRouter", "OPENROUTER_API_KEY", .environment, models: 0),
+        builtIn("groq", "Groq", "GROQ_API_KEY", models: 12),
+        builtIn("mistral", "Mistral", "MISTRAL_API_KEY", models: 9),
+        builtIn("xai", "xAI", "XAI_API_KEY", models: 7),
+        builtIn("deepseek", "DeepSeek", "DEEPSEEK_API_KEY", models: 2),
+        ollama,
+        ProviderStatus(
+            id: "team-gateway", name: "Team Gateway", kind: .custom, configured: true, credential: .storedKey, modelCount: 3,
+            envVar: nil, baseUrl: "https://llm.example.com/v1", api: .openAiResponses, models: []
+        ),
+        ProviderStatus(
+            id: "openai-codex", name: "OpenAI Codex", kind: .other, configured: true, credential: .signedIn, modelCount: 1,
+            envVar: nil, baseUrl: nil, api: nil, models: []
+        ),
+    ]
+
+    static let engines: [LocalEngine] = [
+        LocalEngine(
+            id: "studio:8080", controller: "studio", port: 8080, baseUrl: "http://127.0.0.1:18091/v1",
+            models: ["qwen3-coder-30b-a3b"], provider: "local-studio-8080", added: true
+        ),
+        LocalEngine(
+            id: "studio:8081", controller: "studio", port: 8081, baseUrl: "http://127.0.0.1:18091/v1",
+            models: ["gpt-oss-120b"], provider: "local-studio-8081", added: false
+        ),
     ]
 
     static let projects: [Project] = [
@@ -123,7 +167,7 @@ enum PagesFixtures {
             .settings(settings: settings),
             .keybindings(bindings: keybindings),
             .models(models: models, favorites: favorites, hidden: [ModelKey(provider: "anthropic", model: "claude-opus-4-1")]),
-            .providers(providers: providers),
+            .providers(providers: providers, engines: engines, errors: []),
             .daemon(socket: "/Users/gil/.eukhe/daemon.sock", version: "0.10.0", pid: 48211),
         ]
     }

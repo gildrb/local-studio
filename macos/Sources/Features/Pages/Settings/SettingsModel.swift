@@ -81,6 +81,9 @@ enum SettingsGroup: Hashable {
     case shortcuts
     case snapshotCapture
     case snapshotFeedback
+    case providerKeys
+    case customEndpoints
+    case localEngines
     case providerList
     case providerSignIn
     case hiddenModels
@@ -111,7 +114,10 @@ enum SettingsGroup: Hashable {
         case .shortcuts: "Shortcuts"
         case .snapshotCapture: "Capture"
         case .snapshotFeedback: "Feedback"
-        case .providerList: "Providers"
+        case .providerKeys: "API Keys"
+        case .customEndpoints: "Custom Endpoints"
+        case .localEngines: "Local Fleet"
+        case .providerList: "Models"
         case .providerSignIn: "Signing In"
         case .hiddenModels: "Hidden Models"
         case .git: "Git"
@@ -132,7 +138,7 @@ enum SettingsGroup: Hashable {
         case .theme, .interface, .typography: .appearance
         case .shortcuts: .keybindings
         case .snapshotCapture, .snapshotFeedback: .snapshots
-        case .providerList, .providerSignIn, .hiddenModels: .providers
+        case .providerKeys, .customEndpoints, .localEngines, .providerList, .providerSignIn, .hiddenModels: .providers
         case .git, .writing: .sourceControl
         case .worktrees, .data: .storage
         case .controller, .fleet: .local
@@ -160,7 +166,7 @@ enum SettingKey: CaseIterable {
     case colorScheme, themes
     case contrast, glassOpacity, diffColors, chatWidth, openLinks
     case interfaceFont, promptFont, codeFont, terminalFont, terminalScrollback, terminalCursorBlink, fontSmoothing, wordWrap
-    case providers, favorites, signIn, hiddenModels
+    case apiKeys, customEndpoints, localEngines, providers, favorites, signIn, hiddenModels
     case autoPull, fetchInterval, mergeMethod
     case writingStyle, customInstructions, followTemplates, writerModel
     case cleanupAfter, cleanupOnMerge, cleanupOnDelete, cleanupUnchanged
@@ -187,6 +193,9 @@ enum SettingKey: CaseIterable {
         case .colorScheme, .themes: .theme
         case .contrast, .glassOpacity, .diffColors, .chatWidth, .openLinks: .interface
         case .interfaceFont, .promptFont, .codeFont, .terminalFont, .terminalScrollback, .terminalCursorBlink, .fontSmoothing, .wordWrap: .typography
+        case .apiKeys: .providerKeys
+        case .customEndpoints: .customEndpoints
+        case .localEngines: .localEngines
         case .providers, .favorites: .providerList
         case .signIn: .providerSignIn
         case .hiddenModels: .hiddenModels
@@ -254,7 +263,10 @@ enum SettingKey: CaseIterable {
         case .terminalCursorBlink: "Blink the terminal cursor"
         case .fontSmoothing: "Font smoothing"
         case .wordWrap: "Word wrap"
-        case .providers: "Providers"
+        case .apiKeys: "Provider API keys"
+        case .customEndpoints: "Custom endpoints"
+        case .localEngines: "Local fleet engines"
+        case .providers: "Provider models"
         case .favorites: "Favorite models"
         case .signIn: "Sign in to a provider"
         case .hiddenModels: "Hidden models"
@@ -330,7 +342,10 @@ enum SettingKey: CaseIterable {
         case .terminalCursorBlink: "caret animation"
         case .fontSmoothing: "antialias"
         case .wordWrap: "wrap lines"
-        case .providers: "auth api key configured"
+        case .apiKeys: "auth api key secret token openai anthropic google gemini openrouter groq mistral xai deepseek together fireworks"
+        case .customEndpoints: "openai compatible responses anthropic base url endpoint server ollama lm studio llama.cpp vllm add provider"
+        case .localEngines: "engine controller fleet gpu use"
+        case .providers: "auth configured catalog"
         case .favorites: "models star"
         case .signIn: "login auth eukhe"
         case .hiddenModels: "hide unhide picker models"

@@ -5,7 +5,11 @@ import SwiftUI
 extension StudioStore {
     func openProjectSettings(_ project: String?) {
         shell.settingsProject = project ?? inbox.currentProject
-        shell.settingsRequest = .project
+        openSettings(.project)
+    }
+
+    func openSettings(_ pane: SettingsPane) {
+        shell.settingsRequest = pane
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }

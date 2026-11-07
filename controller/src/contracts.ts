@@ -3,15 +3,21 @@ import * as Schema from "effect/Schema";
 export const LOCAL_STUDIO_CONTROLLER_HEADER = "x-local-studio-controller";
 
 const OptionalString = Schema.NullOr(Schema.String);
+const OptionalNumber = Schema.NullOr(Schema.Number);
 
-export const LocalGpu = Schema.Struct({
+export const LocalGpuTelemetry = Schema.Struct({
   index: Schema.Number,
   name: Schema.String,
-  card: OptionalString,
   memoryUsedMiB: Schema.Number,
   memoryTotalMiB: Schema.Number,
-  busy: Schema.Boolean,
+  powerW: OptionalNumber,
+  powerLimitW: OptionalNumber,
+  temperatureC: OptionalNumber,
+  utilization: OptionalNumber,
 });
+export type LocalGpuTelemetry = typeof LocalGpuTelemetry.Type;
+
+export const LocalGpu = Schema.Struct({ ...LocalGpuTelemetry.fields, card: OptionalString, busy: Schema.Boolean });
 export type LocalGpu = typeof LocalGpu.Type;
 
 export const LocalHardware = Schema.Struct({
@@ -233,3 +239,32 @@ export const LocalShareResult = Schema.Struct({
   commands: Schema.Array(Schema.String),
 });
 export type LocalShareResult = typeof LocalShareResult.Type;
+
+export const LocalTelemetry = Schema.Struct({
+  generatedAt: Schema.String,
+  engines: Schema.Array(
+    Schema.Struct({
+      port: Schema.Number,
+      models: Schema.Array(Schema.String),
+      kind: OptionalString,
+      loadedAt: OptionalString,
+    }),
+  ),
+  live: Schema.Struct({
+    decodeTps: OptionalNumber,
+    running: OptionalNumber,
+    waiting: OptionalNumber,
+    kvPercent: OptionalNumber,
+    ttftMs: OptionalNumber,
+  }),
+  peaks: Schema.Struct({ running: OptionalNumber, kvPercent: OptionalNumber, ttftBestMs: OptionalNumber }),
+  gpus: Schema.Array(LocalGpuTelemetry),
+  memory: Schema.Struct({ totalBytes: Schema.Number, freeBytes: Schema.Number }),
+  history: Schema.optionalKey(
+    Schema.Struct({
+      decode: Schema.Struct({ start: Schema.String, stepSeconds: Schema.Number, values: Schema.Array(Schema.Number) }),
+      days: Schema.Array(Schema.Struct({ day: Schema.String, prompt: Schema.Number, generation: Schema.Number })),
+    }),
+  ),
+});
+export type LocalTelemetry = typeof LocalTelemetry.Type;
