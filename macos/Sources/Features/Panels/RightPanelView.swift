@@ -117,6 +117,7 @@ private struct PanelTabStrip: View {
                 .menuIndicator(.hidden)
                 .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
                 .help("Open a surface")
+                .accessibilityLabel("Open a surface")
             }
             ChromeIconButton(
                 panels.rightPanelMaximized ? "Restore Panel" : "Maximize Panel",
@@ -146,14 +147,24 @@ private struct PanelTab: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: surface.symbol)
-                .font(.system(size: 12, weight: .light))
+            Button {
+                panels.show(surface.id)
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: surface.symbol)
+                        .font(.system(size: 12, weight: .light))
+                        .accessibilityHidden(true)
+                    Text(Self.clip(surface.title))
+                        .font(.system(size: 12.5))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
                 .foregroundStyle(active ? Color.primary : Theme.secondaryText)
-            Text(Self.clip(surface.title))
-                .font(.system(size: 12.5))
-                .foregroundStyle(active ? Color.primary : Theme.secondaryText)
-                .lineLimit(1)
-                .fixedSize()
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(surface.title)
+            .accessibilityAddTraits(active ? .isSelected : [])
             Button {
                 panels.close(surface.id)
             } label: {
@@ -176,6 +187,7 @@ private struct PanelTab: View {
         .onTapGesture { panels.show(surface.id) }
         .onHover { hovering = $0 }
         .help(surface.title)
+        .accessibilityElement(children: .contain)
         .contextMenu {
             if let path = surface.copyablePath {
                 Button("Copy Path") {
@@ -219,6 +231,7 @@ private struct PanelLauncherView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .padding(.horizontal, 10)
                 .padding(.bottom, 8)
+                .accessibilityAddTraits(.isHeader)
             ForEach(actions) { action in
                 LauncherRow(action: action) { panels.openSurface(action.kind) }
             }
@@ -238,6 +251,7 @@ private struct PanelLauncherView: View {
             return .handled
         }
         .onAppear { focused = true }
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("Open a surface")
     }
 }
@@ -254,6 +268,7 @@ private struct LauncherRow: View {
                     .font(.system(size: 14, weight: .light))
                     .foregroundStyle(Theme.chromeIcon)
                     .frame(width: 20)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
                         Text(action.kind.label)
@@ -292,6 +307,15 @@ private struct LauncherRow: View {
         .opacity(action.available ? 1 : 0.45)
         .onHover { hovering = $0 }
         .help(action.available ? action.kind.label : action.kind.unavailableHint)
+        .accessibilityLabel(action.kind.label)
+        .accessibilityValue(accessibilityValue)
+        .accessibilityHint(action.available ? "Opens the \(action.kind.label) surface. Shortcut \(String(action.kind.shortcut).uppercased())." : action.kind.unavailableHint)
+    }
+
+    private var accessibilityValue: String {
+        if !action.available { return action.kind.unavailableHint }
+        if action.badge > 0 { return "\(action.badge) running" }
+        return action.kind.description ?? ""
     }
 }
 
@@ -312,12 +336,14 @@ private struct PanelSurfaceView: View {
             DiffSurfaceView(model: model, panels: panels)
         case .file(let model):
             FilePreviewView(model: model, settings: panels.settings)
-        case .pullRequest(let pull):
-            PullRequestDetailView(pull: pull)
+        case .pullRequest(let model):
+            PullRequestDetailView(model: model, settings: panels.settings)
         case .pullRequests(let model):
-            PullRequestsSurfaceView(model: model)
+            PullRequestsSurfaceView(model: model, settings: panels.settings)
         case .agents:
             AgentsSurfaceView(panels: panels)
+        case .device(let model):
+            DeviceSurfaceView(model: model, notice: store.notice)
         }
     }
 }
@@ -349,6 +375,7 @@ struct PanelMessage: View {
             Image(systemName: symbol)
                 .font(.system(size: 22, weight: .light))
                 .foregroundStyle(Theme.chromeIcon)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .multilineTextAlignment(.center)
@@ -477,6 +504,7 @@ private struct AgentRow: View {
                     .font(.system(size: 13, weight: .light))
                     .foregroundStyle(tint)
                     .frame(width: 18)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(agent.title)
                         .font(.system(size: 13))
@@ -490,6 +518,7 @@ private struct AgentRow: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(Theme.secondaryText)
                     .opacity(agent.output.isEmpty ? 0 : 1)
+                    .accessibilityHidden(true)
             }
             if expanded, !agent.output.isEmpty {
                 Text(agent.output.suffix(4000))
@@ -507,6 +536,9 @@ private struct AgentRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: toggle)
         .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(agent.output.isEmpty ? [] : .isButton)
+        .accessibilityAction(named: expanded ? "Hide Output" : "Show Output", toggle)
     }
 
     @ViewBuilder private var meta: some View {

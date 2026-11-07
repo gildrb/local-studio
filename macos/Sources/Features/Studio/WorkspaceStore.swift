@@ -71,11 +71,19 @@ final class WorkspaceStore {
     }
 
     func setPullRequestDetail(request: String, detail: PullRequestDetail) {
-        pullRequestDetails[request] = detail
+        guard case .pullDetail(let model) = routes.removeValue(forKey: request) else {
+            pullRequestDetails[request] = detail
+            return
+        }
+        model.loaded(detail, request: request)
     }
 
     func setDevices(request: String, devices: [Device]) {
-        self.devices[request] = devices
+        guard case .devices(let model) = routes.removeValue(forKey: request) else {
+            self.devices[request] = devices
+            return
+        }
+        model.loaded(devices, request: request)
     }
 
     func setPullRequests(request: String, pulls: [PullRequest]) {
@@ -107,7 +115,10 @@ final class WorkspaceStore {
         var issued = ""
         let id = requests.issue { [weak self] outcome in
             guard let self, let route = routes.removeValue(forKey: issued) else { return }
-            if case .failed(let message) = outcome {
+            switch outcome {
+            case .done(let message):
+                route.done(message)
+            case .failed(let message):
                 route.fail(message, request: issued)
             }
         }
@@ -143,7 +154,16 @@ enum PanelRoute {
     case directory(FilesModel, String)
     case file(FilePreviewModel)
     case pulls(PullRequestsModel)
+    case pullDetail(PullRequestDetailModel)
+    case devices(DeviceModel)
+    case deviceAction(DeviceModel, String)
     case terminal(TerminalSession)
+
+    func done(_ message: String) {
+        if case .deviceAction(let model, let device) = self {
+            model.actionFinished(device: device, message: message, failed: false)
+        }
+    }
 
     func fail(_ message: String, request: String) {
         switch self {
@@ -157,6 +177,12 @@ enum PanelRoute {
             model.failed(message, request: request)
         case .pulls(let model):
             model.failed(message, request: request)
+        case .pullDetail(let model):
+            model.failed(message, request: request)
+        case .devices(let model):
+            model.failed(message, request: request)
+        case .deviceAction(let model, let device):
+            model.actionFinished(device: device, message: message, failed: true)
         case .terminal(let session):
             session.failed(message)
         }
@@ -342,7 +368,8 @@ final class PanelState {
             case .diff, .pullRequests: available = isGit(project)
             case .pullRequest: available = status?.pullRequest != nil
             case .agents: available = thread != nil
-            case .device, .file: available = false
+            case .device: available = true
+            case .file: available = false
             }
             return PanelLauncherAction(kind: kind, available: available, badge: kind == .agents ? liveAgentCount : 0)
         }
@@ -454,16 +481,22 @@ final class PanelState {
             model.load()
             return .diff(model)
         case .pullRequest:
-            guard let pull = gitStatus(project)?.pullRequest else { return nil }
-            return .pullRequest(pull)
+            guard let project, let pull = gitStatus(project)?.pullRequest else { return nil }
+            let model = PullRequestDetailModel(project: project, pull: pull, workspace: workspace, settings: settings)
+            model.load()
+            return .pullRequest(model)
         case .pullRequests:
             guard let project else { return nil }
-            let model = PullRequestsModel(project: project, workspace: workspace)
+            let model = PullRequestsModel(project: project, workspace: workspace, settings: settings)
             model.load()
             return .pullRequests(model)
         case .agents:
             return .agents
-        case .device, .file:
+        case .device:
+            let model = DeviceModel(workspace: workspace)
+            model.load()
+            return .device(model)
+        case .file:
             return nil
         }
     }
