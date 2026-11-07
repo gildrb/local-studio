@@ -153,10 +153,12 @@ final class ConversationStore {
         core.run { $0.setServiceTier(thread: thread, tier: tier) }
     }
 
+    @ObservationIgnored private var infoCache: [String: ThreadInfo] = [:]
+
     func focus(_ thread: String?) {
         guard thread != self.thread else { return }
         self.thread = thread
-        info = nil
+        info = thread.flatMap { infoCache[$0] }
         entries = []
         rows = []
         anchors = []
@@ -177,6 +179,7 @@ final class ConversationStore {
     }
 
     func setInfo(thread: String, info: ThreadInfo) {
+        infoCache[thread] = info
         guard thread == self.thread else { return }
         self.info = info
     }
