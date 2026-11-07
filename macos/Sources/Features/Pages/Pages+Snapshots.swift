@@ -1,0 +1,9 @@
+import Foundation
+import LocalStudioKit
+import SwiftUI
+
+extension SnapshotCatalog {
+    @MainActor static var pages: [SnapshotEntry] {
+        []
+    }
+}

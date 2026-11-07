@@ -52,12 +52,16 @@ final class StudioStore {
         notice = nil
     }
 
-    private func tick() {
-        guard let studio = core.studio else { return }
-        for update in studio.tick() {
+    func receive(_ updates: [Update]) {
+        for update in updates {
             apply(update)
         }
         didTick.send()
+    }
+
+    private func tick() {
+        guard let studio = core.studio else { return }
+        receive(studio.tick())
     }
 
     private func apply(_ update: Update) {

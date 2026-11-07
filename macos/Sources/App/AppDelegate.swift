@@ -12,6 +12,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let arguments = CommandLine.arguments
+        if let flag = arguments.firstIndex(of: "+snapshot") {
+            let directory = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : NSTemporaryDirectory() + "local-studio-snapshots"
+            let filter = arguments.indices.contains(flag + 2) ? arguments[flag + 2] : nil
+            exit(Snapshots.run(into: URL(fileURLWithPath: directory, isDirectory: true), matching: filter))
+        }
         do {
             try store.start()
         } catch {
