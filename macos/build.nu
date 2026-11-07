@@ -102,6 +102,9 @@ def main [
         cp ($package | path join "LocalStudio-Info.plist") ($contents | path join "Info.plist")
         make-icon ($repo | path join $icon_source) ($contents | path join "Resources" "AppIcon.icns")
         bundle-controller $repo ($contents | path join "Resources" "controller")
+        for resource in (glob ($package | path join "Resources" "*")) {
+            cp $resource ($contents | path join "Resources")
+        }
         let daemon = (find-daemon $repo)
         if $daemon == null {
             print -e "warning: no eukhe-daemon found (set EUKHE_DAEMON); the app will only attach to a running daemon"

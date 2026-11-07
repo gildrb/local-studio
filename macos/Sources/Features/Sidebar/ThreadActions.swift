@@ -55,10 +55,13 @@ enum ThreadActions {
         guard let row = store.inbox.thread(id) else { return [] }
         let settled = row.shelf == .settled
         let snoozed = row.shelf == .snoozed
-        var nodes: [MenuNode] = [
-            .action(row.pinned ? "Unpin Thread" : "Pin Thread", symbol: "pin") { store.togglePin([id]) },
-            .action(settled ? "Un-settle Thread" : "Settle Thread", symbol: settled ? "arrow.uturn.backward" : "checkmark") { store.toggleSettle([id]) },
-        ]
+        var nodes: [MenuNode] = []
+        if let branch = row.branch {
+            nodes.append(.action("New Thread on \(branch)", symbol: "arrow.triangle.branch") { store.newThread(onBranchOf: row) })
+            nodes.append(.divider("branch"))
+        }
+        nodes.append(.action(row.pinned ? "Unpin Thread" : "Pin Thread", symbol: "pin") { store.togglePin([id]) })
+        nodes.append(.action(settled ? "Un-settle Thread" : "Settle Thread", symbol: settled ? "arrow.uturn.backward" : "checkmark") { store.toggleSettle([id]) })
         if snoozed {
             nodes.append(.action("Wake Thread", symbol: "alarm") { store.inbox.snooze([id], until: nil) })
         } else {

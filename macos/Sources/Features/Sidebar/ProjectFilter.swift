@@ -137,6 +137,7 @@ private struct ProjectFilterRow: View {
             if let project {
                 Button("New Thread in \(project.name)") { store.newThread(in: project.id) }
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: project.path)]) }
+                Button("Project Settings…") { store.openProjectSettings(project.id) }
                 Divider()
                 Button("Remove Project", role: .destructive) { store.inbox.removeProject(project.id) }
             }
