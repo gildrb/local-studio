@@ -16,6 +16,7 @@ final class ConversationStore {
     private(set) var models: [ModelOption] = []
     private(set) var favorites: [ModelKey] = []
     private(set) var hiddenModels: [ModelKey] = []
+    private(set) var modelsLoaded = false
     private(set) var commands: [SlashCommand] = []
     private(set) var commandsLoaded = false
     private(set) var mentionRequest: String?
@@ -115,6 +116,7 @@ final class ConversationStore {
         self.models = models
         self.favorites = favorites
         self.hiddenModels = hidden
+        modelsLoaded = true
     }
 
     func setCommands(request: String, commands: [SlashCommand]) {
@@ -244,6 +246,22 @@ final class ConversationStore {
         favorites.contains { $0.provider == model.provider && $0.model == model.id }
     }
 
+    func setHidden(_ model: ModelOption, _ hidden: Bool) {
+        core.run { $0.setHiddenModel(provider: model.provider, model: model.id, hidden: hidden) }
+    }
+
+    func isHidden(_ model: ModelOption) -> Bool {
+        hiddenModels.contains { $0.provider == model.provider && $0.model == model.id }
+    }
+
+    var providerUnavailable: Bool {
+        guard modelsLoaded else { return false }
+        if thread != nil {
+            return info?.model == nil && !models.contains(where: \.configured)
+        }
+        return currentModel(settings: nil) == nil
+    }
+
     func answer(_ approval: Approval, _ answer: ApprovalAnswer) {
         guard let thread else { return }
         core.run { $0.answerApproval(thread: thread, request: approval.requestId, answer: answer) }
@@ -272,11 +290,14 @@ final class ConversationStore {
                     thinkingLevels: info?.thinkingLevels ?? [], contextWindow: info?.context?.window ?? 0, configured: true
                 )
         }
-        let key = newThread.model ?? settings.flatMap { settings in
+        let selectable = models.filter { $0.configured && !isHidden($0) }
+        let chosen = newThread.model ?? settings.flatMap { settings in
             settings.defaultProvider.flatMap { provider in settings.defaultModel.map { ModelKey(provider: provider, model: $0) } }
         }
-        guard let key else { return models.first(where: \.configured) }
-        return models.first { $0.provider == key.provider && $0.id == key.model }
+        if let chosen, let model = selectable.first(where: { $0.provider == chosen.provider && $0.id == chosen.model }) {
+            return model
+        }
+        return selectable.first(where: isFavorite) ?? selectable.first
     }
 
     func thinkingLevel(settings: Settings?) -> String? {

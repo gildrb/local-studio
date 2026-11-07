@@ -12,6 +12,20 @@ extension SnapshotCatalog {
         let fixtures = ConversationFixtures.self
         return [
             SnapshotEntry(
+                name: "conversation-model-picker",
+                size: CGSize(width: 320, height: 300),
+                focus: "t1",
+                updates: [fixtures.pickerModelsUpdate, .thread(thread: "t1", info: fixtures.info(busy: false))],
+                view: { store in AnyView(ModelPickerPanel(store: store) {}.background(Theme.card)) }
+            ),
+            SnapshotEntry(
+                name: "conversation-model-picker-hidden",
+                size: CGSize(width: 320, height: 380),
+                focus: "t1",
+                updates: [fixtures.pickerModelsUpdate, .thread(thread: "t1", info: fixtures.info(busy: false))],
+                view: { store in AnyView(ModelPickerPanel(store: store, revealHidden: true) {}.background(Theme.card)) }
+            ),
+            SnapshotEntry(
                 name: "conversation-draft-hero",
                 size: CGSize(width: 980, height: 640),
                 updates: [.projects(projects: [fixtures.project]), fixtures.modelsUpdate],
@@ -41,6 +55,19 @@ extension SnapshotCatalog {
                     store.conversation.composer(project: nil).text = "/"
                     return thread(store)
                 }
+            ),
+            SnapshotEntry(
+                name: "conversation-draft-no-provider",
+                size: CGSize(width: 980, height: 640),
+                updates: [
+                    .projects(projects: [fixtures.project]),
+                    .models(models: fixtures.models.map { model in
+                        var model = model
+                        model.configured = false
+                        return model
+                    }, favorites: [], hidden: []),
+                ],
+                view: thread
             ),
             SnapshotEntry(
                 name: "conversation-draft-no-project",
@@ -206,6 +233,21 @@ enum ConversationFixtures {
     ]
 
     static let modelsUpdate = Update.models(models: models, favorites: [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")], hidden: [])
+
+    static let pickerModelsUpdate = Update.models(
+        models: models + [
+            ModelOption(
+                provider: "anthropic", id: "claude-opus-4-1", name: "Claude Opus 4.1", reasoning: true,
+                thinkingLevels: ["off", "low", "medium", "high"], contextWindow: 200_000, configured: true
+            ),
+            ModelOption(
+                provider: "openai", id: "gpt-4.1-mini", name: "GPT-4.1 mini", reasoning: false,
+                thinkingLevels: [], contextWindow: 1_000_000, configured: true
+            ),
+        ],
+        favorites: [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")],
+        hidden: [ModelKey(provider: "openai", model: "gpt-4.1-mini"), ModelKey(provider: "anthropic", model: "claude-opus-4-1")]
+    )
 
     static func info(busy: Bool) -> ThreadInfo {
         ThreadInfo(

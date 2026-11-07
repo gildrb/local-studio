@@ -97,6 +97,7 @@ private struct ProjectMenu: View {
         .fixedSize()
         .onHover { hovering = $0 }
         .help("Project")
+        .accessibilityLabel("Project: \(current?.name ?? "No project")")
     }
 
     private func addProject() {
@@ -255,6 +256,7 @@ private struct ScrollToEndPill: View {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
                     .font(.system(size: 11, weight: .medium))
+                    .accessibilityHidden(true)
                 Text("Scroll to end")
             }
             .font(.system(size: 12.5))
