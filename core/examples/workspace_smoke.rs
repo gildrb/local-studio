@@ -229,6 +229,8 @@ fn free_port() -> anyhow::Result<u16> {
     Ok(TcpListener::bind("127.0.0.1:0")?.local_addr()?.port())
 }
 
+const FAUX_SCRIPT: &str = r#"{"modelId":"faux-1","responses":[{"content":[{"type":"text","text":"Running the usage command."},{"type":"toolCall","name":"bash","arguments":{"script":"echo usage-ok"},"id":"call-1"}]},"Done: usage-ok","\"Usage Smoke.\"","\"Usage Smoke.\""]}"#;
+
 const FAKE_GH: &str = r#"#!/bin/sh
 case "$1 $2" in
   "pr view") cat "$FAKE_GH_DIR/pr-view.json" ;;
@@ -299,6 +301,9 @@ fn main() -> anyhow::Result<()> {
     let repo = repo.canonicalize()?;
     let port = free_port()?;
     install_fake_gh(&root)?;
+    let script = root.join("faux-script.json");
+    std::fs::write(&script, FAUX_SCRIPT)?;
+    std::env::set_var("EUKHE_FAUX_SCRIPT", &script);
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", &data);
     std::env::set_var("LOCAL_STUDIO_CONTROLLER_URL", format!("http://127.0.0.1:{port}"));
     let socket = root.join("d.sock");
@@ -684,8 +689,10 @@ fn settings_providers_usage(harness: &mut Harness, project: &str) -> anyhow::Res
     let thread = thread.context("thread id")?;
     let id = thread.clone();
     harness.pump_until("thread finished", move |view| {
-        view.threads.iter().any(|row| row.id == id && matches!(row.status, ThreadStatus::Done | ThreadStatus::Idle))
+        view.threads.iter().any(|row| row.id == id && matches!(row.status, ThreadStatus::Done | ThreadStatus::Failed))
     })?;
+    let finished = harness.view.threads.iter().find(|row| row.id == thread).map(|row| row.status);
+    ensure!(finished != Some(ThreadStatus::Failed), "the usage turn failed; the faux model did not answer");
     let request = harness.request();
     harness.studio.load_usage(request.clone(), UsagePeriod::Day);
     harness.answer("usage report", &request)?;
