@@ -5,6 +5,7 @@ import LocalStudioKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store: StudioStore
     private var smoke: Smoke?
+    private var conversationSmoke: ConversationSmoke?
 
     override init() {
         store = StudioStore(launch: Self.bundledDaemon())
@@ -29,6 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let smoke = Smoke(store: store)
             smoke.start()
             self.smoke = smoke
+        }
+        if CommandLine.arguments.contains("+smoke-conversation") {
+            let smoke = ConversationSmoke(store: store)
+            smoke.start()
+            conversationSmoke = smoke
         }
     }
 
