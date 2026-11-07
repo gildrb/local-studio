@@ -35,9 +35,18 @@ struct SettingsView: View {
         } detail: {
             detail
                 .environment(\.settingsQuery, detailQuery)
-                .scrollEdgeEffectStyle(.hard, for: .top)
+                .scrollEdgeEffectHidden(true, for: .top)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.canvas)
+                .overlay(alignment: .top) {
+                    Theme.canvas
+                        .frame(height: 52)
+                        .overlay(alignment: .bottom) {
+                            Rectangle().fill(Theme.hairline).frame(height: 1)
+                        }
+                        .ignoresSafeArea(edges: .top)
+                        .allowsHitTesting(false)
+                }
                 .navigationTitle(selection?.title ?? "Settings")
                 .toolbar(removing: .title)
                 .toolbar {
