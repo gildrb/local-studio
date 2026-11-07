@@ -2,12 +2,16 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
-use gtk::{gdk, gio, glib};
-use vte::prelude::*;
+use gtk::{gdk, gio, pango};
+use local_studio_core::{TerminalFrame, TerminalSize};
 
-use crate::app::App;
+use crate::app::{App, Target};
+use crate::terminal::{Input, Sink, TerminalView};
 
-const CONTEXT_LINES: usize = 40;
+const CONTEXT_LINES: u32 = 40;
+const RECENT_LINES: u32 = 200;
+const PREVIEW_COLS: u16 = 100;
+const PREVIEW_ROWS: u16 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layout {
@@ -16,10 +20,13 @@ pub enum Layout {
 }
 
 pub struct Pane {
-    pub terminal: vte::Terminal,
-    id: RefCell<Option<String>>,
+    pub view: TerminalView,
+    root: gtk::Overlay,
+    status: gtk::Label,
+    id: Rc<RefCell<Option<String>>>,
     request: RefCell<Option<String>>,
-    size: Cell<(i64, i64)>,
+    size: Rc<Cell<Option<TerminalSize>>>,
+    has_selection: Cell<bool>,
 }
 
 pub struct Drawer {
@@ -29,7 +36,8 @@ pub struct Drawer {
     panes: RefCell<Vec<Rc<Pane>>>,
     layout: Cell<Layout>,
     focused: Cell<usize>,
-    font: RefCell<String>,
+    font: RefCell<pango::FontDescription>,
+    blink: Cell<bool>,
     app: Weak<App>,
 }
 
@@ -70,22 +78,6 @@ impl Drawer {
         area.set_child(Some(&empty));
         root.append(&bar);
         root.append(&area);
-        let weak = app.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(400), move || {
-            let Some(app) = weak.upgrade() else { return glib::ControlFlow::Break };
-            for pane in app.drawer.panes.borrow().iter() {
-                let size = (pane.terminal.column_count(), pane.terminal.row_count());
-                if size == pane.size.get() {
-                    continue;
-                }
-                pane.size.set(size);
-                let id = pane.id.borrow().clone();
-                if let (Some(id), Ok(cols), Ok(rows)) = (id, u16::try_from(size.0), u16::try_from(size.1)) {
-                    app.core.run(|studio| studio.resize_terminal(id, cols, rows));
-                }
-            }
-            glib::ControlFlow::Continue
-        });
         Self {
             root,
             area,
@@ -93,7 +85,8 @@ impl Drawer {
             panes: RefCell::new(Vec::new()),
             layout: Cell::new(Layout::SideBySide),
             focused: Cell::new(0),
-            font: RefCell::new("Monospace 10".to_string()),
+            font: RefCell::new(pango::FontDescription::from_string("Monospace 10")),
+            blink: Cell::new(true),
             app,
         }
     }
@@ -112,27 +105,40 @@ impl Drawer {
         if self.panes.borrow().is_empty() {
             self.add(app, self.layout.get());
         } else if let Some(pane) = self.panes.borrow().get(self.focused.get()) {
-            pane.terminal.grab_focus();
+            pane.view.area.grab_focus();
         }
     }
 
     pub fn set_font(&self, family: &str, size: u32) {
         let family = if family.trim().is_empty() { "Monospace" } else { family.trim() };
-        let font = format!("{family} {size}");
+        let font = pango::FontDescription::from_string(&format!("{family} {size}"));
         for pane in self.panes.borrow().iter() {
-            pane.terminal.set_font(Some(&gtk::pango::FontDescription::from_string(&font)));
+            pane.view.set_font(&font);
         }
         self.font.replace(font);
     }
 
+    pub fn set_blink(&self, enabled: bool) {
+        self.blink.set(enabled);
+        for pane in self.panes.borrow().iter() {
+            pane.view.set_blink(enabled);
+        }
+    }
+
+    pub fn set_colors(&self, colors: &crate::colors::Colors) {
+        for pane in self.panes.borrow().iter() {
+            pane.view.set_colors(colors);
+        }
+    }
+
     fn attach(&self, layout: Layout) -> Rc<Pane> {
-        let pane = Rc::new(self.pane());
+        let pane = self.pane();
         self.layout.set(layout);
         self.panes.borrow_mut().push(Rc::clone(&pane));
         self.focused.set(self.panes.borrow().len() - 1);
         self.relayout();
         self.root.set_visible(true);
-        pane.terminal.grab_focus();
+        pane.view.area.grab_focus();
         pane
     }
 
@@ -140,13 +146,13 @@ impl Drawer {
         let pane = self.attach(layout);
         let dir = app.state.borrow().workspace_dir();
         let Some(dir) = dir else {
-            pane.terminal.feed(b"\x1b[2mOpen a project thread to start a shell in it.\x1b[0m\r\n");
+            pane.status.set_label("Open a project thread to start a shell in it.");
+            pane.status.set_visible(true);
             return;
         };
         let request = app.core.request();
         pane.request.replace(Some(request.clone()));
-        let cols = u16::try_from(pane.terminal.column_count()).unwrap_or(80);
-        let rows = u16::try_from(pane.terminal.row_count()).unwrap_or(24);
+        let (cols, rows) = pane.view.grid();
         app.core.run(|studio| studio.open_terminal(request, dir, cols, rows));
     }
 
@@ -159,7 +165,8 @@ impl Drawer {
             .get(project)
             .and_then(|scripts| scripts.iter().find(|known| known.id == script).map(|known| known.name.clone()))
             .unwrap_or_else(|| script.to_string());
-        pane.terminal.feed(format!("\x1b[2m▶ {name}\x1b[0m\r\n").as_bytes());
+        pane.status.set_label(&format!("▶ {name}"));
+        pane.status.set_visible(true);
         let request = app.core.request();
         pane.request.replace(Some(request.clone()));
         let (project, script) = (project.to_string(), script.to_string());
@@ -185,13 +192,13 @@ impl Drawer {
         if remaining == 0 {
             app.terminal_focus(false);
         } else if let Some(pane) = self.panes.borrow().get(self.focused.get()) {
-            pane.terminal.grab_focus();
+            pane.view.area.grab_focus();
         }
     }
 
     fn relayout(&self) {
         let panes = self.panes.borrow();
-        let widgets: Vec<gtk::Widget> = panes.iter().map(|pane| pane.terminal.clone().upcast()).collect();
+        let widgets: Vec<gtk::Widget> = panes.iter().map(|pane| pane.root.clone().upcast()).collect();
         for widget in &widgets {
             if let Some(parent) = widget.parent() {
                 if let Some(paned) = parent.downcast_ref::<gtk::Paned>() {
@@ -225,105 +232,57 @@ impl Drawer {
         }
     }
 
-    pub fn set_colors(&self, colors: &crate::colors::Colors) {
-        for pane in self.panes.borrow().iter() {
-            paint(&pane.terminal, colors);
-        }
-    }
-
-    fn pane(&self) -> Pane {
-        let terminal = vte::Terminal::new();
-        terminal.set_vexpand(true);
-        terminal.set_hexpand(true);
-        terminal.add_css_class("ls-terminal");
-        paint(&terminal, &crate::colors::current());
-        terminal.set_font(Some(&gtk::pango::FontDescription::from_string(&self.font.borrow())));
-        let weak = self.app.clone();
-        terminal.connect_commit(move |terminal, text, _| {
-            let Some(app) = weak.upgrade() else { return };
-            let id = app.drawer.pane_for(terminal).and_then(|pane| pane.id.borrow().clone());
-            if let Some(id) = id {
-                let data = text.as_bytes().to_vec();
-                app.core.run(|studio| studio.write_terminal(id, data));
-            }
-        });
-        let focus = gtk::EventControllerFocus::new();
-        let (weak, watched) = (self.app.clone(), terminal.downgrade());
-        focus.connect_enter(move |_| {
-            let (Some(app), Some(terminal)) = (weak.upgrade(), watched.upgrade()) else { return };
-            let index = app.drawer.panes.borrow().iter().position(|pane| pane.terminal == terminal);
-            if let Some(index) = index {
-                app.drawer.focused.set(index);
-            }
-            app.terminal_focus(true);
-        });
-        let weak = self.app.clone();
-        focus.connect_leave(move |_| {
-            if let Some(app) = weak.upgrade() {
-                app.terminal_focus(false);
-            }
-        });
-        terminal.add_controller(focus);
-        let keys = gtk::EventControllerKey::new();
-        keys.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let (weak, watched) = (self.app.clone(), terminal.downgrade());
-        keys.connect_key_pressed(move |_, key, _, modifiers| {
-            let (Some(app), Some(terminal)) = (weak.upgrade(), watched.upgrade()) else {
-                return glib::Propagation::Proceed;
-            };
-            let wanted = gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK;
-            if !modifiers.contains(wanted) {
-                return glib::Propagation::Proceed;
-            }
-            match key.to_lower() {
-                gdk::Key::c => terminal.copy_clipboard_format(vte::Format::Text),
-                gdk::Key::v => terminal.paste_clipboard(),
-                gdk::Key::t => app.drawer.add(&app, app.drawer.layout.get()),
-                gdk::Key::d => app.drawer.add(&app, Layout::SideBySide),
-                gdk::Key::e => app.drawer.add(&app, Layout::Stacked),
-                gdk::Key::w => app.drawer.close_focused(&app),
-                gdk::Key::a => add_to_chat(&app, &terminal),
-                _ => return glib::Propagation::Proceed,
-            }
-            glib::Propagation::Stop
-        });
-        terminal.add_controller(keys);
+    fn pane(&self) -> Rc<Pane> {
+        let id: Rc<RefCell<Option<String>>> = Rc::new(RefCell::new(None));
+        let size: Rc<Cell<Option<TerminalSize>>> = Rc::new(Cell::new(None));
+        let sink: Sink = {
+            let (weak, id, size) = (self.app.clone(), Rc::clone(&id), Rc::clone(&size));
+            Rc::new(move |input| {
+                if let Some(app) = weak.upgrade() {
+                    handle(&app, &id, &size, input);
+                }
+            })
+        };
+        let view = TerminalView::new(&crate::colors::current(), &sink);
+        view.set_font(&self.font.borrow());
+        view.set_blink(self.blink.get());
+        let status = gtk::Label::new(None);
+        status.add_css_class("ls-terminal-status");
+        status.set_halign(gtk::Align::End);
+        status.set_valign(gtk::Align::End);
+        status.set_margin_end(10);
+        status.set_margin_bottom(8);
+        status.set_can_target(false);
+        status.set_visible(false);
+        let root = gtk::Overlay::new();
+        root.set_child(Some(&view.area));
+        root.add_overlay(&status);
         let actions = gio::SimpleActionGroup::new();
-        for name in ["copy", "paste", "add-to-chat"] {
+        for name in ["copy", "paste", "copy-recent", "add-to-chat"] {
             let action = gio::SimpleAction::new(name, None);
-            let (weak, watched) = (self.app.clone(), terminal.downgrade());
+            let (weak, id) = (self.app.clone(), Rc::clone(&id));
             action.connect_activate(move |action, _| {
-                let (Some(app), Some(terminal)) = (weak.upgrade(), watched.upgrade()) else { return };
-                match action.name().as_str() {
-                    "copy" => terminal.copy_clipboard_format(vte::Format::Text),
-                    "paste" => terminal.paste_clipboard(),
-                    _ => add_to_chat(&app, &terminal),
+                if let Some(app) = weak.upgrade() {
+                    command(&app, &id, action.name().as_str());
                 }
             });
             actions.add_action(&action);
         }
-        terminal.insert_action_group("term", Some(&actions));
-        let menu = gtk::GestureClick::builder().button(3).build();
-        let watched = terminal.downgrade();
-        menu.connect_pressed(move |gesture, _, x, y| {
-            let Some(terminal) = watched.upgrade() else { return };
-            gesture.set_state(gtk::EventSequenceState::Claimed);
-            let model = gio::Menu::new();
-            model.append(Some("Add to Chat"), Some("term.add-to-chat"));
-            model.append(Some("Copy"), Some("term.copy"));
-            model.append(Some("Paste"), Some("term.paste"));
-            crate::actions::popup_menu(&terminal, &model, x, y);
-        });
-        terminal.add_controller(menu);
-        Pane { terminal, id: RefCell::new(None), request: RefCell::new(None), size: Cell::new((0, 0)) }
-    }
-
-    fn pane_for(&self, terminal: &vte::Terminal) -> Option<Rc<Pane>> {
-        self.panes.borrow().iter().find(|pane| &pane.terminal == terminal).cloned()
+        root.insert_action_group("term", Some(&actions));
+        Rc::new(Pane { view, root, status, id, request: RefCell::new(None), size, has_selection: Cell::new(false) })
     }
 
     fn pane_by_id(&self, terminal: &str) -> Option<Rc<Pane>> {
         self.panes.borrow().iter().find(|pane| pane.id.borrow().as_deref() == Some(terminal)).cloned()
+    }
+
+    fn pane_for(&self, id: &Rc<RefCell<Option<String>>>) -> Option<(usize, Rc<Pane>)> {
+        self.panes
+            .borrow()
+            .iter()
+            .enumerate()
+            .find(|(_, pane)| Rc::ptr_eq(&pane.id, id))
+            .map(|(index, pane)| (index, Rc::clone(pane)))
     }
 
     pub fn opened(&self, request: &str, terminal: &str) -> bool {
@@ -331,32 +290,83 @@ impl Drawer {
         let Some(pane) = pane else { return false };
         pane.request.replace(None);
         pane.id.replace(Some(terminal.to_string()));
-        pane.size.set((0, 0));
+        if let Some(app) = self.app.upgrade() {
+            let size = pane.size.get().unwrap_or_else(|| pane.view.size());
+            let id = terminal.to_string();
+            app.core.run(|studio| studio.resize_terminal(id, size));
+            if pane.view.area.has_focus() {
+                let id = terminal.to_string();
+                app.core.run(|studio| studio.terminal_focus(id, true));
+            }
+        }
         true
     }
 
-    pub fn output(&self, terminal: &str, data: &[u8]) {
+    pub fn frame(&self, terminal: &str, frame: &TerminalFrame) {
         if let Some(pane) = self.pane_by_id(terminal) {
-            pane.terminal.feed(data);
+            pane.has_selection.set(frame.has_selection);
+            if let Some(title) = frame.title.as_deref().filter(|title| !title.is_empty()) {
+                pane.root.set_tooltip_text(Some(title));
+            }
+            pane.view.apply(frame);
         }
     }
 
     pub fn exited(&self, terminal: &str, code: Option<i32>) {
         let Some(pane) = self.pane_by_id(terminal) else { return };
         pane.id.replace(None);
-        let message = match code {
-            Some(code) if code != 0 => format!("\r\n\x1b[2m[Process exited with code {code}]\x1b[0m\r\n"),
-            _ => "\r\n\x1b[2m[Process exited]\x1b[0m\r\n".to_string(),
-        };
-        pane.terminal.feed(message.as_bytes());
+        pane.status.set_label(&match code {
+            Some(code) if code != 0 => format!("Process exited with code {code}"),
+            _ => "Process exited".to_string(),
+        });
+        pane.status.set_visible(true);
+    }
+
+    pub fn text_arrived(app: &Rc<App>, target: Target, text: &str) {
+        match target {
+            Target::TerminalCopy => {
+                if text.is_empty() {
+                    app.toast("Nothing to copy.");
+                } else {
+                    app.window.clipboard().set_text(text);
+                }
+            }
+            _ => add_to_chat(app, text),
+        }
+    }
+
+    pub fn focused_text(&self) -> String {
+        self.panes.borrow().get(self.focused.get()).map(|pane| pane.view.text()).unwrap_or_default()
+    }
+
+    pub fn type_text(&self, app: &Rc<App>, text: &str) {
+        let id = self.panes.borrow().get(self.focused.get()).and_then(|pane| pane.id.borrow().clone());
+        let Some(id) = id else { return };
+        for ch in text.chars() {
+            let (id, key) = (id.clone(), crate::terminal::text_key(&ch.to_string()));
+            app.core.run(|studio| studio.terminal_key(id, key));
+        }
+        let key = crate::terminal::return_key();
+        app.core.run(|studio| studio.terminal_key(id, key));
+    }
+
+    pub fn add_focused_to_chat(&self, app: &Rc<App>) {
+        let pane = self.panes.borrow().get(self.focused.get()).cloned();
+        if let Some(pane) = pane {
+            command(app, &pane.id, "add-to-chat");
+        }
     }
 
     pub fn fixture(&self, texts: &[&str], layout: Layout) {
         self.panes.borrow_mut().clear();
         self.layout.set(layout);
         for text in texts {
-            let pane = Rc::new(self.pane());
-            pane.terminal.feed(text.as_bytes());
+            let pane = self.pane();
+            if let Some(frame) =
+                local_studio_core::terminal_preview(PREVIEW_COLS, PREVIEW_ROWS, text.as_bytes().to_vec())
+            {
+                pane.view.apply(&frame);
+            }
             self.panes.borrow_mut().push(pane);
         }
         self.relayout();
@@ -370,34 +380,108 @@ impl Drawer {
     }
 }
 
-fn add_to_chat(app: &Rc<App>, terminal: &vte::Terminal) {
-    let selected =
-        terminal.text_selected(vte::Format::Text).map(|text| text.to_string()).filter(|text| !text.trim().is_empty());
-    let text = selected.unwrap_or_else(|| {
-        let all = terminal.text_format(vte::Format::Text).map(|text| text.to_string()).unwrap_or_default();
-        let lines: Vec<&str> = all.trim_end().lines().collect();
-        lines[lines.len().saturating_sub(CONTEXT_LINES)..].join("\n")
-    });
+fn handle(app: &Rc<App>, id: &Rc<RefCell<Option<String>>>, size: &Rc<Cell<Option<TerminalSize>>>, input: Input) {
+    let terminal = id.borrow().clone();
+    match input {
+        Input::Key(key) => {
+            if let Some(terminal) = terminal {
+                app.core.run(|studio| studio.terminal_key(terminal, key));
+            }
+        }
+        Input::Mouse(mouse) => {
+            if let Some(terminal) = terminal {
+                app.core.run(|studio| studio.terminal_mouse(terminal, mouse));
+            }
+        }
+        Input::Scroll(scroll) => {
+            if let Some(terminal) = terminal {
+                app.core.run(|studio| studio.terminal_scroll(terminal, scroll));
+            }
+        }
+        Input::Focus(focused) => {
+            if focused {
+                if let Some((index, _)) = app.drawer.pane_for(id) {
+                    app.drawer.focused.set(index);
+                }
+            }
+            app.terminal_focus(focused);
+            if let Some(terminal) = terminal {
+                app.core.run(|studio| studio.terminal_focus(terminal, focused));
+            }
+        }
+        Input::Resize(next) => {
+            size.set(Some(next));
+            if let Some(terminal) = terminal {
+                app.core.run(|studio| studio.resize_terminal(terminal, next));
+            }
+        }
+        Input::Menu(x, y) => {
+            let Some((_, pane)) = app.drawer.pane_for(id) else { return };
+            let model = gio::Menu::new();
+            model.append(Some("Add to Chat"), Some("term.add-to-chat"));
+            model.append(Some("Copy"), Some("term.copy"));
+            model.append(Some("Paste"), Some("term.paste"));
+            model.append(Some("Copy Recent Output"), Some("term.copy-recent"));
+            crate::actions::popup_menu(&pane.root, &model, x, y);
+        }
+        Input::Shortcut(key) => match key {
+            gdk::Key::c => command(app, id, "copy"),
+            gdk::Key::v => command(app, id, "paste"),
+            gdk::Key::t => app.drawer.add(app, app.drawer.layout.get()),
+            gdk::Key::d => app.drawer.add(app, Layout::SideBySide),
+            gdk::Key::e => app.drawer.add(app, Layout::Stacked),
+            gdk::Key::w => app.drawer.close_focused(app),
+            _ => command(app, id, "add-to-chat"),
+        },
+    }
+}
+
+fn command(app: &Rc<App>, id: &Rc<RefCell<Option<String>>>, name: &str) {
+    let terminal = id.borrow().clone();
+    let selected = app.drawer.pane_for(id).is_some_and(|(_, pane)| pane.has_selection.get());
+    let Some(terminal) = terminal else {
+        let text = app.drawer.pane_for(id).map(|(_, pane)| pane.view.text()).unwrap_or_default();
+        match name {
+            "copy" | "copy-recent" => app.window.clipboard().set_text(&text),
+            "add-to-chat" => add_to_chat(app, &text),
+            _ => {}
+        }
+        return;
+    };
+    match name {
+        "paste" => {
+            let weak = Rc::downgrade(app);
+            app.window.clipboard().read_text_async(None::<&gio::Cancellable>, move |result| {
+                let (Some(app), Ok(Some(text))) = (weak.upgrade(), result) else { return };
+                let text = text.to_string();
+                app.core.run(|studio| studio.terminal_paste(terminal, text));
+            });
+        }
+        "copy" => {
+            let request = app.ask(Target::TerminalCopy);
+            app.core.run(|studio| studio.terminal_selection_text(request, terminal));
+        }
+        "copy-recent" => {
+            let request = app.ask(Target::TerminalCopy);
+            app.core.run(|studio| studio.terminal_recent_output(request, terminal, RECENT_LINES));
+        }
+        _ => {
+            let request = app.ask(Target::TerminalChat);
+            if selected {
+                app.core.run(|studio| studio.terminal_selection_text(request, terminal));
+            } else {
+                app.core.run(|studio| studio.terminal_recent_output(request, terminal, CONTEXT_LINES));
+            }
+        }
+    }
+}
+
+fn add_to_chat(app: &Rc<App>, text: &str) {
+    let text = text.trim_end();
     if text.trim().is_empty() {
         app.toast("The terminal has no output to add yet.");
         return;
     }
-    app.composer.extras.add_context("Terminal", text.trim_end());
+    app.composer.extras.add_context("Terminal", text);
     app.composer.focus();
-}
-
-fn paint(terminal: &vte::Terminal, colors: &crate::colors::Colors) {
-    let palette: Vec<gdk::RGBA> = colors.ansi.iter().filter_map(|color| gdk::RGBA::parse(*color).ok()).collect();
-    let palette: Vec<&gdk::RGBA> = palette.iter().collect();
-    if let (Ok(foreground), Ok(background)) =
-        (gdk::RGBA::parse(colors.terminal_fg), gdk::RGBA::parse(colors.terminal_bg))
-    {
-        terminal.set_colors(Some(&foreground), Some(&background), &palette);
-    }
-    if let Ok(cursor) = gdk::RGBA::parse(colors.cursor) {
-        terminal.set_color_cursor(Some(&cursor));
-    }
-    if let Ok(selection) = gdk::RGBA::parse(colors.selection) {
-        terminal.set_color_highlight(Some(&selection));
-    }
 }

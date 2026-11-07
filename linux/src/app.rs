@@ -50,6 +50,8 @@ pub enum Target {
     Skills,
     MessageImage,
     CommitFiles,
+    TerminalCopy,
+    TerminalChat,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -508,7 +510,12 @@ impl App {
             Update::TerminalOpened { request, terminal } => {
                 self.drawer.opened(&request, &terminal);
             }
-            Update::TerminalOutput { terminal, data } => self.drawer.output(&terminal, &data),
+            Update::TerminalFrame { terminal, frame } => self.drawer.frame(&terminal, &frame),
+            Update::TerminalText { request, terminal: _, text } => {
+                if let Some(target @ (Target::TerminalCopy | Target::TerminalChat)) = self.take_request(&request) {
+                    Drawer::text_arrived(self, target, &text);
+                }
+            }
             Update::TerminalExited { terminal, code } => self.drawer.exited(&terminal, code),
             Update::Usage { request: _, report } => {
                 self.state.borrow_mut().usage = Some(report);
@@ -816,6 +823,7 @@ impl App {
         self.branches.root.set_maximum_size(width);
         self.panel.diff.apply_settings(settings);
         self.drawer.set_font(&settings.terminal_font, settings.terminal_font_size);
+        self.drawer.set_blink(settings.terminal_cursor_blink);
     }
 
     pub fn open_surface(self: &Rc<Self>, kind: &str) {
