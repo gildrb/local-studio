@@ -2,26 +2,27 @@ import AppKit
 import SwiftUI
 
 enum Theme {
-    static let canvas = dynamic(dark: rgb(0.0392, 0.0392, 0.0392), light: rgb(0.9895, 0.9895, 0.9895))
-    static let sidebar = dynamic(dark: rgb(0.068, 0.068, 0.068), light: rgb(0.98, 0.98, 0.98))
-    static let card = dynamic(dark: rgb(0.068, 0.068, 0.068), light: rgb(1, 1, 1))
-    static let primary = dynamic(dark: rgb(0.2044, 0.4198, 0.9449), light: rgb(0.1043, 0.3071, 0.8463))
-    static let hairline = dynamic(dark: NSColor(white: 1, alpha: 0.06), light: rgb(0.894, 0.894, 0.906))
-    static let input = dynamic(dark: NSColor(white: 1, alpha: 0.08), light: rgb(0.831, 0.831, 0.847))
-    static let hover = dynamic(dark: NSColor(white: 1, alpha: 0.04), light: rgb(0.957, 0.957, 0.961))
-    static let selection = dynamic(dark: NSColor(white: 1, alpha: 0.07), light: rgb(0.937, 0.937, 0.945))
-    static let selectionStroke = dynamic(dark: NSColor(white: 1, alpha: 0.09), light: rgb(0.894, 0.894, 0.906))
-    static let message = dynamic(dark: NSColor(white: 1, alpha: 0.06), light: rgb(0.957, 0.957, 0.961))
-    static let secondaryText = dynamic(dark: rgb(0.5059, 0.5059, 0.5059), light: rgb(0.443, 0.443, 0.478))
-    static let chromeIcon = dynamic(dark: NSColor(white: 1, alpha: 0.6), light: NSColor(white: 0, alpha: 0.55))
-    static let tertiaryText = dynamic(dark: rgb(0.36, 0.36, 0.36), light: rgb(0.62, 0.62, 0.65))
-    static let success = dynamic(dark: rgb(0.204, 0.827, 0.6), light: rgb(0.02, 0.588, 0.412))
-    static let warning = dynamic(dark: rgb(0.984, 0.749, 0.141), light: rgb(0.851, 0.467, 0.024))
-    static let danger = dynamic(dark: rgb(0.973, 0.443, 0.443), light: rgb(0.863, 0.149, 0.149))
-    static let working = dynamic(dark: rgb(0.22, 0.741, 0.973), light: rgb(0.008, 0.518, 0.78))
-    static let woke = dynamic(dark: rgb(0.984, 0.573, 0.235), light: rgb(0.918, 0.345, 0.047))
-    static let overlay = dynamic(dark: rgb(0.086, 0.086, 0.086), light: rgb(1, 1, 1))
-    static let shadow = dynamic(dark: NSColor(white: 0, alpha: 0.5), light: NSColor(white: 0, alpha: 0.14))
+    static var canvas: Color { ThemeTokens.shared.color(.canvas) }
+    static var sidebar: Color { ThemeTokens.shared.color(.sidebar) }
+    static var card: Color { ThemeTokens.shared.color(.card) }
+    static var primary: Color { ThemeTokens.shared.color(.primary) }
+    static var hairline: Color { ThemeTokens.shared.color(.hairline) }
+    static var input: Color { ThemeTokens.shared.color(.input) }
+    static var hover: Color { ThemeTokens.shared.color(.hover) }
+    static var selection: Color { ThemeTokens.shared.color(.selection) }
+    static var selectionStroke: Color { ThemeTokens.shared.color(.selectionStroke) }
+    static var message: Color { ThemeTokens.shared.color(.message) }
+    static var text: Color { ThemeTokens.shared.color(.text) }
+    static var secondaryText: Color { ThemeTokens.shared.color(.secondaryText) }
+    static var chromeIcon: Color { ThemeTokens.shared.color(.chromeIcon) }
+    static var tertiaryText: Color { ThemeTokens.shared.color(.tertiaryText) }
+    static var success: Color { ThemeTokens.shared.color(.success) }
+    static var warning: Color { ThemeTokens.shared.color(.warning) }
+    static var danger: Color { ThemeTokens.shared.color(.danger) }
+    static var working: Color { ThemeTokens.shared.color(.working) }
+    static var woke: Color { ThemeTokens.shared.color(.woke) }
+    static var overlay: Color { ThemeTokens.shared.color(.overlay) }
+    static var shadow: Color { ThemeTokens.shared.color(.shadow) }
 
     enum Metrics {
         static let titlebarHeight: CGFloat = 52
@@ -33,16 +34,6 @@ enum Theme {
         static let sidebarInset: CGFloat = 8
         static let chromeButton: CGFloat = 28
         static let trailingChromeInset: CGFloat = 76
-    }
-
-    private static func rgb(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> NSColor {
-        NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
-    }
-
-    private static func dynamic(dark: NSColor, light: NSColor) -> Color {
-        Color(nsColor: NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
-        })
     }
 }
 
