@@ -1,6 +1,6 @@
 use crate::workspace::model::{
-    Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalSnapshot, ProviderStatus,
-    PullRequest, PullRequestDetail, SearchHit, Settings, UsageReport,
+    Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalSnapshot, ProjectScript,
+    ProjectSettings, ProviderStatus, PullRequest, PullRequestDetail, SearchHit, Settings, SetupStage, UsageReport,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +193,7 @@ pub struct ThreadSettings {
 pub enum ApprovalAnswer {
     Approve,
     Deny,
+    AlwaysAllowSession,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -364,6 +365,10 @@ pub enum Update {
     Providers { providers: Vec<ProviderStatus> },
     Settings { settings: Settings },
     Keybindings { bindings: Vec<Keybinding> },
+    ProjectScripts { project: String, scripts: Vec<ProjectScript> },
+    ProjectSettings { project: String, settings: ProjectSettings, effective: Settings },
+    WorktreeSetup { thread: String, stages: Vec<SetupStage>, done: bool, error: Option<String> },
+    Daemon { socket: String, version: Option<String>, pid: Option<u32> },
     RequestDone { request: String, message: String },
     RequestFailed { request: String, message: String },
     Notice { level: NoticeLevel, text: String },

@@ -131,6 +131,17 @@ final class InboxStore {
         core.run { $0.setProjectIcon(project: project, icon: value?.isEmpty == true ? nil : value) }
     }
 
+    private(set) var projectScripts: [String: [ProjectScript]] = [:]
+    private(set) var projectSettings: [String: (settings: ProjectSettings, effective: Settings)] = [:]
+
+    func setProjectScripts(project: String, scripts: [ProjectScript]) {
+        projectScripts[project] = scripts
+    }
+
+    func setProjectSettings(project: String, settings: ProjectSettings, effective: Settings) {
+        projectSettings[project] = (settings, effective)
+    }
+
     func setThreadSearch(request: String, hits: [ThreadSearchHit]) {
         threadSearch = (request, hits)
         guard request == searchRequest else { return }

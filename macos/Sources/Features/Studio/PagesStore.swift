@@ -92,6 +92,12 @@ final class PagesStore {
         keybindings = bindings
     }
 
+    private(set) var daemon: (socket: String, version: String?, pid: UInt32?)?
+
+    func setDaemon(socket: String, version: String?, pid: UInt32?) {
+        daemon = (socket, version, pid)
+    }
+
     func update(_ change: (inout Settings) -> Void) {
         guard var next = settings else { return }
         change(&next)

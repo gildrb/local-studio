@@ -218,6 +218,49 @@ pub struct Device {
     pub runtime: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProjectScript {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub icon: Option<String>,
+    pub keybinding: Option<String>,
+    pub run_on_worktree_setup: bool,
+    pub wait_for_setup: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[serde(default, rename_all = "camelCase")]
+pub struct ProjectSettings {
+    pub default_provider: Option<String>,
+    pub default_model: Option<String>,
+    pub default_thinking_level: Option<String>,
+    pub default_access: Option<AccessMode>,
+    pub new_thread_workspace: Option<NewThreadWorkspace>,
+    pub new_worktrees_start_from_origin: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum SetupStageState {
+    Pending,
+    Running,
+    Done,
+    Failed,
+    Skipped,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct SetupStage {
+    pub name: String,
+    pub state: SetupStageState,
+    pub output_tail: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UsageByModel {
