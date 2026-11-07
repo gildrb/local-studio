@@ -278,8 +278,8 @@ esac
 const PR_LIST: &str = r#"[{"number":7,"title":"Add feature","url":"https://github.com/smoke/repo/pull/7","state":"MERGED",
 "headRefName":"watched","baseRefName":"main","statusCheckRollup":[]}]"#;
 
-const T3_JSON: &str = r#"{
-  // JSONC is tolerated, like main's loader
+const LOCAL_STUDIO_JSON: &str = r#"{
+  // JSONC is tolerated
   "scripts": [
     { "name": "Echo", "command": "echo setup-ran-in-$(basename \"$LOCAL_STUDIO_WORKTREE_PATH\")", "runOnWorktreeCreate": true, "async": false },
     { "name": "Hello", "command": "echo script-ran", "icon": "test" },
@@ -404,10 +404,10 @@ fn first_run(harness: &mut Harness, repo: &Path, port: u16) -> anyhow::Result<()
 
 fn project_scripts_and_settings(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
     let project = project.to_string();
-    std::fs::write(Path::new(&project).join("t3.json"), T3_JSON)?;
+    std::fs::write(Path::new(&project).join("local-studio.json"), LOCAL_STUDIO_JSON)?;
     let request = harness.request();
     harness.studio.import_project_scripts(request.clone(), project.clone());
-    harness.answer("import scripts from t3.json (JSONC)", &request)?;
+    harness.answer("import scripts from local-studio.json (JSONC)", &request)?;
     let id = project.clone();
     harness.pump_until("imported scripts pushed", move |view| {
         view.project_scripts.iter().rev().find(|(owner, _)| *owner == id).is_some_and(|(_, scripts)| scripts.len() == 2)
@@ -464,7 +464,7 @@ fn worktree_setup(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
         PromptDraft { text: "hello from a worktree".to_string(), images: Vec::new(), files: Vec::new() },
         thread_settings(WorktreeChoice::NewWorktree { branch: "smoke/setup".to_string(), base: Some("main".into()) }),
     );
-    harness.pump_until("worktree setup ran the t3.json setup script before the thread", |view| {
+    harness.pump_until("worktree setup ran the local-studio.json setup script before the thread", |view| {
         view.setups.iter().any(|(draft, stages, done, error)| {
             draft == "setup-draft"
                 && *done
