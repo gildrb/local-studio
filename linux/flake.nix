@@ -64,7 +64,7 @@
               pkgs.clang
               pkgs.git
               pkgs.xvfb-run
-              pkgs.xorg.xvfb
+              pkgs.xvfb
               pkgs.dbus
               pkgs.rsync
             ];

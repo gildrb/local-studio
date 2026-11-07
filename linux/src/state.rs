@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use local_studio_core::{
     AccessMode, Approval, Connection, GitStatus, Keybinding, LocalSnapshot, ModelKey, ModelOption, Project,
-    ProjectScript, ProjectSettings, ProviderStatus, QueuedMessage, Settings, SetupStage, ThreadInfo, ThreadRow,
-    UsagePeriod, UsageReport,
+    ProjectScript, ProjectSettings, ProviderStatus, QueuedMessage, Settings, SetupStage, Subagent, ThreadInfo,
+    ThreadRow, UsagePeriod, UsageReport,
 };
 
 #[derive(Clone, Default)]
@@ -34,6 +34,7 @@ pub struct DraftSettings {
     pub model: Option<ModelKey>,
     pub thinking: Option<String>,
     pub access: Option<AccessMode>,
+    pub compare: Vec<ModelKey>,
 }
 
 #[derive(Default)]
@@ -58,6 +59,8 @@ pub struct State {
     pub project_settings: HashMap<String, ProjectSettings>,
     pub setup: HashMap<String, Setup>,
     pub daemon: Option<DaemonInfo>,
+    pub subagents: HashMap<String, Vec<Subagent>>,
+    pub effective: HashMap<String, Settings>,
     pub providers: Vec<ProviderStatus>,
     pub archived: Vec<ThreadRow>,
     pub git: HashMap<String, GitStatus>,

@@ -72,6 +72,19 @@ impl PullDetail {
             gtk::UriLauncher::new(&url).launch(window.as_ref(), None::<&gio::Cancellable>, |_| {});
         });
         meta.append(&open);
+        let number = pull.number.to_string();
+        let checkout = gtk::Button::builder().label("Check Out").tooltip_text("Check out into a new worktree").build();
+        checkout.add_css_class("flat");
+        checkout.set_action_name(Some("win.pr-checkout"));
+        checkout.set_action_target_value(Some(&number.to_variant()));
+        meta.append(&checkout);
+        if pull.state.eq_ignore_ascii_case("open") {
+            let merge = gtk::Button::with_label("Merge…");
+            merge.add_css_class("suggested-action");
+            merge.set_action_name(Some("win.pr-merge"));
+            merge.set_action_target_value(Some(&number.to_variant()));
+            meta.append(&merge);
+        }
         column.append(&meta);
         if !detail.checks.is_empty() {
             let group = adw::PreferencesGroup::builder().title("Checks").build();

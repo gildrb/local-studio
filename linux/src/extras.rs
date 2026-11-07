@@ -46,6 +46,8 @@ pub struct Extras {
     trigger: RefCell<Option<Trigger>>,
     commands: RefCell<Vec<SlashCommand>>,
     commands_key: RefCell<Option<String>>,
+    skills: RefCell<Vec<local_studio_core::SkillEntry>>,
+    skills_key: RefCell<Option<String>>,
     pulls: RefCell<Vec<PullRequest>>,
     pulls_key: RefCell<Option<String>>,
     pending: RefCell<String>,
@@ -101,6 +103,8 @@ impl Extras {
             trigger: RefCell::new(None),
             commands: RefCell::new(Vec::new()),
             commands_key: RefCell::new(None),
+            skills: RefCell::new(Vec::new()),
+            skills_key: RefCell::new(None),
             pulls: RefCell::new(Vec::new()),
             pulls_key: RefCell::new(None),
             pending: RefCell::new(String::new()),
@@ -162,18 +166,23 @@ impl Extras {
             (state.current_project(), state.workspace_dir())
         };
         match trigger.kind {
-            Kind::Command | Kind::Skill => {
+            Kind::Command => {
                 let key = project.clone().unwrap_or_default();
                 if self.commands_key.borrow().as_ref() != Some(&key) {
                     self.commands_key.replace(Some(key));
                     let request = app.ask(Target::Commands);
                     app.core.run(|studio| studio.list_commands(request, project));
                 }
-                if trigger.kind == Kind::Command {
-                    self.show_commands(&trigger.query);
-                } else {
-                    self.show_skills(&trigger.query);
+                self.show_commands(&trigger.query);
+            }
+            Kind::Skill => {
+                let key = project.clone().unwrap_or_default();
+                if self.skills_key.borrow().as_ref() != Some(&key) {
+                    self.skills_key.replace(Some(key));
+                    let request = app.ask(Target::Skills);
+                    app.core.run(|studio| studio.list_skills(request, project));
                 }
+                self.show_skills(&trigger.query);
             }
             Kind::Pull => {
                 let Some(root) = root else {
@@ -241,22 +250,30 @@ impl Extras {
     fn show_skills(&self, query: &str) {
         let query = query.to_lowercase();
         let items: Vec<Suggestion> = self
-            .commands
+            .skills
             .borrow()
             .iter()
-            .filter(|command| command.source.to_lowercase().contains("skill"))
-            .filter(|command| command.name.to_lowercase().contains(&query))
+            .filter(|skill| skill.name.to_lowercase().contains(&query))
             .take(MENU_LIMIT)
-            .map(|command| Suggestion {
-                title: format!("${}", command.name.trim_start_matches("skill:")),
-                detail: command.description.clone(),
-                badge: command.source.clone(),
-                insert: format!("${} ", command.name.trim_start_matches("skill:")),
+            .map(|skill| Suggestion {
+                title: format!("${}", skill.name),
+                detail: skill.description.clone(),
+                badge: skill_source(skill.source).to_string(),
+                insert: format!("${} ", skill.name),
                 file: None,
                 context: None,
             })
             .collect();
         self.show(items, "No matching skill.");
+    }
+
+    pub fn skills_loaded(&self, skills: &[local_studio_core::SkillEntry]) {
+        self.skills.replace(skills.to_vec());
+        let query =
+            self.trigger.borrow().as_ref().filter(|trigger| trigger.kind == Kind::Skill).map(|t| t.query.clone());
+        if let Some(query) = query {
+            self.show_skills(&query);
+        }
     }
 
     pub fn commands_loaded(&self, commands: Vec<SlashCommand>) {
@@ -304,7 +321,11 @@ impl Extras {
         items.extend(self.commands.borrow().iter().map(|command| Suggestion {
             title: format!("/{}", command.name),
             detail: command.description.clone(),
-            badge: command.source.clone(),
+            badge: match command.kind {
+                local_studio_core::CommandKind::Template => "Template".to_string(),
+                local_studio_core::CommandKind::Skill => "Skill".to_string(),
+                local_studio_core::CommandKind::Command => command.source.clone(),
+            },
             insert: format!("/{} ", command.name),
             file: None,
             context: None,
@@ -568,6 +589,16 @@ enum Chip {
 fn remove_at<T>(items: &mut Vec<T>, index: usize) {
     if index < items.len() {
         items.remove(index);
+    }
+}
+
+fn skill_source(source: local_studio_core::SkillSource) -> &'static str {
+    match source {
+        local_studio_core::SkillSource::App => "App",
+        local_studio_core::SkillSource::Repo => "Repo",
+        local_studio_core::SkillSource::Project => "Project",
+        local_studio_core::SkillSource::Personal => "Personal",
+        local_studio_core::SkillSource::System => "System",
     }
 }
 

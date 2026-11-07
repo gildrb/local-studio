@@ -109,6 +109,7 @@ pub fn status(status: ThreadStatus) -> Option<(&'static str, &'static str, &'sta
         ThreadStatus::Failed => Some(("dialog-error-symbolic", "Failed", "status-failed")),
         ThreadStatus::Done => Some(("object-select-symbolic", "Done", "status-done")),
         ThreadStatus::Woke => Some(("alarm-symbolic", "Woke", "status-woke")),
+        ThreadStatus::Monitoring => Some(("view-reveal-symbolic", "Monitoring", "status-monitoring")),
     }
 }
 

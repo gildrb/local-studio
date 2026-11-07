@@ -25,6 +25,7 @@ pub fn install(app: &Rc<App>) {
     crate::commands::install(app);
     crate::workbench::install(app);
     crate::bindings::install(app);
+    crate::flows::install(app);
     add_string_action(app, "copy-text", |app, text| {
         app.window.clipboard().set_text(&text);
         app.toast("Copied");
@@ -148,9 +149,7 @@ fn install_threads(app: &Rc<App>) {
 
 fn install_global(app: &Rc<App>) {
     let extra: [(&str, AppAction); 5] = [
-        ("git-commit", |app| {
-            git_request(app, "Committing…", |studio, request, dir| studio.commit(request, dir, None));
-        }),
+        ("git-commit", crate::commit::present),
         ("git-push", |app| git_request(app, "Pushing…", local_studio_core::Studio::push)),
         ("git-pr", create_pull_request),
         ("git-view-pr", view_pull_request),
@@ -282,6 +281,7 @@ pub fn thread_menu(state: &State, id: &str) -> gio::Menu {
         for (action, label) in SNOOZES {
             item(&snooze, label, action);
         }
+        item(&snooze, "Custom…", "thread-snooze-custom");
         first.append_submenu(Some("Snooze"), &snooze);
     }
     if pinned {
@@ -299,6 +299,10 @@ pub fn thread_menu(state: &State, id: &str) -> gio::Menu {
     item(&second, "Regenerate Title", "thread-regenerate-title");
     item(&second, if unread { "Mark as Read" } else { "Mark Unread" }, "thread-unread");
     item(&second, "Fork Thread", "thread-fork");
+    if let Some(branch) = row.and_then(|row| row.branch.clone()) {
+        item(&second, &format!("New Thread on {branch}"), "thread-new-on-branch");
+    }
+    item(&second, "Restart Agent Session", "thread-restart");
     if let Some(name) = project_name {
         item(
             &second,

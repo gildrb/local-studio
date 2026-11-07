@@ -60,13 +60,22 @@ pub fn install(app: &Rc<App>) {
     }
     let strings: [(&str, StringAction); 7] = [
         ("run-script", |app, id| {
-            let script = {
+            let project = {
                 let state = app.state.borrow();
-                let current = state.current_project().and_then(|project| state.scripts.get(&project));
-                current.into_iter().chain(state.scripts.values()).flatten().find(|script| script.id == id).cloned()
+                let current = state.current_project();
+                current
+                    .clone()
+                    .filter(|project| state.scripts.get(project).is_some_and(|list| list.iter().any(|s| s.id == id)))
+                    .or_else(|| {
+                        state
+                            .scripts
+                            .iter()
+                            .find(|(_, list)| list.iter().any(|script| script.id == id))
+                            .map(|(project, _)| project.clone())
+                    })
             };
-            match script {
-                Some(script) => app.drawer.run(app, &script.name, &script.command),
+            match project {
+                Some(project) => app.drawer.run_script(app, &project, &id),
                 None => app.toast("That script isn't defined for this project."),
             }
         }),

@@ -47,6 +47,9 @@ pub enum Target {
     DiffBases,
     GotoFile,
     HashPulls,
+    Skills,
+    MessageImage,
+    CommitFiles,
 }
 
 #[derive(Default, Clone, Copy)]
@@ -78,6 +81,7 @@ pub struct App {
     pub stack: gtk::Stack,
     pub conversation: gtk::Stack,
     pub banner: adw::Banner,
+    pub banners: crate::banners::Banners,
     pub sidebar: Sidebar,
     pub header: Header,
     pub timeline: Timeline,
@@ -123,14 +127,16 @@ impl App {
                 .default_width(1280)
                 .default_height(820)
                 .build();
+            let width = crate::prefs::get("sidebar-width").and_then(|value| value.parse::<f64>().ok()).unwrap_or(288.0);
             let split = adw::OverlaySplitView::builder()
-                .min_sidebar_width(264.0)
-                .max_sidebar_width(320.0)
-                .sidebar_width_fraction(0.24)
+                .min_sidebar_width(width)
+                .max_sidebar_width(width)
+                .sidebar_width_fraction(1.0)
                 .build();
             let sidebar = Sidebar::new(weak.clone());
             let editors = Editors::detect();
             let header = Header::build(&editors.menu());
+            crate::flows::new_thread_in_on_shift(weak, header.new_thread());
             let timeline = Timeline::new(weak.clone());
             let composer = Composer::new(weak.clone());
             let panel = Panel::new(weak.clone());
@@ -143,6 +149,7 @@ impl App {
             let branches = BranchBar::new(weak.clone());
             let search = ProjectSearch::new(weak.clone());
             let banner = adw::Banner::new("");
+            let banners = crate::banners::Banners::new();
             let conversation = gtk::Stack::new();
             conversation.add_named(&hero.root, Some("hero"));
             conversation.add_named(&timeline.root, Some("timeline"));
@@ -151,9 +158,19 @@ impl App {
             chat.append(&conversation);
             chat.append(&composer.root);
             chat.append(&branches.root);
-            chat.add_controller(crate::extras::drop_target(weak));
+            let drop = crate::extras::drop_target(weak);
+            let hint = gtk::Label::new(Some("Drop files to attach"));
+            hint.add_css_class("ls-drop-hint");
+            hint.set_can_target(false);
+            hint.set_visible(false);
+            let shown = hint.clone();
+            drop.connect_current_drop_notify(move |target| shown.set_visible(target.current_drop().is_some()));
+            chat.add_controller(drop);
+            let chat_overlay = gtk::Overlay::new();
+            chat_overlay.set_child(Some(&chat));
+            chat_overlay.add_overlay(&hint);
             let column = gtk::Paned::new(gtk::Orientation::Vertical);
-            column.set_start_child(Some(&chat));
+            column.set_start_child(Some(&chat_overlay));
             column.set_end_child(Some(&drawer.root));
             column.set_resize_end_child(false);
             column.set_shrink_end_child(false);
@@ -189,11 +206,16 @@ impl App {
             sidebar_view.add_top_bar(&sidebar.header);
             sidebar_view.set_content(Some(&sidebar.root));
             sidebar_view.add_css_class("ls-sidebar");
+            let sidebar_overlay = gtk::Overlay::new();
+            sidebar_overlay.set_child(Some(&sidebar_view));
+            sidebar_overlay.add_overlay(&sidebar_handle(&split));
             let content_view = adw::ToolbarView::new();
             content_view.add_top_bar(&header.bar);
             content_view.add_top_bar(&banner);
+            content_view.add_top_bar(&banners.notice);
+            content_view.add_top_bar(&banners.provider);
             content_view.set_content(Some(&stack));
-            split.set_sidebar(Some(&sidebar_view));
+            split.set_sidebar(Some(&sidebar_overlay));
             split.set_content(Some(&content_view));
             let toasts = adw::ToastOverlay::new();
             toasts.set_child(Some(&split));
@@ -216,6 +238,7 @@ impl App {
                 stack,
                 conversation,
                 banner,
+                banners,
                 sidebar,
                 header,
                 timeline,
@@ -246,6 +269,14 @@ impl App {
         app.sidebar.bind_split(&app.split);
         app.header.bind_split(&app.split);
         crate::actions::install(&app);
+        let weak = Rc::downgrade(&app);
+        theme::on_colors(move |colors| {
+            if let Some(app) = weak.upgrade() {
+                app.drawer.set_colors(colors);
+                app.panel.diff.set_colors();
+                app.timeline.recolor();
+            }
+        });
         app.render(Dirty::all());
         app
     }
@@ -308,7 +339,16 @@ impl App {
                         state.filter = None;
                     }
                 }
+                let unloaded: Vec<String> = projects
+                    .iter()
+                    .filter(|project| !state.scripts.contains_key(&project.id))
+                    .map(|project| project.id.clone())
+                    .collect();
                 state.projects = projects;
+                drop(state);
+                for project in unloaded {
+                    self.core.run(|studio| studio.load_project_settings(project));
+                }
                 dirty.sidebar = true;
                 dirty.header = true;
                 dirty.page = true;
@@ -351,27 +391,28 @@ impl App {
                         dirty.page = true;
                     }
                     self.timeline.apply(op);
+                    self.timeline.refresh_minimap();
+                }
+            }
+            Update::Subagents { thread, agents } => {
+                let focused = self.state.borrow().selected.as_deref() == Some(thread.as_str());
+                let running = agents.iter().filter(|agent| agent.running).count();
+                self.state.borrow_mut().subagents.insert(thread, agents);
+                if focused {
+                    self.header.set_agents(running);
                     if self.panel.showing("agents") {
                         self.panel.agents.render(self);
                     }
-                    self.timeline.refresh_minimap();
-                    let running = self
-                        .timeline
-                        .items()
-                        .iter()
-                        .filter(|item| {
-                            matches!(
-                                item.kind,
-                                local_studio_core::ItemKind::Tool {
-                                    kind: local_studio_core::ToolKind::Agent,
-                                    state: local_studio_core::ToolState::Running
-                                        | local_studio_core::ToolState::Pending,
-                                    ..
-                                }
-                            )
-                        })
-                        .count();
-                    self.header.set_agents(running);
+                }
+            }
+            Update::Skills { request, skills } => {
+                if self.take_request(&request) == Some(Target::Skills) {
+                    self.composer.extras.skills_loaded(&skills);
+                }
+            }
+            Update::MessageImage { request, mime_type: _, data } => {
+                if self.take_request(&request) == Some(Target::MessageImage) {
+                    crate::images::show(self, &data);
                 }
             }
             Update::Approvals { thread, approvals } => {
@@ -456,7 +497,13 @@ impl App {
                 self.state.borrow_mut().git.insert(project, status);
                 dirty.header = true;
             }
-            Update::Diff { request, files } => self.panel.diff.loaded(&request, &files),
+            Update::Diff { request, files } => {
+                if self.take_request(&request) == Some(Target::CommitFiles) {
+                    crate::commit::files_loaded(&files);
+                } else {
+                    self.panel.diff.loaded(&request, &files);
+                }
+            }
             Update::TerminalOpened { request, terminal } => {
                 self.drawer.opened(&request, &terminal);
             }
@@ -473,6 +520,7 @@ impl App {
             Update::Providers { providers } => {
                 self.state.borrow_mut().providers = providers;
                 dirty.settings = true;
+                dirty.header = true;
             }
             Update::Settings { settings } => {
                 self.apply_settings(&settings);
@@ -504,9 +552,15 @@ impl App {
                 }
                 self.state.borrow_mut().scripts.insert(project, scripts);
                 dirty.header = true;
+                crate::project::refresh(self);
             }
-            Update::ProjectSettings { project, settings, effective: _ } => {
-                self.state.borrow_mut().project_settings.insert(project, settings);
+            Update::ProjectSettings { project, settings, effective } => {
+                let mut state = self.state.borrow_mut();
+                state.project_settings.insert(project.clone(), settings);
+                state.effective.insert(project, effective);
+                drop(state);
+                crate::project::refresh(self);
+                dirty.composer = true;
             }
             Update::WorktreeSetup { thread, stages, done, error } => {
                 self.state.borrow_mut().setup.insert(thread, crate::state::Setup { stages, done, error });
@@ -528,7 +582,12 @@ impl App {
                     _ => self.toast(&message),
                 }
             }
-            Update::Notice { level: _, text } => self.toast(&text),
+            Update::Notice { level, text } => match level {
+                local_studio_core::NoticeLevel::Error | local_studio_core::NoticeLevel::Warning => {
+                    self.show_notice(&text);
+                }
+                local_studio_core::NoticeLevel::Info => self.toast(&text),
+            },
         }
     }
 
@@ -541,6 +600,7 @@ impl App {
             }
             if dirty.header || dirty.page {
                 self.header.render(&state);
+                self.banners.render(&state);
             }
             if dirty.composer || dirty.page || dirty.header {
                 self.composer.render(&state);
@@ -623,6 +683,14 @@ impl App {
         self.timeline.clear();
         self.composer.reset();
         self.core.run(|studio| studio.select_thread(thread.clone()));
+        let running = thread.as_deref().map_or(0, |id| {
+            self.state
+                .borrow()
+                .subagents
+                .get(id)
+                .map_or(0, |agents| agents.iter().filter(|agent| agent.running).count())
+        });
+        self.header.set_agents(running);
         self.render(Dirty::all());
         let unread = thread.as_deref().and_then(|id| self.state.borrow().row(id).map(|row| row.unread));
         if let (Some(thread), Some(true)) = (thread, unread) {
@@ -684,6 +752,7 @@ impl App {
         state.draft = Some(draft.clone());
         let project = state.draft_project.clone().or_else(|| state.current_project());
         let model = state.active_model();
+        let model_key = model.clone();
         let worktree = self.branches.choice(&state, &draft);
         let settings = ThreadSettings {
             provider: model.as_ref().map(|model| model.provider.clone()),
@@ -692,8 +761,14 @@ impl App {
             access: state.active_access(),
             worktree,
         };
+        let compare = std::mem::take(&mut state.draft_settings.compare);
+        let models: Vec<local_studio_core::ModelKey> = model_key.into_iter().chain(compare).collect();
         drop(state);
-        self.core.run(|studio| studio.start_thread(draft, project, prompt, settings));
+        if models.len() > 1 {
+            self.core.run(|studio| studio.start_threads(draft, project, prompt, settings, models));
+        } else {
+            self.core.run(|studio| studio.start_thread(draft, project, prompt, settings));
+        }
     }
 
     pub fn add_project(self: &Rc<Self>) {
@@ -792,6 +867,10 @@ impl App {
         self.toasts.add_toast(toast);
     }
 
+    pub fn show_notice(&self, text: &str) {
+        self.banners.show_notice(text);
+    }
+
     fn show_banner(&self, text: &str) {
         self.banner.set_title(&format::escape(text));
         self.banner.set_revealed(true);
@@ -830,6 +909,38 @@ impl App {
     pub fn shelf_of(&self, thread: &str) -> Option<Shelf> {
         self.state.borrow().row(thread).map(|row| row.shelf)
     }
+}
+
+fn sidebar_handle(split: &adw::OverlaySplitView) -> gtk::Box {
+    let handle = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    handle.set_halign(gtk::Align::End);
+    handle.set_width_request(6);
+    handle.add_css_class("ls-sidebar-handle");
+    handle.set_cursor_from_name(Some("col-resize"));
+    let drag = gtk::GestureDrag::new();
+    let start = Rc::new(Cell::new(0.0));
+    let (begin, moving) = (Rc::clone(&start), split.clone());
+    drag.connect_drag_begin(move |_, _, _| begin.set(moving.max_sidebar_width()));
+    let resizing = split.clone();
+    drag.connect_drag_update(move |_, dx, _| {
+        let width = (start.get() + dx).clamp(220.0, 480.0).round();
+        resizing.set_min_sidebar_width(width);
+        resizing.set_max_sidebar_width(width);
+    });
+    let saving = split.clone();
+    drag.connect_drag_end(move |_, _, _| crate::prefs::set("sidebar-width", &saving.max_sidebar_width().to_string()));
+    handle.add_controller(drag);
+    let reset = gtk::GestureClick::new();
+    let resetting = split.clone();
+    reset.connect_pressed(move |_, presses, _, _| {
+        if presses == 2 {
+            resetting.set_min_sidebar_width(288.0);
+            resetting.set_max_sidebar_width(288.0);
+            crate::prefs::set("sidebar-width", "288");
+        }
+    });
+    handle.add_controller(reset);
+    handle
 }
 
 impl Hero {

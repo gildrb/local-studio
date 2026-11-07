@@ -56,6 +56,10 @@ pub fn present(app: &Rc<App>) {
     add.add_css_class("suggested-action");
     add.set_halign(gtk::Align::Center);
     projects.append(&add);
+    let clone = gtk::Button::builder().label("Clone a repository…").action_name("win.clone-project").build();
+    clone.add_css_class("pill");
+    clone.set_halign(gtk::Align::Center);
+    projects.append(&clone);
     let names = gtk::Label::new(Some(&if state.projects.is_empty() {
         "No projects yet. You can also start without one.".to_string()
     } else {

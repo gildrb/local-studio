@@ -38,6 +38,8 @@ pub struct Composer {
     pub extras: Extras,
     pub tools: crate::tools::Tools,
     setup: crate::setup::SetupCard,
+    pub options: crate::options::Options,
+    markdown: Cell<bool>,
 }
 
 impl Composer {
@@ -142,12 +144,15 @@ impl Composer {
         send.add_css_class("suggested-action");
         let extras = Extras::new(app.clone());
         let tools = crate::tools::Tools::new(&app);
-        let setup = crate::setup::SetupCard::new();
+        let setup = crate::setup::SetupCard::new(&app);
+        let options = crate::options::Options::new(&app);
         let footer = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         footer.append(&extras.attach);
         footer.append(&model);
+        footer.append(&options.compare);
         footer.append(&thinking);
         footer.append(&access);
+        footer.append(&options.tier);
         footer.append(&tools.meter);
         footer.append(&tools.stash);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -164,6 +169,7 @@ impl Composer {
         card.append(&overlay);
         card.append(&footer);
         column.append(&working);
+        column.append(&options.goal);
         column.append(&setup.root);
         column.append(&queue);
         column.append(&card);
@@ -213,11 +219,23 @@ impl Composer {
             if app.composer.extras.key(&app, &view, key) == glib::Propagation::Stop {
                 return glib::Propagation::Stop;
             }
+            let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
+            let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+            if control && !shift && app.composer.markdown.get() {
+                let marker = match key.to_lower() {
+                    gdk::Key::b => Some("**"),
+                    gdk::Key::i => Some("_"),
+                    gdk::Key::e => Some("`"),
+                    _ => None,
+                };
+                if let Some(marker) = marker {
+                    app.composer.wrap_selection(marker);
+                    return glib::Propagation::Stop;
+                }
+            }
             if !matches!(key, gdk::Key::Return | gdk::Key::KP_Enter) {
                 return glib::Propagation::Proceed;
             }
-            let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
-            let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
             let sends = match app.composer.shortcut.get() {
                 SendShortcut::Enter => !shift && !control,
                 SendShortcut::ModEnterMultiline | SendShortcut::ModEnter => control,
@@ -353,7 +371,29 @@ impl Composer {
             extras,
             tools,
             setup,
+            options,
+            markdown: Cell::new(true),
         }
+    }
+
+    pub fn wrap_selection(&self, marker: &str) {
+        let buffer = self.view.buffer();
+        let (start, end) = buffer.selection_bounds().unwrap_or_else(|| {
+            let cursor = buffer.iter_at_mark(&buffer.get_insert());
+            (cursor, cursor)
+        });
+        let selected = buffer.text(&start, &end, false).to_string();
+        let empty = selected.is_empty();
+        let (mut start, mut end) = (start, end);
+        buffer.begin_user_action();
+        buffer.delete(&mut start, &mut end);
+        buffer.insert(&mut start, &format!("{marker}{selected}{marker}"));
+        if empty {
+            let mut cursor = start;
+            cursor.backward_chars(i32::try_from(marker.chars().count()).unwrap_or(0));
+            buffer.place_cursor(&cursor);
+        }
+        buffer.end_user_action();
     }
 
     pub fn text(&self) -> String {
@@ -414,7 +454,7 @@ impl Composer {
         self.extras.remember(&text);
         self.set_text("");
         let mut prompt: Vec<String> =
-            contexts.iter().map(|(label, body)| format!("{label} output:\n```\n{body}\n```")).collect();
+            contexts.iter().map(|(label, body)| format!("{label}:\n```\n{body}\n```")).collect();
         if !text.is_empty() {
             prompt.push(text);
         }
@@ -424,8 +464,10 @@ impl Composer {
     #[allow(clippy::too_many_lines)]
     pub fn render(&self, state: &State) {
         self.shortcut.set(state.settings.send_shortcut);
+        self.markdown.set(state.settings.rich_text_composer);
         self.tools.render(state);
         self.setup.render(state);
+        self.options.render(state);
         let info = state.selected.as_ref().and(state.info.as_ref());
         let busy = info.is_some_and(|info| info.busy);
         self.stop.set_visible(busy);

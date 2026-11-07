@@ -7,7 +7,8 @@
 - Lint: `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check`. Same bar as the rest: no `unsafe`, `unwrap`, `expect` or code comments.
 - Daemon: the app starts `$EUKHE_DAEMON`, else `eukhe-daemon` beside the binary, else the one on `PATH`, on `$EUKHE_DAEMON_SOCKET` (default `/tmp/eukhe-<uid>/daemon.sock`). Build one with `cargo build -p eukhe-daemon` in `../eukhe`.
 - Keybindings come from the core (`Update::Keybindings`, mapped in `src/bindings.rs`); `cmd` maps to Ctrl. Terminals live in the bottom drawer (`src/drawer.rs`); while one has focus, app accelerators are suspended and the drawer takes Ctrl+Shift+T/D/E/W/C/V/A instead of the `terminalFocus` bindings.
-- Client-only preferences (favorite editor, composer stash) live in `$XDG_CONFIG_HOME/local-studio/linux.ini` (`src/prefs.rs`); everything shared goes through core `Settings`, including custom themes (`Settings.custom_themes`, JSON).
+- Client-only preferences (favorite editor, composer stash, sidebar width) live in `$XDG_CONFIG_HOME/local-studio/linux.ini` (`src/prefs.rs`); everything shared goes through core `Settings`, including custom themes (`Settings.custom_themes`, JSON).
+- Colors come from `src/colors.rs`: the default palette (dashboards) and the built-in `gildrb` theme (dark and light, follows the color scheme). CSS, code highlighting (`src/highlight.rs`), diff tags and the VTE palette all read the current `Colors`; add new colored surfaces there, not as literals.
 - Headless runs use isolated state and the faux model:
   ```sh
   env HOME=/tmp/X/home LOCAL_STUDIO_DATA_DIR=/tmp/X/data EUKHE_CODING_AGENT_DIR=/tmp/X/agent \

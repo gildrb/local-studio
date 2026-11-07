@@ -10,6 +10,7 @@ use crate::state::State;
 
 #[derive(Clone)]
 struct Entry {
+    group: &'static str,
     title: String,
     subtitle: String,
     action: &'static str,
@@ -17,8 +18,8 @@ struct Entry {
 }
 
 impl Entry {
-    fn new(title: &str, subtitle: &str, action: &'static str, target: Option<String>) -> Self {
-        Self { title: title.to_string(), subtitle: subtitle.to_string(), action, target }
+    fn new(group: &'static str, title: &str, subtitle: &str, action: &'static str, target: Option<String>) -> Self {
+        Self { group, title: title.to_string(), subtitle: subtitle.to_string(), action, target }
     }
 
     fn matches(&self, query: &str) -> bool {
@@ -44,6 +45,24 @@ pub fn open(app: &Rc<App>) {
     dialog.set_child(Some(&view));
 
     let visible: Rc<RefCell<Vec<Entry>>> = Rc::default();
+    let headers = Rc::clone(&visible);
+    list.set_header_func(move |row, before| {
+        let visible = headers.borrow();
+        let group = usize::try_from(row.index()).ok().and_then(|index| visible.get(index)).map(|entry| entry.group);
+        let previous = before
+            .and_then(|before| usize::try_from(before.index()).ok())
+            .and_then(|index| visible.get(index))
+            .map(|entry| entry.group);
+        match group.filter(|group| Some(*group) != previous) {
+            Some(group) => {
+                let label = gtk::Label::new(Some(group));
+                label.add_css_class("ls-palette-group");
+                label.set_xalign(0.0);
+                row.set_header(Some(&label));
+            }
+            None => row.set_header(None::<&gtk::Widget>),
+        }
+    });
     fill(&list, &entries, "", &visible);
     let refill_list = list.clone();
     let refill_visible = Rc::clone(&visible);
@@ -98,7 +117,8 @@ pub fn open(app: &Rc<App>) {
 
 fn fill(list: &gtk::ListBox, entries: &[Entry], query: &str, visible: &Rc<RefCell<Vec<Entry>>>) {
     list.remove_all();
-    let matched: Vec<Entry> = entries.iter().filter(|entry| entry.matches(query)).take(60).cloned().collect();
+    let matched: Vec<Entry> = entries.iter().filter(|entry| entry.matches(query)).take(80).cloned().collect();
+    visible.borrow_mut().clone_from(&matched);
     for entry in &matched {
         let row = adw::ActionRow::builder().title(format::escape(&entry.title)).activatable(true).build();
         if !entry.subtitle.is_empty() {
@@ -106,45 +126,87 @@ fn fill(list: &gtk::ListBox, entries: &[Entry], query: &str, visible: &Rc<RefCel
         }
         list.append(&row);
     }
+    list.invalidate_headers();
     if let Some(first) = list.row_at_index(0) {
         list.select_row(Some(&first));
     }
-    *visible.borrow_mut() = matched;
 }
 
 fn entries(state: &State) -> Vec<Entry> {
+    const ACTIONS: &str = "Actions";
     let mut entries = vec![
-        Entry::new("New thread", "Ctrl+N", "new-thread", None),
-        Entry::new("New thread without a project", "Ctrl+Alt+N", "new-thread-without-project", None),
-        Entry::new("Add project…", "", "add-project", None),
-        Entry::new("Open settings", "Ctrl+,", "settings", None),
-        Entry::new("Open usage", "Ctrl+U", "usage", None),
-        Entry::new("Open Local", "Machines, models and the registry", "local", None),
-        Entry::new("Toggle sidebar", "Ctrl+B", "toggle-sidebar", None),
-        Entry::new("Toggle terminal", "Ctrl+J", "toggle-terminal", None),
-        Entry::new("Toggle diff", "Ctrl+D", "toggle-diff", None),
-        Entry::new("Search threads", "Ctrl+F", "search", None),
+        Entry::new(ACTIONS, "New thread", "Ctrl+N · Shift-click the + button to pick a project", "new-thread", None),
+        Entry::new(ACTIONS, "New thread without a project", "Ctrl+Alt+N", "new-thread-without-project", None),
+        Entry::new(ACTIONS, "Go to file…", "Ctrl+P", "go-to-file", None),
+        Entry::new(ACTIONS, "Search project contents", "Ctrl+Shift+F", "project-search", None),
+        Entry::new(ACTIONS, "Search threads", "Ctrl+F", "search", None),
+        Entry::new(ACTIONS, "Add project folder…", "", "add-project", None),
+        Entry::new(ACTIONS, "Clone repository…", "GitHub owner/name or a git URL", "clone-project", None),
+        Entry::new(ACTIONS, "Open usage", "Ctrl+U", "usage", None),
+        Entry::new(ACTIONS, "Open Local", "Machines, models and the registry", "local", None),
+        Entry::new(ACTIONS, "Toggle sidebar", "Ctrl+B", "toggle-sidebar", None),
+        Entry::new(ACTIONS, "Toggle terminal", "Ctrl+J", "toggle-terminal", None),
+        Entry::new(ACTIONS, "Toggle diff", "Ctrl+D", "toggle-diff", None),
+        Entry::new(ACTIONS, "Toggle right panel", "", "toggle-panel", None),
+        Entry::new(ACTIONS, "Clean up worktrees now", "Storage retention rules", "cleanup-worktrees", None),
     ];
     if state.workspace_dir().is_some() {
-        entries.push(Entry::new("Commit changes", "Source control", "git-commit", None));
-        entries.push(Entry::new("Push branch", "Source control", "git-push", None));
-        entries.push(Entry::new("Create pull request…", "Source control", "git-pr", None));
+        entries.push(Entry::new(ACTIONS, "Commit changes…", "Source control", "git-commit", None));
+        entries.push(Entry::new(ACTIONS, "Push branch", "Source control", "git-push", None));
+        entries.push(Entry::new(ACTIONS, "Create pull request…", "Source control", "git-pr", None));
+        entries.push(Entry::new(ACTIONS, "Open in editor", "Ctrl+O", "open-editor", None));
     }
+    if let Some(thread) = &state.selected {
+        entries.push(Entry::new(
+            ACTIONS,
+            "Restart agent session",
+            "Current thread",
+            "thread-restart",
+            Some(thread.clone()),
+        ));
+        entries.push(Entry::new(ACTIONS, "Fork thread", "Current thread", "thread-fork", Some(thread.clone())));
+        entries.push(Entry::new(ACTIONS, "Compact context", "Current thread", "thread-compact", Some(thread.clone())));
+    }
+    let mut recent: Vec<&local_studio_core::ThreadRow> = state.threads.iter().filter(|row| !row.archived).collect();
+    recent.sort_by_key(|row| std::cmp::Reverse(row.updated_at));
+    let thread_entry = |group: &'static str, row: &local_studio_core::ThreadRow| {
+        Entry::new(
+            group,
+            if row.title.is_empty() { "New thread" } else { &row.title },
+            &state.project_name(row.project.as_deref()).unwrap_or_else(|| "No project".to_string()),
+            "thread-open",
+            Some(row.id.clone()),
+        )
+    };
+    entries.extend(recent.iter().take(5).map(|row| thread_entry("Recent", row)));
     for project in &state.projects {
         entries.push(Entry::new(
+            "Projects",
             &format!("New thread in {}", project.name),
             &project.path,
             "project-new-thread",
             Some(project.id.clone()),
         ));
-    }
-    for row in state.threads.iter().filter(|row| !row.archived) {
         entries.push(Entry::new(
-            if row.title.is_empty() { "New thread" } else { &row.title },
-            &state.project_name(row.project.as_deref()).unwrap_or_else(|| "No project".to_string()),
-            "thread-open",
-            Some(row.id.clone()),
+            "Projects",
+            &format!("{} settings…", project.name),
+            "Name, icon, defaults and scripts",
+            "project-settings",
+            Some(project.id.clone()),
         ));
+    }
+    entries.extend(recent.iter().skip(5).map(|row| thread_entry("Threads", row)));
+    for (name, title) in [
+        ("general", "General"),
+        ("appearance", "Appearance"),
+        ("keybindings", "Keybindings"),
+        ("providers", "Providers"),
+        ("source-control", "Source Control"),
+        ("storage", "Storage"),
+        ("local", "Local"),
+        ("archive", "Archive"),
+    ] {
+        entries.push(Entry::new("Settings", title, "Settings", "settings-page", Some(name.to_string())));
     }
     entries
 }

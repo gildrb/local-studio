@@ -1194,6 +1194,12 @@ fn storage_page(app: &Weak<App>) -> adw::PreferencesPage {
             settings.worktree_cleanup_unchanged = value;
         },
     );
+    cleanup.set_description(Some(
+        "Only worktrees Local Studio created, never ones with uncommitted changes or used by an active thread. Branches are kept.",
+    ));
+    let now = adw::ButtonRow::builder().title("Clean Up Now").start_icon_name("edit-clear-all-symbolic").build();
+    now.set_action_name(Some("win.cleanup-worktrees"));
+    cleanup.add(&now);
     page
 }
 
