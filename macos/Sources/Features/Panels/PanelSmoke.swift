@@ -129,12 +129,12 @@ final class PanelSmoke {
             passed.insert("terminal")
             print("ok terminal \(session.terminal ?? "?"): \(session.grid.columns)x\(session.grid.rows.count) grid, echo row rendered from core frames")
             let shot = output.deletingPathExtension().appendingPathExtension("terminal.png")
-            if let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }), let content = window.contentView {
-                if let problem = Self.write(content, to: shot) {
-                    return finish(passed: false, problem)
-                }
-                print("ok terminal window snapshot \(shot.path)")
+            let actions = TerminalActions(new: {}, splitSideBySide: {}, splitStacked: {}, close: {}, attach: { _ in }, commands: nil)
+            let pane = TerminalPaneView(session: session, settings: store.workspace.panels.settings, focused: true, actions: actions) {}
+            if let problem = render(pane, size: CGSize(width: 640, height: 360), to: shot) {
+                return finish(passed: false, problem)
             }
+            print("ok terminal surface snapshot \(shot.path)")
         }
         if passed.contains("terminal"), !chatRequested, let session {
             chatRequested = true
@@ -199,11 +199,15 @@ final class PanelSmoke {
     }
 
     private func render(_ diff: DiffModel) -> String? {
-        let frame = NSRect(x: 0, y: 0, width: 520, height: 560)
+        render(DiffSurfaceView(model: diff, panels: store.workspace.panels), size: CGSize(width: 520, height: 560), to: output)
+    }
+
+    private func render(_ view: some View, size: CGSize, to url: URL) -> String? {
+        let frame = NSRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .darkAqua)
-        let host = NSHostingView(rootView: DiffSurfaceView(model: diff, panels: store.workspace.panels)
+        let host = NSHostingView(rootView: view
             .frame(width: frame.width, height: frame.height)
             .background(Theme.canvas)
             .environment(\.colorScheme, .dark))
@@ -213,14 +217,9 @@ final class PanelSmoke {
             host.layoutSubtreeIfNeeded()
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
         }
-        let problem = Self.write(host, to: output)
-        window.close()
-        return problem
-    }
-
-    private static func write(_ view: NSView, to url: URL) -> String? {
-        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return "no bitmap for \(url.lastPathComponent)" }
-        view.cacheDisplay(in: view.bounds, to: bitmap)
+        defer { window.close() }
+        guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return "no bitmap for \(url.lastPathComponent)" }
+        host.cacheDisplay(in: host.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]) else { return "PNG encoding failed" }
         do {
             try data.write(to: url)
