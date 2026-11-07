@@ -1,5 +1,16 @@
-use super::model::{DiffScope, LocalAction, MergeMethod, ProjectScript, ProjectSettings, Settings, UsagePeriod};
+use super::model::{
+    DiffScope, LocalAction, MergeMethod, ProjectScript, ProjectSettings, Settings, TerminalFrame, TerminalKey,
+    TerminalMouse, TerminalScroll, TerminalSelect, TerminalSize, UsagePeriod,
+};
+use super::terminal::{self, Message};
 use crate::studio::Studio;
+
+#[cfg_attr(feature = "ffi", uniffi::export)]
+#[allow(clippy::needless_pass_by_value)]
+#[must_use]
+pub fn terminal_preview(cols: u16, rows: u16, data: Vec<u8>) -> Option<TerminalFrame> {
+    terminal::preview(cols, rows, &data)
+}
 
 #[cfg_attr(feature = "ffi", uniffi::export)]
 impl Studio {
@@ -83,8 +94,42 @@ impl Studio {
         self.workspace.write_terminal(terminal, data);
     }
 
-    pub fn resize_terminal(&self, terminal: String, cols: u16, rows: u16) {
-        self.workspace.resize_terminal(terminal, cols, rows);
+    pub fn resize_terminal(&self, terminal: String, size: TerminalSize) {
+        self.workspace.resize_terminal(terminal, size);
+    }
+
+    pub fn terminal_key(&self, terminal: String, key: TerminalKey) {
+        self.workspace.terminal(terminal, Message::Key(key));
+    }
+
+    pub fn terminal_paste(&self, terminal: String, text: String) {
+        self.workspace.terminal(terminal, Message::Paste(text));
+    }
+
+    pub fn terminal_mouse(&self, terminal: String, mouse: TerminalMouse) {
+        self.workspace.terminal(terminal, Message::Mouse(mouse));
+    }
+
+    pub fn terminal_scroll(&self, terminal: String, scroll: TerminalScroll) {
+        self.workspace.terminal(terminal, Message::Scroll(scroll));
+    }
+
+    pub fn terminal_focus(&self, terminal: String, focused: bool) {
+        self.workspace.terminal(terminal, Message::Focus(focused));
+    }
+
+    pub fn terminal_select(&self, terminal: String, selection: TerminalSelect) {
+        self.workspace.terminal(terminal, Message::Select(selection));
+    }
+
+    pub fn terminal_selection_text(&self, request: String, terminal: String) {
+        let reply = request.clone();
+        self.workspace.terminal_request(request, terminal, Message::SelectionText(reply));
+    }
+
+    pub fn terminal_recent_output(&self, request: String, terminal: String, lines: u32) {
+        let reply = request.clone();
+        self.workspace.terminal_request(request, terminal, Message::RecentOutput(reply, lines));
     }
 
     pub fn close_terminal(&self, terminal: String) {

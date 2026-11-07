@@ -1,6 +1,7 @@
 use crate::workspace::model::{
     Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalSnapshot, ProjectScript,
-    ProjectSettings, ProviderStatus, PullRequest, PullRequestDetail, SearchHit, Settings, SetupStage, UsageReport,
+    ProjectSettings, ProviderStatus, PullRequest, PullRequestDetail, SearchHit, Settings, SetupStage, TerminalFrame,
+    UsageReport,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -436,7 +437,8 @@ pub enum Update {
     PullRequestDetail { request: String, detail: PullRequestDetail },
     Devices { request: String, devices: Vec<Device> },
     TerminalOpened { request: String, terminal: String },
-    TerminalOutput { terminal: String, data: Vec<u8> },
+    TerminalFrame { terminal: String, frame: TerminalFrame },
+    TerminalText { request: String, terminal: String, text: String },
     TerminalExited { terminal: String, code: Option<i32> },
     Usage { request: String, report: UsageReport },
     Local { request: String, snapshot: LocalSnapshot },

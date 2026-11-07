@@ -495,6 +495,8 @@ pub struct Settings {
     pub code_font_size: u32,
     pub terminal_font: String,
     pub terminal_font_size: u32,
+    pub terminal_scrollback: u32,
+    pub terminal_cursor_blink: bool,
     pub font_smoothing: bool,
     pub word_wrap: bool,
     pub open_links_in: LinkTarget,
@@ -572,6 +574,8 @@ impl Default for Settings {
             code_font_size: 12,
             terminal_font: String::new(),
             terminal_font_size: 12,
+            terminal_scrollback: 10_000,
+            terminal_cursor_blink: true,
             font_smoothing: true,
             word_wrap: true,
             open_links_in: LinkTarget::System,
@@ -826,4 +830,194 @@ pub struct TailnetDevice {
     pub controller_url: Option<String>,
     pub controller_name: Option<String>,
     pub linked: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum TerminalColor {
+    Default,
+    Palette { index: u8 },
+    Rgb { red: u8, green: u8, blue: u8 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum TerminalUnderline {
+    None,
+    Single,
+    Double,
+    Curly,
+    Dotted,
+    Dashed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct TerminalStyle {
+    pub foreground: TerminalColor,
+    pub background: TerminalColor,
+    pub underline_color: TerminalColor,
+    pub underline: TerminalUnderline,
+    pub bold: bool,
+    pub italic: bool,
+    pub faint: bool,
+    pub blink: bool,
+    pub inverse: bool,
+    pub invisible: bool,
+    pub strikethrough: bool,
+    pub overline: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalRun {
+    pub column: u16,
+    pub cells: u16,
+    pub wide: bool,
+    pub text: String,
+    pub style: TerminalStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalSpan {
+    pub start: u16,
+    pub end: u16,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalRow {
+    pub index: u16,
+    pub runs: Vec<TerminalRun>,
+    pub selection: Option<TerminalSpan>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum TerminalCursorShape {
+    Block,
+    Bar,
+    Underline,
+    BlockHollow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalCursor {
+    pub column: u16,
+    pub row: u16,
+    pub visible: bool,
+    pub shape: TerminalCursorShape,
+    pub blinking: bool,
+    pub wide: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct TerminalFrame {
+    pub cols: u16,
+    pub rows: u16,
+    pub full: bool,
+    pub dirty: Vec<TerminalRow>,
+    pub cursor: TerminalCursor,
+    pub scrollback_len: u64,
+    pub viewport_offset: u64,
+    pub title: Option<String>,
+    pub bell: bool,
+    pub has_selection: bool,
+    pub mouse_tracking: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalSize {
+    pub cols: u16,
+    pub rows: u16,
+    pub cell_width: u32,
+    pub cell_height: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+#[allow(clippy::struct_excessive_bools)]
+pub struct TerminalMods {
+    pub shift: bool,
+    pub control: bool,
+    pub alt: bool,
+    pub super_key: bool,
+    pub caps_lock: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum TerminalKeyAction {
+    Press,
+    Release,
+    Repeat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalKey {
+    pub action: TerminalKeyAction,
+    pub code: u32,
+    pub mods: TerminalMods,
+    pub text: Option<String>,
+    pub unshifted: u32,
+    pub composing: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum TerminalMouseAction {
+    Press,
+    Release,
+    Motion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum TerminalMouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalMouse {
+    pub action: TerminalMouseAction,
+    pub button: Option<TerminalMouseButton>,
+    pub x: f64,
+    pub y: f64,
+    pub mods: TerminalMods,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalScroll {
+    pub lines: i32,
+    pub x: f64,
+    pub y: f64,
+    pub mods: TerminalMods,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct TerminalPoint {
+    pub column: u16,
+    pub row: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum TerminalSelect {
+    All,
+    Clear,
+    Range { start: TerminalPoint, end: TerminalPoint },
+    Word { at: TerminalPoint },
+    Line { at: TerminalPoint },
 }

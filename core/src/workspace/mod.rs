@@ -19,6 +19,7 @@ mod usage;
 mod watch;
 mod writer;
 
+pub use self::api::terminal_preview;
 pub(crate) use self::setup::PreparedWorktree;
 
 use std::collections::{BTreeMap, HashMap};
@@ -34,10 +35,10 @@ use tokio::sync::{mpsc, watch as channel};
 use self::devices::Devices;
 use self::links::Links;
 use self::local::Local;
-use self::model::{DiffScope, LocalAction, MergeMethod, PullRequest, Settings, UsagePeriod};
+use self::model::{DiffScope, LocalAction, MergeMethod, PullRequest, Settings, TerminalSize, UsagePeriod};
 use self::projects::ProjectFile;
 use self::setup::Setups;
-use self::terminal::Terminals;
+use self::terminal::{Launch, Message, Terminals};
 use self::watch::GitWatcher;
 use crate::daemon::DaemonQuery;
 use crate::model::{ModelOption, NoticeLevel, Update};
@@ -554,10 +555,12 @@ impl Workspace {
 
     pub(crate) fn open_terminal(&self, request: String, project: String, cols: u16, rows: u16) {
         let workspace = self.clone();
+        let scrollback = self.current_settings().terminal_scrollback;
         self.inner.runtime.spawn_blocking(move || {
             let inner = &workspace.inner;
             let opened = files::root(&project).and_then(|root| {
-                inner.terminals.open(&inner.runtime, &inner.mailbox, request.clone(), &root, cols, rows)
+                let launch = Launch { cwd: &root, cols, rows, scrollback };
+                inner.terminals.open(&inner.mailbox, request.clone(), &launch)
             });
             if let Err(message) = opened {
                 workspace.push(Update::RequestFailed { request, message });
@@ -566,14 +569,22 @@ impl Workspace {
     }
 
     pub(crate) fn write_terminal(&self, terminal: String, data: Vec<u8>) {
-        if let Err(message) = self.inner.terminals.write(terminal, data) {
+        self.terminal(terminal, Message::Write(data));
+    }
+
+    pub(crate) fn resize_terminal(&self, terminal: String, size: TerminalSize) {
+        self.terminal(terminal, Message::Resize(size));
+    }
+
+    pub(crate) fn terminal(&self, terminal: String, message: Message) {
+        if let Err(message) = self.inner.terminals.send(terminal, message) {
             self.error(message);
         }
     }
 
-    pub(crate) fn resize_terminal(&self, terminal: String, cols: u16, rows: u16) {
-        if let Err(message) = self.inner.terminals.resize(terminal, cols, rows) {
-            self.error(message);
+    pub(crate) fn terminal_request(&self, request: String, terminal: String, message: Message) {
+        if let Err(message) = self.inner.terminals.send(terminal, message) {
+            self.push(Update::RequestFailed { request, message });
         }
     }
 

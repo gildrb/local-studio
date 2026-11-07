@@ -1,5 +1,7 @@
 #!/usr/bin/env nu
 
+use zig.nu toolchain
+
 def developer-dir []: nothing -> string {
     if ($env.DEVELOPER_DIR? | is-not-empty) {
         return $env.DEVELOPER_DIR
@@ -25,8 +27,9 @@ def compile-icon [package: path, resources: path] {
 
 def build-kit [repo: path, package: path, profile: string] {
     let cargo_profile = if $profile == "release" { ["--release"] } else { [] }
-    ^cargo build --manifest-path ($repo | path join "Cargo.toml") -p local-studio-kit ...$cargo_profile
     let target_root = if ($env.CARGO_TARGET_DIR? | is-not-empty) { $env.CARGO_TARGET_DIR | path expand } else { $repo | path join "target" }
+    $env.PATH = ($env.PATH | prepend (toolchain $target_root))
+    ^cargo build --manifest-path ($repo | path join "Cargo.toml") -p local-studio-kit ...$cargo_profile
     let target = ($target_root | path join $profile)
     let generated = ($package | path join "Generated")
     let bindings = (mktemp -d)
