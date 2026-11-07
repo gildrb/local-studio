@@ -71,7 +71,7 @@ enum PagesFixtures {
             .projects(projects: projects),
             .settings(settings: settings),
             .keybindings(bindings: keybindings),
-            .models(models: models, favorites: favorites),
+            .models(models: models, favorites: favorites, hidden: []),
             .providers(providers: providers),
         ]
     }
@@ -81,7 +81,7 @@ enum PagesFixtures {
             id: id, project: project, title: title, shelf: .settled, status: .idle, statusSince: nil,
             updatedAt: now - Int64(hoursAgo * 3_600_000), snoozedUntil: nil, pinned: false, unread: false,
             branch: branch, worktree: nil, provider: "anthropic", model: "claude-sonnet-4-5",
-            additions: branch == nil ? 0 : 42, deletions: branch == nil ? 0 : 7, note: nil, archived: true
+            additions: branch == nil ? 0 : 42, deletions: branch == nil ? 0 : 7, note: nil, archived: true, autoSettle: true
         )
     }
 
@@ -116,7 +116,8 @@ enum PagesFixtures {
                 UsageByModel(provider: "openai-codex", model: "gpt-5-codex", tokens: total * 3 / 10, costUsd: cost * 0.4, requests: 58),
                 UsageByModel(provider: "local", model: "qwen3-coder-30b-a3b", tokens: total / 10, costUsd: cost * 0.05, requests: 14),
             ],
-            daily: daily
+            daily: daily,
+            limits: []
         )
     }
 

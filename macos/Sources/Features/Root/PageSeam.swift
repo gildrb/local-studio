@@ -48,7 +48,7 @@ struct RightPanelSeam: View {
     let store: StudioStore
 
     var body: some View {
-        EmptyView()
+        RightPanelView(store: store)
     }
 }
 
@@ -56,7 +56,7 @@ struct TerminalDrawerSeam: View {
     let store: StudioStore
 
     var body: some View {
-        EmptyView()
+        TerminalDrawerView(store: store)
     }
 }
 

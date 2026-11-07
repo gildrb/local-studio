@@ -15,6 +15,7 @@ final class ConversationStore {
     private(set) var queued: [QueuedMessage] = []
     private(set) var models: [ModelOption] = []
     private(set) var favorites: [ModelKey] = []
+    private(set) var hiddenModels: [ModelKey] = []
     private(set) var commands: [SlashCommand] = []
     private(set) var commandsLoaded = false
     private(set) var mentionRequest: String?
@@ -110,9 +111,10 @@ final class ConversationStore {
         }
     }
 
-    func setModels(_ models: [ModelOption], favorites: [ModelKey]) {
+    func setModels(_ models: [ModelOption], favorites: [ModelKey], hidden: [ModelKey]) {
         self.models = models
         self.favorites = favorites
+        self.hiddenModels = hidden
     }
 
     func setCommands(request: String, commands: [SlashCommand]) {

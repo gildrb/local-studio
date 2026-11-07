@@ -18,17 +18,20 @@ final class StudioStore {
     @ObservationIgnored let requests = RequestCenter()
     @ObservationIgnored let didTick = PassthroughSubject<Void, Never>()
     @ObservationIgnored private let launch: DaemonLaunch?
+    @ObservationIgnored private let controllerMain: String?
 
-    init(launch: DaemonLaunch?) {
+    init(launch: DaemonLaunch?, controllerMain: String? = nil) {
         self.launch = launch
+        self.controllerMain = controllerMain
         inbox = InboxStore(core: core, requests: requests)
         conversation = ConversationStore(core: core, requests: requests)
         workspace = WorkspaceStore(core: core, requests: requests)
         pages = PagesStore(core: core, requests: requests)
+        workspace.panels.bind(conversation: conversation, inbox: inbox, pages: pages)
     }
 
     func start() throws {
-        let config = StudioConfig(socketPath: nil, sessionDir: nil, dataDir: nil, launch: launch)
+        let config = StudioConfig(socketPath: nil, sessionDir: nil, dataDir: nil, launch: launch, controllerMain: controllerMain)
         let waker = MainWaker { [weak self] in self?.tick() }
         core.studio = try Studio(config: config, waker: waker)
     }
@@ -72,6 +75,9 @@ final class StudioStore {
             inbox.setProjects(projects)
         case .threads(let threads):
             inbox.setThreads(threads)
+        case .threadSearch(let request, let hits):
+            requests.settle(request)
+            inbox.setThreadSearch(request: request, hits: hits)
         case .archivedThreads(let request, let threads):
             requests.settle(request)
             pages.setArchived(threads)
@@ -91,8 +97,8 @@ final class StudioStore {
             conversation.setQueue(thread: thread, queued: queued)
         case .composerText(let thread, let text):
             conversation.setComposerText(thread: thread, text: text)
-        case .models(let models, let favorites):
-            conversation.setModels(models, favorites: favorites)
+        case .models(let models, let favorites, let hidden):
+            conversation.setModels(models, favorites: favorites, hidden: hidden)
         case .commands(let request, let commands):
             requests.settle(request)
             conversation.setCommands(request: request, commands: commands)
@@ -118,6 +124,12 @@ final class StudioStore {
         case .pullRequests(let request, let pulls):
             requests.settle(request)
             workspace.setPullRequests(request: request, pulls: pulls)
+        case .pullRequestDetail(let request, let detail):
+            requests.settle(request)
+            workspace.setPullRequestDetail(request: request, detail: detail)
+        case .devices(let request, let devices):
+            requests.settle(request)
+            workspace.setDevices(request: request, devices: devices)
         case .terminalOpened(let request, let terminal):
             requests.settle(request)
             workspace.terminalOpened(request: request, terminal: terminal)

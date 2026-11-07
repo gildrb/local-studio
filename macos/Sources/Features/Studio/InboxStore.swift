@@ -52,6 +52,7 @@ final class InboxStore {
     private(set) var sections = InboxSections()
     private(set) var visibleOrder: [String] = []
     private(set) var searchResults: [ThreadRow] = []
+    private(set) var threadSearch: (request: String, hits: [ThreadSearchHit])?
     private(set) var currentProject: String?
     private(set) var undo: InboxUndo?
     private(set) var receivedThreads = false
@@ -73,7 +74,6 @@ final class InboxStore {
     var renaming: String?
 
     let shell = ShellState()
-    let panels = PanelState()
     @ObservationIgnored let notifier = Notifier()
 
     @ObservationIgnored private let core: CoreHandle
@@ -94,6 +94,10 @@ final class InboxStore {
         if let current = currentProject, projects.contains(where: { $0.id == current }) { return }
         if currentProject == nil, projectChosen { return }
         currentProject = projects.first?.id
+    }
+
+    func setThreadSearch(request: String, hits: [ThreadSearchHit]) {
+        threadSearch = (request, hits)
     }
 
     func setThreads(_ threads: [ThreadRow]) {

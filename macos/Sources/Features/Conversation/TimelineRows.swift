@@ -32,7 +32,8 @@ private struct TimelineEntryView: View {
         case .assistant(let blocks, let streaming, let error, let changedFiles):
             AssistantMessage(
                 blocks: blocks, streaming: streaming, error: error, changedFiles: changedFiles,
-                createdAt: item.createdAt, hidesThinking: hidesThinking
+                createdAt: item.createdAt, hidesThinking: hidesThinking,
+                openDiff: { path in store.panels.openDiff(path: path) }
             )
         case .notice(let level, let text):
             NoticeRow(level: level, text: text)
@@ -134,6 +135,7 @@ private struct AssistantMessage: View {
     let changedFiles: [FileChange]
     let createdAt: Int64?
     let hidesThinking: Bool
+    let openDiff: (String) -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -168,7 +170,7 @@ private struct AssistantMessage: View {
                 .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.red.opacity(0.25)))
             }
             if !changedFiles.isEmpty {
-                ChangedFilesCard(files: changedFiles, openDiff: nil)
+                ChangedFilesCard(files: changedFiles, openDiff: openDiff)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

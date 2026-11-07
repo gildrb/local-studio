@@ -205,7 +205,7 @@ enum ConversationFixtures {
         ),
     ]
 
-    static let modelsUpdate = Update.models(models: models, favorites: [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")])
+    static let modelsUpdate = Update.models(models: models, favorites: [ModelKey(provider: "anthropic", model: "claude-sonnet-4-5")], hidden: [])
 
     static func info(busy: Bool) -> ThreadInfo {
         ThreadInfo(
