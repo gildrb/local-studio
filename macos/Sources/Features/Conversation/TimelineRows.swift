@@ -81,6 +81,8 @@ private struct UserBubble: View {
                     .padding(.vertical, 3)
                     .background(Theme.hover, in: Capsule())
                     .overlay(Capsule().strokeBorder(Theme.hairline))
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(images == 1 ? "1 image attached" : "\(images) images attached")
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -159,7 +161,7 @@ private struct AssistantMessage: View {
                 Label {
                     Text(error).textSelection(.enabled)
                 } icon: {
-                    Image(systemName: "exclamationmark.triangle")
+                    Image(systemName: "exclamationmark.triangle").accessibilityHidden(true)
                 }
                 .font(.system(size: 12.5))
                 .foregroundStyle(.red)
@@ -255,6 +257,7 @@ private struct ThinkingBlock: View {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
                 }
                 .font(.system(size: 12.5))
                 .contentShape(Rectangle())
@@ -296,6 +299,7 @@ private struct ToolGroupView: View {
                         Image(systemName: "ellipsis")
                             .font(.system(size: 12, weight: .light))
                             .frame(width: 16)
+                            .accessibilityHidden(true)
                         Text(hidden == 1 ? "1 earlier tool call" : "\(hidden) earlier tool calls")
                         Spacer(minLength: 0)
                     }
@@ -329,6 +333,7 @@ private struct ToolRow: View {
                             .font(.system(size: 12, weight: .light))
                             .foregroundStyle(Theme.secondaryText)
                             .frame(width: 16)
+                            .accessibilityHidden(true)
                         Text(summary.isEmpty ? name : summary)
                             .foregroundStyle(hovering || expanded ? Color.primary : Theme.secondaryText)
                             .lineLimit(1)
@@ -347,6 +352,7 @@ private struct ToolRow: View {
                             .foregroundStyle(Theme.secondaryText)
                             .frame(width: 10)
                             .opacity(hovering || expanded ? 1 : 0)
+                            .accessibilityHidden(true)
                     }
                     .font(.system(size: 12.5))
                     .frame(height: 26)
@@ -463,6 +469,7 @@ private struct TurnFoldRow: View {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
                     Rectangle()
                         .fill(Theme.hairline)
                         .frame(height: 1)
@@ -557,6 +564,7 @@ private struct ChangedFileRow: View {
                 .font(.system(size: 12, weight: .light))
                 .foregroundStyle(Theme.secondaryText)
                 .frame(width: 16)
+                .accessibilityHidden(true)
             Text(url.lastPathComponent)
                 .font(.system(size: 12.5))
                 .lineLimit(1)
@@ -585,6 +593,7 @@ private struct NoticeRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: level.symbol)
                 .font(.system(size: 12, weight: .light))
+                .accessibilityHidden(true)
             Text(text)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
@@ -611,6 +620,8 @@ private struct CompactionDivider: View {
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.secondaryText)
                         .fixedSize()
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Context compacted from \(TokenCount(tokensBefore).text) tokens")
                     Rectangle().fill(Theme.hairline).frame(height: 1)
                 }
                 .contentShape(Rectangle())
@@ -689,6 +700,8 @@ struct QueuedBubble: View {
                     .foregroundStyle(Theme.secondaryText)
                     .help(message.steering ? "Sends after the next tool call" : "Sends when the turn ends")
                     .padding(.trailing, 4)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(status)
                 if !message.steering, !message.sending {
                     MessageActionButton("Send now", symbol: "arrow.up", size: 12) {
                         store.conversation.sendNow(message)

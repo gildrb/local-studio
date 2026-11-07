@@ -83,12 +83,14 @@ struct ComposerChip: View {
             if let symbol {
                 Image(systemName: symbol)
                     .font(.system(size: 12, weight: .light))
+                    .accessibilityHidden(true)
             }
             Text(title)
                 .lineLimit(1)
             Image(systemName: "chevron.down")
                 .font(.system(size: 8, weight: .medium))
                 .opacity(0.7)
+                .accessibilityHidden(true)
         }
         .font(.system(size: 12.5))
         .foregroundStyle(hovering ? Color.primary : Theme.secondaryText)
@@ -138,6 +140,7 @@ private struct ModelPickerButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Model")
+        .accessibilityLabel("Model: \(title)")
         .popover(isPresented: $presented, arrowEdge: .bottom) {
             ModelPickerPanel(store: store) { presented = false }
         }
@@ -158,10 +161,18 @@ struct ModelPickerPanel: View {
     let store: StudioStore
     let dismiss: () -> Void
     @State private var query = ""
+    @State private var showsHidden: Bool
+
+    init(store: StudioStore, revealHidden: Bool = false, dismiss: @escaping () -> Void) {
+        self.store = store
+        self.dismiss = dismiss
+        _showsHidden = State(initialValue: revealHidden)
+    }
 
     var body: some View {
         let conversation = store.conversation
         let configured = conversation.models.filter(\.configured)
+        let hiddenCount = configured.filter(conversation.isHidden).count
         let sections = sections(configured)
         let current = conversation.currentModel(settings: store.pages.settings)
         VStack(spacing: 0) {
@@ -170,6 +181,7 @@ struct ModelPickerPanel: View {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
                     TextField("Search models", text: $query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
@@ -179,7 +191,7 @@ struct ModelPickerPanel: View {
                 Rectangle().fill(Theme.hairline).frame(height: 1)
             }
             if sections.isEmpty {
-                Text(emptyText(configured: configured))
+                Text(emptyText(configured: configured, hiddenCount: hiddenCount))
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.secondaryText)
                     .multilineTextAlignment(.center)
@@ -189,22 +201,28 @@ struct ModelPickerPanel: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(sections) { section in
-                            Text(section.title)
-                                .font(.system(size: 11.5, weight: .medium))
-                                .foregroundStyle(Theme.secondaryText)
-                                .padding(.horizontal, 10)
-                                .padding(.top, section.id == sections.first?.id ? 4 : 10)
-                                .padding(.bottom, 3)
-                            ForEach(section.models, id: \.key) { model in
-                                ModelRow(
-                                    model: model,
-                                    selected: current?.provider == model.provider && current?.id == model.id,
-                                    favorite: conversation.isFavorite(model)
-                                ) {
-                                    conversation.selectModel(model)
-                                    dismiss()
-                                } toggleFavorite: {
-                                    conversation.setFavorite(model, !conversation.isFavorite(model))
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(section.title)
+                                    .font(.system(size: 11.5, weight: .medium))
+                                    .foregroundStyle(Theme.secondaryText)
+                                    .padding(.horizontal, 10)
+                                    .padding(.top, section.id == sections.first?.id ? 4 : 10)
+                                    .padding(.bottom, 3)
+                                    .accessibilityAddTraits(.isHeader)
+                                ForEach(section.models, id: \.key) { model in
+                                    ModelRow(
+                                        model: model,
+                                        selected: current?.provider == model.provider && current?.id == model.id,
+                                        favorite: conversation.isFavorite(model),
+                                        hidden: conversation.isHidden(model)
+                                    ) {
+                                        conversation.selectModel(model)
+                                        dismiss()
+                                    } toggleFavorite: {
+                                        conversation.setFavorite(model, !conversation.isFavorite(model))
+                                    } toggleHidden: {
+                                        conversation.setHidden(model, !conversation.isHidden(model))
+                                    }
                                 }
                             }
                         }
@@ -213,6 +231,18 @@ struct ModelPickerPanel: View {
                 }
                 .frame(maxHeight: 380)
                 .fixedSize(horizontal: false, vertical: true)
+            }
+            if hiddenCount > 0 || showsHidden {
+                Rectangle().fill(Theme.hairline).frame(height: 1)
+                Toggle(isOn: $showsHidden) {
+                    Text(hiddenCount == 1 ? "Show 1 hidden model" : "Show \(hiddenCount) hidden models")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.secondaryText)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .padding(.horizontal, 12)
+                .frame(height: 34)
             }
         }
         .frame(width: 320)
@@ -223,29 +253,34 @@ struct ModelPickerPanel: View {
         }
     }
 
-    private func emptyText(configured: [ModelOption]) -> String {
-        if store.conversation.models.isEmpty {
+    private func emptyText(configured: [ModelOption], hiddenCount: Int) -> String {
+        if !store.conversation.modelsLoaded {
             return "Loading models…"
         }
         if configured.isEmpty {
             return "No configured providers. Sign in to a provider to choose a model."
         }
+        if hiddenCount == configured.count, !showsHidden {
+            return "Every model is hidden."
+        }
         return "No models match “\(query)”."
     }
 
     private func sections(_ configured: [ModelOption]) -> [ModelSection] {
+        let conversation = store.conversation
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         let matching = needle.isEmpty ? configured : configured.filter {
             $0.name.lowercased().contains(needle) || $0.id.lowercased().contains(needle) || $0.provider.lowercased().contains(needle)
         }
+        let visible = matching.filter { !conversation.isHidden($0) }
         var sections: [ModelSection] = []
-        let favorites = matching.filter { store.conversation.isFavorite($0) }
+        let favorites = visible.filter(conversation.isFavorite)
         if !favorites.isEmpty {
             sections.append(ModelSection(id: "favorites", title: "Favorites", models: favorites))
         }
         var order: [String] = []
         var grouped: [String: [ModelOption]] = [:]
-        for model in matching {
+        for model in visible {
             if grouped[model.provider] == nil {
                 order.append(model.provider)
             }
@@ -253,6 +288,10 @@ struct ModelPickerPanel: View {
         }
         for provider in order.sorted(by: { providerName($0) < providerName($1) }) {
             sections.append(ModelSection(id: provider, title: providerName(provider), models: grouped[provider] ?? []))
+        }
+        let hidden = matching.filter(conversation.isHidden)
+        if showsHidden, !hidden.isEmpty {
+            sections.append(ModelSection(id: "hidden", title: "Hidden", models: hidden))
         }
         return sections
     }
@@ -272,8 +311,10 @@ private struct ModelRow: View {
     let model: ModelOption
     let selected: Bool
     let favorite: Bool
+    let hidden: Bool
     let select: () -> Void
     let toggleFavorite: () -> Void
+    let toggleHidden: () -> Void
     @State private var hovering = false
 
     var body: some View {
@@ -294,26 +335,50 @@ private struct ModelRow: View {
                         Image(systemName: "checkmark")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(Theme.primary)
+                            .accessibilityHidden(true)
                     }
                 }
+                .opacity(hidden ? 0.55 : 1)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            Button(action: toggleFavorite) {
-                Image(systemName: favorite ? "star.fill" : "star")
-                    .font(.system(size: 11.5, weight: .light))
-                    .foregroundStyle(favorite ? Color.primary.opacity(0.8) : Theme.secondaryText)
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
+            .accessibilityLabel(model.name)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            if hidden {
+                Button(action: toggleHidden) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 11.5, weight: .light))
+                        .foregroundStyle(Theme.secondaryText)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Unhide model")
+                .accessibilityLabel("Unhide \(model.name)")
+            } else {
+                Button(action: toggleFavorite) {
+                    Image(systemName: favorite ? "star.fill" : "star")
+                        .font(.system(size: 11.5, weight: .light))
+                        .foregroundStyle(favorite ? Color.primary.opacity(0.8) : Theme.secondaryText)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(favorite || hovering ? 1 : 0)
+                .help(favorite ? "Remove from favorites" : "Add to favorites")
+                .accessibilityLabel(favorite ? "Remove \(model.name) from favorites" : "Add \(model.name) to favorites")
             }
-            .buttonStyle(.plain)
-            .opacity(favorite || hovering ? 1 : 0)
-            .help(favorite ? "Remove from favorites" : "Add to favorites")
         }
         .padding(.horizontal, 8)
         .frame(height: 30)
         .rowSurface(selected: selected, hovering: hovering)
         .onHover { hovering = $0 }
+        .contextMenu {
+            Button(hidden ? "Unhide Model" : "Hide Model", action: toggleHidden)
+            if !hidden {
+                Button(favorite ? "Remove from Favorites" : "Add to Favorites", action: toggleFavorite)
+            }
+        }
     }
 }
 
@@ -343,6 +408,7 @@ private struct ThinkingMenu: View {
             .fixedSize()
             .onHover { hovering = $0 }
             .help("Thinking level")
+            .accessibilityLabel("Thinking level: \(Self.title(current))")
         }
     }
 
@@ -378,6 +444,7 @@ private struct AccessMenu: View {
         .fixedSize()
         .onHover { hovering = $0 }
         .help("Access")
+        .accessibilityLabel("Access: \(current.title)")
     }
 }
 
@@ -445,6 +512,7 @@ private struct ContextMeter: View {
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
             .help("Context window: \(Int((fraction * 100).rounded()))% used")
+            .accessibilityLabel("Context window: \(Int((fraction * 100).rounded()))% used")
             .popover(isPresented: $presented, arrowEdge: .bottom) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Context window")
@@ -478,6 +546,8 @@ struct ThreadContextStrip: View {
                 strip {
                     Label(branch, systemImage: "arrow.triangle.branch")
                         .padding(.horizontal, 8)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Branch: \(branch)")
                     if info.worktree != nil {
                         Text("Worktree")
                             .padding(.horizontal, 4)
@@ -531,6 +601,7 @@ private struct WorkspaceMenu: View {
         .fixedSize()
         .onHover { hovering = $0 }
         .help("Workspace")
+        .accessibilityLabel(options.worktree ? "Workspace: New worktree" : "Workspace: Local checkout")
     }
 }
 
@@ -563,12 +634,14 @@ private struct BaseBranchButton: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Base branch")
+        .accessibilityLabel("Base branch: \(options.base ?? defaultBase)")
         .popover(isPresented: $presented, arrowEdge: .bottom) {
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 12, weight: .light))
                         .foregroundStyle(Theme.secondaryText)
+                        .accessibilityHidden(true)
                     TextField("Search branches", text: $query)
                         .textFieldStyle(.plain)
                         .font(.system(size: 13))
@@ -627,6 +700,7 @@ private struct BranchRow: View {
                     .font(.system(size: 11.5, weight: .light))
                     .foregroundStyle(Theme.secondaryText)
                     .frame(width: 16)
+                    .accessibilityHidden(true)
                 Text(branch.name)
                     .font(.system(size: 13))
                     .lineLimit(1)
@@ -641,6 +715,7 @@ private struct BranchRow: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(Theme.primary)
+                        .accessibilityHidden(true)
                 }
             }
             .padding(.horizontal, 8)
