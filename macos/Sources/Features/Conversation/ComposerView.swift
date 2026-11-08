@@ -57,8 +57,8 @@ struct ComposerView: View {
             }
             .padding(.leading, 16)
             .padding(.trailing, resting ? 48 : 16)
-            .padding(.top, resting ? Self.restingInset : Self.textTop)
-            .padding(.bottom, resting ? Self.restingInset : Self.controlsBand)
+            .padding(.top, resting ? restingInset : Self.textTop)
+            .padding(.bottom, resting ? restingInset : Self.controlsBand)
         }
         .overlay(alignment: .bottom) {
             HStack(spacing: 2) {
@@ -75,7 +75,7 @@ struct ComposerView: View {
                 ) { submit(alternate: false) }
             }
             .padding(.horizontal, 8)
-            .padding(.bottom, resting ? (Self.restingInset * 2 + lineHeight - 30) / 2 : 8)
+            .padding(.bottom, Self.controlsBottom)
         }
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.input))
@@ -120,7 +120,12 @@ struct ComposerView: View {
 
     private static let textTop: CGFloat = 14
     private static let controlsBand: CGFloat = 44
-    private static let restingInset: CGFloat = 11
+    private static let controlsBottom: CGFloat = 8
+    private static let controlsHeight: CGFloat = 30
+
+    private var restingInset: CGFloat {
+        Self.controlsBottom + Self.controlsHeight / 2 - lineHeight / 2
+    }
 
     private static var motion: Animation? {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.22)
