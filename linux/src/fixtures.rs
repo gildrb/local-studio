@@ -23,7 +23,7 @@ pub fn scenes() -> Vec<&'static str> {
     all
 }
 
-pub const SCENES: [&str; 55] = [
+pub const SCENES: [&str; 57] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -75,6 +75,8 @@ pub const SCENES: [&str; 55] = [
     "49-commit-dialog",
     "50-review-comment",
     "51-palette-grouped",
+    "56-follow-up-bubble",
+    "57-follow-up-sending",
     "52-theme-gildrb",
     "53-theme-gildrb-light",
     "54-gildrb-file-preview-light",
@@ -219,6 +221,7 @@ pub fn teardown(app: &Rc<App>) {
     app.branches.reset();
     app.timeline.clear();
     *app.state.borrow_mut() = State::default();
+    app.render_pending();
     crate::theme::color_scheme(ColorScheme::System);
     app.render(Dirty::all());
 }
@@ -973,6 +976,13 @@ fn usage_report() -> UsageReport {
                 tokens: 4_200_000,
                 cost_usd: 0.0,
                 requests: 4,
+            },
+            UsageByModel {
+                provider: "anthropic".to_string(),
+                model: "claude-haiku-4-5".to_string(),
+                tokens: 3_100,
+                cost_usd: 0.0045,
+                requests: 2,
             },
         ],
         daily: days(7, 4_000_000),

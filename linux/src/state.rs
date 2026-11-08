@@ -37,6 +37,18 @@ pub struct DraftSettings {
     pub compare: Vec<ModelKey>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingSend {
+    pub request: String,
+    pub thread: String,
+    pub text: String,
+    pub draft: String,
+    pub queued: bool,
+    pub images: u32,
+    pub baseline: usize,
+    pub queue_baseline: usize,
+}
+
 #[derive(Default)]
 pub struct State {
     pub connection: Option<Connection>,
@@ -76,6 +88,7 @@ pub struct State {
     pub providers_loaded: bool,
     pub usage: Option<UsageReport>,
     pub usage_period: Option<UsagePeriod>,
+    pub pending: Vec<PendingSend>,
 }
 
 impl State {
@@ -173,6 +186,19 @@ impl State {
         }
         self.draft_settings.thinking.clone().or_else(|| self.settings.default_thinking_level.clone())
     }
+
+    pub fn run_start(&self, thread: &str, reported: Option<i64>) -> Option<i64> {
+        let reported = reported?;
+        let shown = self
+            .info
+            .as_ref()
+            .filter(|info| info.busy && info.thread == thread && self.selected.as_deref() == Some(thread))
+            .and_then(|info| info.run_started_at);
+        match shown {
+            Some(start) if start <= reported && reported - start < START_SKEW => Some(start),
+            _ => Some(reported),
+        }
+    }
 }
 
 pub fn short_path(path: &str) -> String {
@@ -181,4 +207,22 @@ pub fn short_path(path: &str) -> String {
 
 pub fn initials(name: &str) -> String {
     name.chars().find(|ch| ch.is_alphanumeric()).map(|ch| ch.to_uppercase().collect()).unwrap_or_default()
+}
+
+const START_SKEW: i64 = 2_000;
+
+pub fn continued(mut info: ThreadInfo, previous: Option<&ThreadInfo>) -> ThreadInfo {
+    if !info.busy {
+        return info;
+    }
+    let earlier = previous
+        .filter(|previous| previous.thread == info.thread && previous.busy)
+        .and_then(|previous| previous.run_started_at);
+    info.run_started_at = match (info.run_started_at, earlier) {
+        (Some(start), Some(earlier)) if start > earlier && start - earlier < START_SKEW => Some(earlier),
+        (None, Some(earlier)) => Some(earlier),
+        (None, None) => Some(crate::format::now_ms()),
+        (start, _) => start,
+    };
+    info
 }

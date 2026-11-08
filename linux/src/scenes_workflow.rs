@@ -135,6 +135,24 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             conversation(app, false);
             crate::palette::open(app);
         }
+        "56-follow-up-bubble" | "57-follow-up-sending" => {
+            let live = scene == "57-follow-up-sending";
+            conversation(app, live);
+            let text = "Also add a test for the shelf headers.".to_string();
+            let pending = crate::state::PendingSend {
+                request: "fixture-send".to_string(),
+                thread: FOCUSED.to_string(),
+                baseline: app.timeline.user_count(&text),
+                queue_baseline: 0,
+                draft: text.clone(),
+                text,
+                images: 0,
+                queued: live,
+            };
+            app.state.borrow_mut().pending.push(pending);
+            app.render_pending();
+            app.render(crate::app::Dirty { composer: true, ..crate::app::Dirty::default() });
+        }
         _ => crate::scenes_providers::stage(app, scene),
     }
 }

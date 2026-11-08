@@ -14,6 +14,9 @@ const TIMEOUT: Duration = Duration::from_secs(180);
 const TERMINAL_MARK: &str = "smoke-term";
 const STUB_KEY: &str = "smoke-key";
 const STUB_NAME: &str = "Smoke Stub";
+const FOLLOW_UP: &str = "smoke follow-up";
+const REJECTED: &str = "smoke rejected send";
+const MISSING: &str = "smoke-missing-thread";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
@@ -21,6 +24,8 @@ enum Phase {
     Project,
     Opening,
     Replying,
+    FollowUp,
+    Rejected,
     Workspace,
     Terminal,
     Typing,
@@ -125,15 +130,16 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
                 return;
             }
             println!("ok   streamed reply rendered ({} transcript items)", items.len());
-            if let Err(error) = std::fs::write(std::path::Path::new(project).join("notes.md"), "smoke notes\n") {
-                finish(app, phase, failed, false, &format!("write notes.md: {error}"));
+            app.composer.set_text(FOLLOW_UP);
+            app.composer.submit(app);
+            if !app.timeline.local_texts().iter().any(|text| text == FOLLOW_UP) {
+                finish(app, phase, failed, false, "the follow-up was not drawn when it was sent");
                 return;
             }
-            phase.set(Phase::Workspace);
-            app.composer.type_text(app, "look at @notes");
-            app.panel.show("files");
-            app.sidebar.search_text("smoke");
+            println!("ok   follow-up bubble drawn the moment it was sent");
+            phase.set(Phase::FollowUp);
         }
+        Phase::FollowUp | Phase::Rejected => follow_up(app, phase, failed, project),
         Phase::Workspace => {
             let mention = app.composer.extras.suggestions().iter().any(|item| item == "@notes.md");
             let file = app.panel.files.names().iter().any(|name| name == "notes.md");
@@ -148,6 +154,49 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
         Phase::Discovering | Phase::Adding | Phase::Removing => providers(app, phase, failed),
         Phase::Keys => keys(app, phase, failed),
         Phase::Finished => {}
+    }
+}
+
+fn follow_up(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, project: &str) {
+    match phase.get() {
+        Phase::FollowUp => {
+            let busy = app.state.borrow().info.as_ref().is_none_or(|info| info.busy);
+            if busy || !app.timeline.local_texts().is_empty() || app.timeline.user_count(FOLLOW_UP) != 1 {
+                return;
+            }
+            println!("ok   the local bubble gave way to the core's user item");
+            app.state.borrow_mut().selected = Some(MISSING.to_string());
+            app.composer.set_text(REJECTED);
+            app.composer.submit(app);
+            if !app.timeline.local_texts().iter().any(|text| text == REJECTED) {
+                finish(app, phase, failed, false, "the rejected send was not drawn when it was sent");
+                return;
+            }
+            phase.set(Phase::Rejected);
+        }
+        Phase::Rejected => {
+            if !app.state.borrow().pending.is_empty() {
+                return;
+            }
+            let restored = app.composer.text() == REJECTED && app.timeline.local_texts().is_empty();
+            if !restored {
+                finish(app, phase, failed, false, "a rejected send did not remove its bubble and restore the composer");
+                return;
+            }
+            println!("ok   a rejected send removed its bubble and returned the text to the composer");
+            app.composer.set_text("");
+            let thread = app.state.borrow().threads.first().map(|row| row.id.clone());
+            app.select_thread(thread);
+            if let Err(error) = std::fs::write(std::path::Path::new(project).join("notes.md"), "smoke notes\n") {
+                finish(app, phase, failed, false, &format!("write notes.md: {error}"));
+                return;
+            }
+            phase.set(Phase::Workspace);
+            app.composer.type_text(app, "look at @notes");
+            app.panel.show("files");
+            app.sidebar.search_text("smoke");
+        }
+        _ => {}
     }
 }
 

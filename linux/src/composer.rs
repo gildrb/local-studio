@@ -433,9 +433,9 @@ impl Composer {
         let mut prompt: Vec<String> =
             contexts.iter().map(|(label, body)| format!("{label}:\n```\n{body}\n```")).collect();
         if !text.is_empty() {
-            prompt.push(text);
+            prompt.push(text.clone());
         }
-        app.send(PromptDraft { text: prompt.join("\n\n"), images, files });
+        app.send(PromptDraft { text: prompt.join("\n\n"), images, files }, text);
     }
 
     #[allow(clippy::too_many_lines)]
@@ -474,9 +474,18 @@ impl Composer {
         while let Some(child) = self.queue.first_child() {
             self.queue.remove(&child);
         }
-        self.queue.set_visible(!state.queue.is_empty());
+        let sending: Vec<&str> = state
+            .pending
+            .iter()
+            .filter(|pending| pending.queued && state.selected.as_deref() == Some(pending.thread.as_str()))
+            .map(|pending| pending.text.as_str())
+            .collect();
+        self.queue.set_visible(!state.queue.is_empty() || !sending.is_empty());
         for queued in &state.queue {
             self.queue.append(&queued_row(&self.app, state, &queued.id, &queued.text, queued.sending, queued.steering));
+        }
+        for text in sending {
+            self.queue.append(&sending_row(text));
         }
 
         let approval = state.approvals.first();
@@ -648,6 +657,25 @@ fn level_title(level: &str) -> String {
         "xhigh" => "Extra high".to_string(),
         other => format::capitalize(other),
     }
+}
+
+fn sending_row(text: &str) -> gtk::Widget {
+    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    row.add_css_class("ls-bubble");
+    row.add_css_class("queued");
+    row.set_halign(gtk::Align::End);
+    let icon = gtk::Image::from_icon_name("alarm-symbolic");
+    icon.add_css_class("dim-label");
+    row.append(&icon);
+    let label = gtk::Label::new(Some(text));
+    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label.set_max_width_chars(60);
+    label.set_xalign(0.0);
+    row.append(&label);
+    let status = gtk::Label::new(Some("Sending"));
+    status.add_css_class("ls-meta");
+    row.append(&status);
+    row.upcast()
 }
 
 fn queued_row(app: &Weak<App>, state: &State, id: &str, text: &str, sending: bool, steering: bool) -> gtk::Widget {
