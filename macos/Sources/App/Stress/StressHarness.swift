@@ -86,6 +86,7 @@ final class StressHarness: NSObject {
     private var scrolled: Set<String> = []
     private var lastTop: [String: UInt64] = [:]
     private var expectedTop: [String: UInt64] = [:]
+    private var followedEnd: Set<String> = []
     private var restoreFrames = 0
     private var streaks: [String: Int] = [:]
     private var workStarts: [String: Int64] = [:]
@@ -570,7 +571,7 @@ final class StressHarness: NSObject {
         let thread = store.conversation.thread
         if thread != previousThread {
             if let previousThread, let top = lastTop[previousThread] {
-                expectedTop[previousThread] = top
+                expectedTop[previousThread] = followedEnd.contains(previousThread) ? nil : top
             }
             previousThread = thread
             restoreFrames = 0
@@ -731,6 +732,11 @@ final class StressHarness: NSObject {
         if let top = scroll.top {
             lastTop[thread] = top == UInt64.max ? nil : top
         }
+        if store.conversation.followsEnd {
+            followedEnd.insert(thread)
+        } else {
+            followedEnd.remove(thread)
+        }
         guard scrolled.contains(thread) else {
             if scroll.distance > 2 {
                 record("not at bottom", "\(thread) shown \(Int(scroll.distance)) pt above the end (follows end \(store.conversation.followsEnd)), after \(monitor.context)")
@@ -742,7 +748,7 @@ final class StressHarness: NSObject {
         if scroll.top == expected {
             expectedTop[thread] = nil
         } else if restoreFrames > 3 {
-            record("scroll not restored", "\(thread) top row \(scroll.top.map(String.init) ?? "?"), expected \(expected)")
+            record("scroll not restored", "\(thread) top row \(scroll.top.map(String.init) ?? "?"), expected \(expected), \(Int(scroll.distance)) pt above the end (follows end \(store.conversation.followsEnd)), after \(monitor.context)")
             expectedTop[thread] = nil
         }
     }
