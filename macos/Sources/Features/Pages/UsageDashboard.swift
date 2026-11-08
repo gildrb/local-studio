@@ -19,7 +19,7 @@ struct UsageDashboard: View {
                         .padding(.top, 34)
                     HStack(alignment: .top, spacing: 0) {
                         hero
-                            .frame(width: column, alignment: .leading)
+                            .frame(minWidth: 0, maxWidth: column, alignment: .leading)
                         VStack(alignment: .leading, spacing: 10) {
                             Text(chartTitle)
                                 .font(.system(size: 13))
@@ -54,7 +54,7 @@ struct UsageDashboard: View {
                 .padding(.top, 36)
                 .padding(.bottom, 44)
             DailyHeatmap(
-                values: metric == .cost ? report.dailyCostUsd : report.lifetime.daily.map(Double.init),
+                values: metric == .cost ? report.dailyCostUsd : report.lifetime.daily.map { Double($0) },
                 lastDay: report.lifetime.lastDay,
                 label: metric == .cost ? "Cost per day, last year" : "Tokens per day, last year",
                 format: metric == .cost ? PageFormat.cost : LocalFormat.tokens

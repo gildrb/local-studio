@@ -230,7 +230,7 @@ private struct LocalMachineDashboard: View {
                             unit: "tok/s",
                             hint: decodeHint
                         )
-                        .frame(width: column, alignment: .leading)
+                        .frame(minWidth: 0, maxWidth: column, alignment: .leading)
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Decode, last 24 hours")
                                 .font(.system(size: 13))
@@ -261,7 +261,7 @@ private struct LocalMachineDashboard: View {
                 .padding(.top, 36)
                 .padding(.bottom, 44)
             DailyHeatmap(
-                values: dashboard.map { $0.tokens.daily.map(Double.init) },
+                values: dashboard.map { $0.tokens.daily.map { Double($0) } },
                 lastDay: dashboard?.tokens.lastDay,
                 label: "Tokens per day, last year",
                 format: LocalFormat.tokens
