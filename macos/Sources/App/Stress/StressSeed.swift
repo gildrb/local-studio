@@ -20,11 +20,35 @@ struct StressSeed {
     let store: StudioStore
     private(set) var prompts: [String: String] = [:]
 
-    static let plans: [Plan] = [
+    static let realModel = ProcessInfo.processInfo.environment["STRESS_MODEL"] == "haiku"
+    static let realSendLimit = 20
+
+    static var plans: [Plan] {
+        guard realModel else { return fauxPlans }
+        return [Plan(project: "alpha", turns: 2), Plan(project: "beta", turns: 1), Plan(project: "gamma", turns: 1), Plan(project: "alpha", turns: 1)]
+    }
+
+    static var seedSends: Int {
+        plans.reduce(0) { $0 + $1.turns }
+    }
+
+    private static let fauxPlans: [Plan] = [
         Plan(project: "alpha", turns: 6), Plan(project: "beta", turns: 2), Plan(project: "gamma", turns: 1),
         Plan(project: "alpha", turns: 4), Plan(project: "beta", turns: 1), Plan(project: "gamma", turns: 3),
         Plan(project: "alpha", turns: 1), Plan(project: "beta", turns: 5), Plan(project: "gamma", turns: 2),
     ]
+
+    private static let realPrompts = [
+        "Run ls here, then summarize in one line",
+        "Say hello in three words",
+        "Read README.md and quote its first line",
+        "What is 7 times 6? One line",
+        "Count the files here with a shell command",
+    ]
+
+    static func realPrompt(_ index: Int) -> String {
+        "\(realPrompts[index % realPrompts.count]) (\(index + 1))"
+    }
 
     private static var activity: NSObjectProtocol?
 
@@ -32,7 +56,9 @@ struct StressSeed {
         setvbuf(stdout, nil, _IOLBF, 0)
         UserDefaults.standard.register(defaults: ["NSApplicationCrashOnExceptions": true])
         activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "Local Studio stress harness")
-        installScript()
+        if !realModel {
+            installScript()
+        }
     }
 
     private static func installScript() {
@@ -84,12 +110,17 @@ struct StressSeed {
         """
     }
 
-    mutating func run() async throws {
+    typealias Sender = (_ text: String, _ project: String, _ thread: String?) async throws -> String
+
+    mutating func run(send: Sender? = nil) async throws {
         let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
         var projects: [String: String] = [:]
         for name in ["alpha", "beta", "gamma"] {
             let path = (home as NSString).appendingPathComponent("stress/\(name)")
             try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+            if Self.realModel {
+                try? "# \(name)\n\nScratch project for the Local Studio stress harness.\n".write(toFile: (path as NSString).appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
+            }
             if name == "alpha" {
                 Self.git(["init", "-q"], in: path)
                 Self.git(["-c", "user.name=Stress", "-c", "user.email=stress@local", "commit", "-q", "--allow-empty", "-m", "init"], in: path)
@@ -103,34 +134,60 @@ struct StressSeed {
         }
         store.conversation.loadModels()
         try await until("models", 20) { store.conversation.modelsLoaded }
+        if Self.realModel {
+            guard store.conversation.models.contains(where: { $0.provider == "anthropic" && $0.id == "claude-haiku-5-5" && $0.configured }) else {
+                throw StressFailure("anthropic/claude-haiku-5-5 is not configured")
+            }
+            store.conversation.newThread.model = ModelKey(provider: "anthropic", model: "claude-haiku-5-5")
+            store.conversation.newThread.thinkingLevel = "low"
+        }
+        var sent = 0
         for (index, plan) in Self.plans.enumerated() {
             guard let project = projects[plan.project] else { throw StressFailure("project \(plan.project) missing") }
-            let known = Set(store.inbox.threads.map(\.id))
             store.newThread(in: project)
             let conversation = store.conversation
             conversation.newThread.access = .fullAccess
-            let prompt = "Stress \(index + 1): plan the \(plan.project) refactor, part \(index + 1)"
-            conversation.composer(project: project).text = prompt
-            conversation.submit(project: project, alternate: false, settings: store.pages.settings)
-            try await until("thread \(index + 1) start", 30) {
-                guard let thread = conversation.thread, !known.contains(thread) else { return false }
-                return true
-            }
-            guard let thread = conversation.thread else { throw StressFailure("thread \(index + 1) has no id") }
+            let prompt = Self.realModel ? Self.realPrompt(sent) : "Stress \(index + 1): plan the \(plan.project) refactor, part \(index + 1)"
+            sent += 1
+            let thread = try await deliver(prompt, project, nil, send)
             prompts[thread] = prompt
-            try await idle(thread, prompt, "thread \(index + 1) turn 1")
             for turn in 1..<plan.turns {
-                let text = "Continue with part \(index + 1).\(turn + 1)"
-                conversation.send(text, project: project, steer: false)
-                try await idle(thread, text, "thread \(index + 1) turn \(turn + 1)")
+                let text = Self.realModel ? Self.realPrompt(sent) : "Continue with part \(index + 1).\(turn + 1)"
+                sent += 1
+                _ = try await deliver(text, project, thread, send)
             }
             print("seed thread \(index + 1)/\(Self.plans.count) \(thread) in \(plan.project): \(conversation.rows.count) rows")
         }
     }
 
+    private func deliver(_ text: String, _ project: String, _ thread: String?, _ send: Sender?) async throws -> String {
+        if let send {
+            return try await send(text, project, thread)
+        }
+        return try await apiSend(text, project: project, thread: thread)
+    }
+
+    private func apiSend(_ text: String, project: String, thread: String?) async throws -> String {
+        let conversation = store.conversation
+        if thread == nil {
+            let known = Set(store.inbox.threads.map(\.id))
+            conversation.composer(project: project).text = text
+            conversation.submit(project: project, alternate: false, settings: store.pages.settings)
+            try await until("a thread for “\(text)”", 30) {
+                guard let thread = conversation.thread, !known.contains(thread) else { return false }
+                return true
+            }
+        } else {
+            conversation.send(text, project: project, steer: false)
+        }
+        guard let id = conversation.thread else { throw StressFailure("“\(text)” has no thread") }
+        try await idle(id, text, "the reply to “\(text)”")
+        return id
+    }
+
     private func idle(_ thread: String, _ text: String, _ label: String) async throws {
         let conversation = store.conversation
-        try await until(label, 60) {
+        try await until(label, Self.realModel ? 120 : 60) {
             guard conversation.thread == thread, let info = conversation.info, info.thread == thread, !info.busy,
                   conversation.queued.isEmpty, let last = conversation.items.last,
                   case .assistant(_, false, _, _) = last.kind,
@@ -164,10 +221,24 @@ func until(_ label: String, _ timeout: TimeInterval, _ condition: () -> Bool) as
 
 @MainActor
 func launchedMainWindow(_ store: StudioStore) async throws -> NSWindow {
-    try await until("the main window to appear at launch", 20) { visibleMainWindow(store) != nil }
+    do {
+        try await until("the main window to appear at launch", 20) { visibleMainWindow(store) != nil }
+    } catch {
+        let windows = NSApp.windows.map { "\($0.identifier?.rawValue ?? "-") “\($0.title)” visible=\($0.isVisible) \(Int($0.frame.width))×\(Int($0.frame.height))" }
+        throw StressFailure("no main window at launch (active=\(NSApp.isActive), windows: \(windows.joined(separator: "; ")))")
+    }
     guard let window = visibleMainWindow(store) else { throw StressFailure("no main window at launch") }
     window.orderFront(nil)
     return window
+}
+
+@MainActor
+func skipOnboarding(_ store: StudioStore, _ window: NSWindow) async throws {
+    try await until("settings and projects", 20) { store.pages.settings != nil && store.inbox.receivedProjects }
+    try await until("the onboarding sheet or none", 3) { window.attachedSheet != nil || !store.needsOnboarding }
+    guard store.needsOnboarding else { return }
+    store.completeOnboarding()
+    try await until("Skip Setup to close the onboarding sheet", 2) { window.attachedSheet == nil }
 }
 
 @MainActor

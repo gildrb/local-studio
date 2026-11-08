@@ -147,12 +147,13 @@ enum KeyDriver {
     }
 
     static func flags(_ flags: NSEvent.ModifierFlags, in window: NSWindow) {
+        let target = window.attachedSheet ?? window
         guard let event = NSEvent.keyEvent(
             with: .flagsChanged, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
+            windowNumber: target.windowNumber, context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false,
             keyCode: flags.contains(.control) ? 59 : flags.contains(.command) ? 55 : 0
         ) else { return }
-        deliver(event, in: window)
+        deliver(event, in: target)
     }
 
     static func scroll(_ delta: CGFloat, at point: NSPoint, in window: NSWindow) {
@@ -187,11 +188,12 @@ enum KeyDriver {
     }
 
     private static func send(_ type: NSEvent.EventType, _ chord: KeyChord, in window: NSWindow) {
+        let target = window.attachedSheet ?? window
         guard let event = NSEvent.keyEvent(
             with: type, location: .zero, modifierFlags: chord.flags, timestamp: ProcessInfo.processInfo.systemUptime,
-            windowNumber: window.windowNumber, context: nil, characters: chord.characters,
+            windowNumber: target.windowNumber, context: nil, characters: chord.characters,
             charactersIgnoringModifiers: chord.ignoring, isARepeat: false, keyCode: chord.keyCode
         ) else { return }
-        deliver(event, in: window)
+        deliver(event, in: target)
     }
 }

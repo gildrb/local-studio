@@ -382,9 +382,21 @@ private struct TimelineScroll: View {
             guard case .entry(let entry, _) = row, case .user(let text, _, _, _) = entry.item.kind else { return nil }
             return text
         }.first
+        var lastUser: String?
+        var replied = false
+        for row in conversation.rows.reversed() {
+            guard case .entry(let entry, _) = row else { continue }
+            if case .user(let text, _, _, _) = entry.item.kind {
+                lastUser = text
+                break
+            }
+            if case .assistant(let blocks, false, nil, _) = entry.item.kind, !blocks.isEmpty {
+                replied = true
+            }
+        }
         return TimelineProbe(
             thread: conversation.thread, pending: conversation.focusedPending, rows: conversation.rows.count, firstUser: firstUser,
-            placeholder: conversation.showsLoading
+            lastUser: lastUser, replied: replied, placeholder: conversation.showsLoading
         )
     }
 
@@ -566,7 +578,7 @@ private struct TimelineFooter: View {
         VStack(alignment: .leading, spacing: 14) {
             if live {
                 if let info = conversation.info, info.busy {
-                    WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty)
+                    WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty, probe: store.shell.probe)
                 }
                 ForEach(conversation.queued, id: \.id) { message in
                     QueuedBubble(message: message, store: store)
