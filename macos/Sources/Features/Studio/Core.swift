@@ -2,17 +2,45 @@ import Foundation
 import LocalStudioKit
 import Observation
 
-final class MainWaker: Waker {
-    private let action: @MainActor @Sendable () -> Void
+final class UpdatePump: Waker, @unchecked Sendable {
+    private let queue = DispatchQueue(label: "LocalStudio.updates", qos: .userInteractive)
+    private let deliver: @MainActor @Sendable (Studio, [Update]) -> Void
+    private var studio: Studio?
+    private var woken = false
+    private var delivering = false
 
-    init(_ action: @escaping @MainActor @Sendable () -> Void) {
-        self.action = action
+    init(_ deliver: @escaping @MainActor @Sendable (Studio, [Update]) -> Void) {
+        self.deliver = deliver
+    }
+
+    func attach(_ studio: Studio?) {
+        queue.async {
+            self.studio = studio
+            self.woken = true
+            self.drain()
+        }
     }
 
     func wake() {
-        let action = self.action
+        queue.async {
+            self.woken = true
+            self.drain()
+        }
+    }
+
+    private func drain() {
+        guard woken, !delivering, let studio else { return }
+        woken = false
+        let updates = studio.tick()
+        guard !updates.isEmpty else { return }
+        delivering = true
+        let deliver = self.deliver
         DispatchQueue.main.async {
-            action()
+            deliver(studio, updates)
+            self.queue.async {
+                self.delivering = false
+                self.drain()
+            }
         }
     }
 }
