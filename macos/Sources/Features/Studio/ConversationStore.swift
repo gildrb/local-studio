@@ -260,6 +260,7 @@ final class ConversationStore {
     @ObservationIgnored private var recency: [String] = []
     @ObservationIgnored private var timelineUse: [String] = []
     @ObservationIgnored private var awaitingReset = false
+    @ObservationIgnored private var seeded: Set<String> = []
     @ObservationIgnored var scrollTop: UInt64?
     private(set) var timelines: [String] = []
 
@@ -346,6 +347,7 @@ final class ConversationStore {
         info.thread = thread
         info.busy = true
         infoCache[thread] = info
+        seeded.insert(thread)
         transcripts[thread] = CachedTranscript(
             entries: start.entries, rows: TimelineLayout.rows(for: start.entries, expanded: []), anchors: [], expandedFolds: [],
             approvals: [], queued: start.queued, scroll: ThreadScroll()
@@ -374,14 +376,18 @@ final class ConversationStore {
         switch op {
         case .reset(let items):
             awaitingReset = false
+            if items.isEmpty, seeded.contains(thread) { return nil }
+            seeded.remove(thread)
             reconcile(items)
         case .insert(let index, let item):
             guard !awaitingReset else { return nil }
+            dropSeed(thread)
             guard let position = Int(exactly: index), position <= entries.count else { return outOfSync }
             entries.insert(TimelineEntry(item: item), at: position)
             rebuildRows()
         case .update(let index, let item):
             guard !awaitingReset else { return nil }
+            dropSeed(thread)
             guard let position = Int(exactly: index), position < entries.count else { return outOfSync }
             let entry = entries[position]
             let restructures = entry.id != item.id || entry.item.turn != item.turn || entry.item.kind.shape != item.kind.shape
@@ -393,6 +399,11 @@ final class ConversationStore {
             }
         }
         return nil
+    }
+
+    private func dropSeed(_ thread: String) {
+        guard seeded.remove(thread) != nil else { return }
+        entries = []
     }
 
     private func reconcile(_ items: [Item]) {

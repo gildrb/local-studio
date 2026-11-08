@@ -640,6 +640,7 @@ struct Thread {
     cwd: Option<String>,
     live: Option<Live>,
     title: Option<String>,
+    prompt: Option<String>,
     run_started_at: Option<i64>,
     failed_at: Option<i64>,
     last_user_at: Option<i64>,
@@ -1278,6 +1279,7 @@ impl Actor {
             .or_else(|| {
                 thread.and_then(|thread| thread.live.as_ref()).and_then(|live| live.transcript.first_user_text())
             })
+            .or_else(|| thread.and_then(|thread| thread.prompt.clone()))
             .map(|title| threads::clean_title(&title))
             .filter(|title| !title.is_empty())
             .unwrap_or_else(|| NEW_THREAD_TITLE.to_string())
@@ -1502,7 +1504,7 @@ impl Actor {
         settings: ThreadSettings,
         fan_out: Option<String>,
     ) {
-        match self.create_thread(draft, project, settings, fan_out).await {
+        match self.create_thread(draft, project, settings, fan_out, &prompt.text).await {
             Ok(id) => {
                 if let Err(error) = self.send_prompt(&id, prompt, Delivery::Queue).await {
                     self.mailbox.notice(NoticeLevel::Error, error);
@@ -1518,6 +1520,7 @@ impl Actor {
         project: Option<String>,
         settings: ThreadSettings,
         fan_out: Option<String>,
+        prompt: &str,
     ) -> Result<String, String> {
         let client = self.client.clone().ok_or_else(|| "Not connected to the Eukhe daemon yet.".to_string())?;
         let project_path = match &project {
@@ -1554,7 +1557,13 @@ impl Actor {
         let id = created.session_id.clone();
         self.threads.insert(
             id.clone(),
-            Thread { path: Some(created.session_file.clone()), cwd: Some(cwd), pending_run: true, ..Thread::default() },
+            Thread {
+                path: Some(created.session_file.clone()),
+                cwd: Some(cwd),
+                pending_run: true,
+                prompt: Some(prompt.to_string()),
+                ..Thread::default()
+            },
         );
         self.store.update(&id, |flags| {
             flags.project.clone_from(&project_path);
