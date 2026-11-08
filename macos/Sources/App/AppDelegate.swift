@@ -82,6 +82,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             harness.start()
             keys = harness
         }
+        DispatchQueue.main.async { [weak self] in
+            self?.presentMainWindowIfMissing()
+        }
+    }
+
+    private func presentMainWindowIfMissing() {
+        guard store.mainWindow == nil else { return }
+        _ = NSApp.delegate?.applicationOpenUntitledFile?(NSApp)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
