@@ -44,6 +44,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
+        if ["+smoke", "+smoke-conversation", "+smoke-panels", "+smoke-providers"].contains(where: arguments.contains) {
+            store.shell.onboardingDismissed = true
+        }
         if arguments.contains("+smoke") {
             let smoke = Smoke(store: store)
             smoke.start()

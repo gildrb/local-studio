@@ -66,7 +66,8 @@ final class ShellSmoke {
                 smoke.store.dispatch("composer.stash")
                 smoke.store.dispatch("diff.toggle")
                 smoke.store.commands.unregister(owner: smoke)
-            }, done: { $0.routed == ["composer.stash", "terminal.split"] && !$0.store.commands.isRegistered("composer.stash") }),
+                smoke.store.dispatch("composer.stash")
+            }, done: { $0.routed == ["composer.stash", "terminal.split"] }),
             Step(name: "add project", act: { smoke in
                 let home = ProcessInfo.processInfo.environment["HOME"] ?? NSTemporaryDirectory()
                 let path = URL(fileURLWithPath: home).appendingPathComponent("shell-smoke-project").path
