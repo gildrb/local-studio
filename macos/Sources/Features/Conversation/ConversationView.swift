@@ -7,10 +7,9 @@ struct ThreadView: View {
     let leadingInset: CGFloat
 
     var body: some View {
-        Group {
-            if store.conversation.showsThread {
-                ConversationColumn(store: store)
-            } else {
+        ZStack {
+            ConversationColumn(store: store)
+            if !store.conversation.showsThread {
                 DraftHero(store: store)
             }
         }
@@ -159,33 +158,35 @@ private struct ConversationColumn: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
-                if let pending = store.conversation.pending {
-                    if let setup = store.conversation.worktreeSetup[pending.draft], pending.failure == nil {
-                        WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
-                            store.conversation.cancelWorktreeSetup()
-                        } workLocally: {
-                            store.conversation.skipWorktreeSetup()
+            if store.conversation.showsThread {
+                VStack(spacing: 8) {
+                    if let pending = store.conversation.pending {
+                        if let setup = store.conversation.worktreeSetup[pending.draft], pending.failure == nil {
+                            WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
+                                store.conversation.cancelWorktreeSetup()
+                            } workLocally: {
+                                store.conversation.skipWorktreeSetup()
+                            }
+                        }
+                        if let failure = pending.failure {
+                            StartFailureCard(message: failure) {
+                                store.conversation.editPending(pending.draft)
+                            } retry: {
+                                store.conversation.retryPending(pending.draft)
+                            }
                         }
                     }
-                    if let failure = pending.failure {
-                        StartFailureCard(message: failure) {
-                            store.conversation.editPending(pending.draft)
-                        } retry: {
-                            store.conversation.retryPending(pending.draft)
-                        }
-                    }
+                    ApprovalCard(store: store)
+                    ComposerView(store: store)
+                        .focusRegionFrame(.composer, in: store.shell)
+                    ThreadContextStrip(store: store)
+                        .padding(.top, -4)
                 }
-                ApprovalCard(store: store)
-                ComposerView(store: store)
-                    .focusRegionFrame(.composer, in: store.shell)
-                ThreadContextStrip(store: store)
-                    .padding(.top, -4)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: width)
+                .padding(.horizontal, 4)
+                .padding(.bottom, 14)
             }
-            .padding(.horizontal, 16)
-            .frame(maxWidth: width)
-            .padding(.horizontal, 4)
-            .padding(.bottom, 14)
         }
     }
 }
