@@ -70,6 +70,7 @@ final class StressHarness: NSObject {
     }
 
     private static let pendingDeadline: TimeInterval = 10
+    private static let floodCount = 4
 
     private let store: StudioStore
     private let duration: TimeInterval
@@ -107,12 +108,17 @@ final class StressHarness: NSObject {
     private var rowsRevision = -1
     private var pendingSignature: [String] = []
     private var edited: Set<String> = []
-    private var spammed: Set<ObjectIdentifier> = []
+    private var floods: [ObjectIdentifier: (session: TerminalSession, base: Int)] = [:]
     private var startTicks = 0
     private var startUpdates = 0
     private var lastTicks = 0
     private var lastTickAt: TimeInterval = 0
-    private var spamTickGap: TimeInterval = 0
+    private var lastCheckAt: TimeInterval = 0
+    private var coreGap: TimeInterval = 0
+    private var longestCoreGap: TimeInterval = 0
+    private var longestTickGap: TimeInterval = 0
+    private var maxFlowing = 0
+    private var coreGapNote = ""
     private var clickMonitor: Any?
     private var timelineClicks = 0
     private lazy var sender = UserSender(store: store)
@@ -348,9 +354,16 @@ final class StressHarness: NSObject {
     }
 
     private func spamTerminals() {
-        let sessions = store.panels.decks.values.flatMap { $0.groups.flatMap(\.sessions) }
-        for session in sessions where !spammed.contains(ObjectIdentifier(session)) {
-            spammed.insert(ObjectIdentifier(session))
+        let alive = { (session: TerminalSession) in session.status == .starting || session.status == .running }
+        let live = { [self] in floods.values.filter { alive($0.session) }.count }
+        var sessions = store.panels.decks.values.flatMap { $0.groups.flatMap(\.sessions) }.filter { alive($0) && floods[ObjectIdentifier($0)] == nil }
+        if store.panels.terminalOpen, let project = store.panels.project {
+            while live() + sessions.count < Self.floodCount, let session = store.panels.deck(for: project).newTerminal() {
+                sessions.append(session)
+            }
+        }
+        for session in sessions where live() < Self.floodCount {
+            floods[ObjectIdentifier(session)] = (session, session.appliedFrames)
             session.write(Data("while :; do seq -f 'stress line %g of a terminal flooding the core with frames' 1 200; sleep 0.01; done\r".utf8))
         }
     }
@@ -520,17 +533,27 @@ final class StressHarness: NSObject {
 
     private func checkCoreTicks() {
         let now = monitor.elapsed()
-        guard store.ticks == lastTicks else {
+        let since = lastCheckAt > 0 ? now - lastCheckAt : 0
+        lastCheckAt = now
+        let flowing = floods.values.filter { $0.session.status == .running && $0.session.appliedFrames - $0.base >= 20 }.count
+        maxFlowing = max(maxFlowing, flowing)
+        if flowing > 0, lastTickAt > 0 {
+            longestTickGap = max(longestTickGap, now - lastTickAt)
+        }
+        guard flowing > 0, store.ticks == lastTicks else {
             lastTicks = store.ticks
             lastTickAt = now
+            coreGap = 0
             return
         }
-        guard !spammed.isEmpty, lastTickAt > 0 else { return }
-        let gap = now - lastTickAt
-        spamTickGap = max(spamTickGap, gap)
-        if gap > 1 {
-            record("core stalled", "no core update applied for \(Int(gap * 1000)) ms while terminals were flooding, after \(monitor.context)")
-            lastTickAt = now
+        coreGap += min(since, 2 * monitor.interval)
+        if coreGap > longestCoreGap {
+            longestCoreGap = coreGap
+            coreGapNote = String(format: "at %.2f s with %d flooding after ", now, flowing) + monitor.context
+        }
+        if coreGap > 1 {
+            record("core stalled", "no core update for \(Int(coreGap * 1000)) ms while \(flowing) terminals were flooding, after \(monitor.context)")
+            coreGap = 0
         }
     }
 
@@ -538,6 +561,9 @@ final class StressHarness: NSObject {
         sender.check()
         guard monitor.recording else { return }
         checkCoreTicks()
+        if !floods.isEmpty {
+            spamTerminals()
+        }
         trackSends()
         checkPendings()
         checkRows()
@@ -749,7 +775,7 @@ final class StressHarness: NSObject {
         for stall in monitor.stalls.prefix(20) {
             print("  stall \(ms(stall.duration)) at \(String(format: "%.2f", stall.at)) s after \(stall.context)")
         }
-        print("core: \(store.ticks - startTicks) ticks applied \(store.appliedUpdates - startUpdates) updates; \(spammed.count) terminals flooding, longest gap between ticks while flooding \(ms(spamTickGap))")
+        print("core: \(store.ticks - startTicks) ticks applied \(store.appliedUpdates - startUpdates) updates; up to \(maxFlowing) terminals flooding, longest core gap \(ms(longestCoreGap)) \(coreGapNote), longest gap between ticks \(ms(longestTickGap))")
         let latencies = switchLatencies.sorted()
         if !latencies.isEmpty {
             let median = latencies[latencies.count / 2]
