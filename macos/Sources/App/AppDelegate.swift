@@ -30,6 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let filter = arguments.indices.contains(flag + 2) ? arguments[flag + 2] : nil
             exit(Snapshots.run(into: URL(fileURLWithPath: directory, isDirectory: true), matching: filter))
         }
+        if let flag = arguments.firstIndex(of: "+motion") {
+            let directory = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : NSTemporaryDirectory() + "local-studio-motion"
+            let filter = arguments.indices.contains(flag + 2) ? arguments[flag + 2] : nil
+            exit(MotionCheck.run(into: URL(fileURLWithPath: directory, isDirectory: true), matching: filter))
+        }
         SyntaxHighlighter.shared.warm()
         let stressFlag = arguments.firstIndex(of: "+stress")
         let keysFlag = arguments.contains("+keys")
