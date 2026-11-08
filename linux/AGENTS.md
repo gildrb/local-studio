@@ -10,9 +10,9 @@
 - Providers (Settings → Providers, `src/providers.rs`) go through the core's providers service: keys with `set_provider_key`, custom endpoints with discovery and add/update/remove/refresh, fleet engines with `use_local_engine`. The Local page (`src/dashboard.rs`) watches the selected machine with `watch_local_dashboard` while it is visible; machine management lives in Settings → Local (`src/fleet.rs`).
 - Client-only preferences (favorite editor, composer stash, sidebar width) live in `$XDG_CONFIG_HOME/local-studio/linux.ini` (`src/prefs.rs`); everything shared goes through core `Settings`, including custom themes (`Settings.custom_themes`, JSON).
 - Colors come from `src/colors.rs`: the default palette (dashboards) and the built-in `gildrb` theme (dark and light, follows the color scheme). CSS, code highlighting (`src/highlight.rs`), diff tags and the terminal palette all read the current `Colors`; add new colored surfaces there, not as literals.
-- Headless runs use isolated state and the real model (`anthropic/claude-haiku-5-5`, thinking `low`; root `AGENTS.md`): copy the credentials in, run, delete the `auth.json` copy:
+- Headless runs use isolated state and the real model (`anthropic/claude-haiku-5-5`, thinking `low`; root `AGENTS.md`): link `auth.json` from a logged-in agent dir on the same machine (never copy it), copy the rest, run, remove the link:
   ```sh
-  mkdir -p /tmp/X/home /tmp/X/agent && install -m 600 <creds>/{auth,models,settings}.json /tmp/X/agent/
+  mkdir -p /tmp/X/home /tmp/X/agent && ln -s "$(realpath <creds>/auth.json)" /tmp/X/agent/auth.json && install -m 600 <creds>/{models,settings}.json /tmp/X/agent/
   env HOME=/tmp/X/home LOCAL_STUDIO_DATA_DIR=/tmp/X/data EUKHE_CODING_AGENT_DIR=/tmp/X/agent \
     EUKHE_DAEMON_SOCKET=/tmp/X/d.sock EUKHE_DAEMON=<eukhe-daemon> \
     GDK_BACKEND=x11 GSK_RENDERER=cairo xvfb-run -a -s '-screen 0 1600x1000x24' dbus-run-session -- target/debug/local-studio --smoke
@@ -20,5 +20,6 @@
   ```
   - `--smoke`: adds a project, starts a supervised thread on the real model through the composer, approves its bash call, and requires the call's output and file (`smoke.txt`) plus the streamed reply in the timeline, then sends a follow-up (drawn at once as a local bubble, replaced by the core's user item, answered by the real model) and a send the core rejects (bubble removed, text back in the composer), then resolves an `@` mention, lists the project in the Files surface, runs a thread content search, types a command into a drawer terminal and waits for its output, and adds that output to the composer with Add to Chat. With `LS_SMOKE_PROVIDER=http://127.0.0.1:<port>/v1` (the core's `provider_stub` example started with the key `smoke-key`) it adds, discovers and removes a custom endpoint through the endpoint dialog. Then it checks Ctrl+T and vim `dw`/`dd`/`u` in the composer; prints `PASS linux smoke` and exits 0. Set `SHELL` to bash for it.
   - `--snapshot <dir> [name-filter]`: renders every fixture scene (`fixtures::scenes()`: `src/fixtures.rs`, `src/scenes*.rs`, `src/dashboard_scenes.rs`, `src/keyboard.rs`) offscreen to `<dir>/<scene>.png`, open popovers included; needs no daemon. Look at the PNGs after UI changes.
+  - `LOCAL_STUDIO_SNAPSHOT_LIVE=1` adds the `usage-live*` scenes (`src/usage_scenes.rs`): they start the core against the daemon on `$EUKHE_DAEMON_SOCKET`, load the real usage report from its saved sessions and render the Usage page (30 days tokens and cost, 24 hours, gildrb, limits; dark and light). Point the daemon's `EUKHE_CODING_AGENT_DIR` at a scratch copy of the sessions.
   - Stop the daemon afterwards from the repo root: `cargo run --example smoke -p local-studio-core -- --stop /tmp/X/d.sock`.
 - Never stop processes this app did not spawn.

@@ -16,8 +16,9 @@ pub struct Credentials {
 
 impl Drop for Credentials {
     fn drop(&mut self) {
-        if std::fs::remove_file(&self.auth).is_ok() {
-            println!("ok   copied credentials removed ({})", self.auth.display());
+        let linked = std::fs::symlink_metadata(&self.auth).is_ok_and(|meta| meta.file_type().is_symlink());
+        if linked && std::fs::remove_file(&self.auth).is_ok() {
+            println!("ok   credential link removed ({})", self.auth.display());
         }
     }
 }
@@ -27,8 +28,12 @@ pub fn install(agent_dir: &Path) -> anyhow::Result<Credentials> {
         format!("{SOURCE_ENV} must name an agent dir holding auth.json, models.json and settings.json for {PROVIDER}/{MODEL}")
     })?;
     std::fs::create_dir_all(agent_dir)?;
+    let auth = std::fs::canonicalize(source.join("auth.json"))
+        .with_context(|| format!("resolve {}", source.join("auth.json").display()))?;
     let credentials = Credentials { auth: agent_dir.join("auth.json") };
-    for name in ["auth.json", "models.json", "settings.json"] {
+    std::os::unix::fs::symlink(&auth, &credentials.auth)
+        .with_context(|| format!("link {} to {}", credentials.auth.display(), auth.display()))?;
+    for name in ["models.json", "settings.json"] {
         let data = std::fs::read(source.join(name)).with_context(|| format!("read {}", source.join(name).display()))?;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -38,7 +43,10 @@ pub fn install(agent_dir: &Path) -> anyhow::Result<Credentials> {
             .open(agent_dir.join(name))?;
         file.write_all(&data)?;
     }
-    println!("     real model {PROVIDER}/{MODEL} thinking {THINKING}, credentials copied from {}", source.display());
+    println!(
+        "     real model {PROVIDER}/{MODEL} thinking {THINKING}, auth.json linked to {} (refreshes write back there)",
+        auth.display()
+    );
     Ok(credentials)
 }
 

@@ -66,20 +66,6 @@ pub fn gigabytes(bytes: u64) -> String {
     format!("{:.0} GB", bytes as f64 / 1_000_000_000.0)
 }
 
-pub fn cost(usd: f64) -> String {
-    if usd >= 100.0 {
-        format!("${usd:.0}")
-    } else if usd >= 0.01 || usd <= 0.0 || !usd.is_finite() {
-        format!("${usd:.2}")
-    } else {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let places = ((-usd.log10()).ceil() as usize + 1).min(12);
-        let text = format!("{usd:.places$}");
-        let text = text.trim_end_matches('0');
-        format!("${text}")
-    }
-}
-
 pub fn access_label(mode: AccessMode) -> &'static str {
     match mode {
         AccessMode::Supervised => "Supervised",

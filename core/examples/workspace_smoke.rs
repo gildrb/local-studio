@@ -1259,22 +1259,62 @@ fn settings_providers_usage(harness: &mut Harness, project: &str) -> anyhow::Res
     harness.answer("usage report", &request)?;
     let (_, report) = harness.view.usage.last().cloned().context("usage")?;
     println!(
-        "     usage requests {} tokens {} (in {} out {}) cost {:.4} models {:?} days {:?} limits {:?}",
+        "     usage requests {} sessions {} tokens {} (in {} cached {} out {}) cost {:.4} models {:?} lifetime {} since {:?} busiest {:?} active {} limits {:?}",
         report.requests,
+        report.sessions,
         report.total_tokens,
         report.input_tokens,
+        report.cache_read_tokens,
         report.output_tokens,
         report.cost_usd,
         report.by_model,
-        report.daily.iter().map(|day| (&day.day, day.tokens)).collect::<Vec<_>>(),
+        report.lifetime.total,
+        report.lifetime.since_day,
+        report.lifetime.busiest_day,
+        report.lifetime.active_days,
         report.limits
     );
-    ensure!(report.requests >= 1 && !report.by_model.is_empty() && !report.daily.is_empty(), "usage covers the run");
+    ensure!(report.requests >= 1 && !report.by_model.is_empty() && report.series.len() == 24, "usage covers the run");
     real_model::check_usage(&report)?;
+    usage_consistent(&report)?;
 
     let request = harness.request();
     harness.studio.load_diff(request.clone(), project.clone(), DiffScope::LatestTurn { thread });
     harness.answer("latest-turn diff after a turn", &request)?;
+    Ok(())
+}
+
+fn usage_consistent(report: &UsageReport) -> anyhow::Result<()> {
+    let lifetime = &report.lifetime;
+    ensure!(lifetime.daily.len() == 378 && report.daily_cost_usd.len() == 378, "the per-day arrays cover 378 days");
+    ensure!(lifetime.read + lifetime.written == lifetime.total, "lifetime read plus written is the lifetime total");
+    ensure!(lifetime.daily.iter().sum::<u64>() == lifetime.total, "the per-day tokens sum to the lifetime total");
+    ensure!(
+        lifetime.total == report.total_tokens
+            && lifetime.read == report.input_tokens
+            && lifetime.written == report.output_tokens
+            && lifetime.last_week == lifetime.total,
+        "a fresh agent dir's lifetime equals its last 24 hours"
+    );
+    ensure!(
+        report.series.iter().map(|bucket| bucket.tokens).sum::<u64>() == report.total_tokens,
+        "the hourly series sums to the period total"
+    );
+    let daily_cost: f64 = report.daily_cost_usd.iter().sum();
+    ensure!(
+        (daily_cost - report.lifetime_cost_usd).abs() < 1e-9
+            && (report.lifetime_cost_usd - report.cost_usd).abs() < 1e-9,
+        "the per-day cost sums to the lifetime cost"
+    );
+    ensure!(
+        lifetime.since_day.is_some() && lifetime.busiest_day.is_some() && (1..=2).contains(&lifetime.active_days),
+        "the first session, busiest day and active days are known"
+    );
+    ensure!(
+        report.sessions >= 1 && report.cache_read_tokens <= report.input_tokens,
+        "sessions and cache reads are counted"
+    );
+    println!("ok   usage lifetime totals and per-day arrays agree");
     Ok(())
 }
 

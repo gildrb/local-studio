@@ -1,4 +1,3 @@
-import Charts
 import LocalStudioKit
 import SwiftUI
 
@@ -153,28 +152,14 @@ private struct LocalMachineTabs: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(controllers, id: \.url) { controller in
-                    let active = controller.url == selected
                     let state = MachineState(controller)
-                    Button { select(controller.url) } label: {
-                        HStack(spacing: 7) {
-                            MachineDot(state: state)
-                            Text(controller.name)
-                                .lineLimit(1)
-                        }
-                        .font(.system(size: 13, weight: active ? .medium : .regular))
-                        .foregroundStyle(active ? Theme.text : Theme.secondaryText)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 8)
-                        .overlay(alignment: .bottom) {
-                            if active {
-                                Rectangle().fill(Theme.text).frame(height: 2)
-                            }
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(controller.name), \(state.label)")
-                    .accessibilityAddTraits(active ? .isSelected : [])
+                    DashboardTab(
+                        title: controller.name,
+                        active: controller.url == selected,
+                        accessibility: "\(controller.name), \(state.label)",
+                        select: { select(controller.url) },
+                        leading: { MachineDot(state: state) }
+                    )
                 }
             }
         }
@@ -213,40 +198,6 @@ private struct LocalOfflineMachine: View {
     }
 }
 
-private struct LocalDashboardButtonStyle: ButtonStyle {
-    var bordered = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        LocalDashboardButtonBody(configuration: configuration, bordered: bordered)
-    }
-}
-
-private struct LocalDashboardButtonBody: View {
-    let configuration: ButtonStyleConfiguration
-    let bordered: Bool
-    @State private var hovering = false
-    @Environment(\.isEnabled) private var enabled
-
-    var body: some View {
-        configuration.label
-            .font(.system(size: 13, weight: .medium))
-            .foregroundStyle(enabled ? Theme.text : Theme.secondaryText)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .fill(configuration.isPressed || (hovering && enabled) ? Theme.hover : bordered ? Theme.card : .clear)
-            )
-            .overlay {
-                if bordered {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.hairline)
-                }
-            }
-            .contentShape(Rectangle())
-            .onHover { hovering = $0 }
-    }
-}
-
 private struct LocalMachineDashboard: View {
     let controller: LocalController
     let dashboard: LocalDashboard?
@@ -273,20 +224,26 @@ private struct LocalMachineDashboard: View {
                             .padding(.top, 14)
                     }
                     HStack(alignment: .top, spacing: 0) {
-                        decode.frame(width: column, alignment: .leading)
+                        DashboardHero(
+                            label: "Decode",
+                            value: dashboard?.decodeTps.map(LocalFormat.decimal),
+                            unit: "tok/s",
+                            hint: decodeHint
+                        )
+                        .frame(width: column, alignment: .leading)
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Decode, last 24 hours")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Theme.secondaryText)
-                            LocalDecodeSparkline(values: dashboard?.decodeSeries ?? [], color: Theme.primary)
+                            DashboardSparkline(values: decodeSeries, color: Theme.primary, label: decodeLabel)
                                 .frame(height: 76)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .padding(.top, 44)
-                    LocalFigureRow(column: column, figures: [firstToken, inFlight, kvCache])
+                    DashboardFigureRow(column: column, figures: [firstToken, inFlight, kvCache])
                         .padding(.top, 48)
-                    LocalFigureRow(column: column, figures: [gpuFigure, memoryFigure, powerFigure])
+                    DashboardFigureRow(column: column, figures: [gpuFigure, memoryFigure, powerFigure])
                         .padding(.top, 40)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -295,7 +252,7 @@ private struct LocalMachineDashboard: View {
                     .fill(Theme.hairline)
                     .frame(width: 1)
                     .padding(.horizontal, 44)
-                LocalTokenSummary(tokens: dashboard?.tokens)
+                TokenSummary(tokens: dashboard?.tokens, empty: "Counted from engine metrics as models serve requests.")
                     .frame(width: 244, alignment: .leading)
             }
             Rectangle()
@@ -303,7 +260,12 @@ private struct LocalMachineDashboard: View {
                 .frame(height: 1)
                 .padding(.top, 36)
                 .padding(.bottom, 44)
-            LocalTokenHeatmap(tokens: dashboard?.tokens)
+            DailyHeatmap(
+                values: dashboard.map { $0.tokens.daily.map(Double.init) },
+                lastDay: dashboard?.tokens.lastDay,
+                label: "Tokens per day, last year",
+                format: LocalFormat.tokens
+            )
         }
         .sheet(isPresented: $switching) {
             LocalSwitchModelSheet(controller: controller, pages: pages)
@@ -345,14 +307,14 @@ private struct LocalMachineDashboard: View {
             Button { switching = true } label: {
                 Label(loading ? "Switching…" : endpoint == nil ? "Load model…" : "Switch model…", systemImage: "arrow.triangle.2.circlepath")
             }
-            .buttonStyle(LocalDashboardButtonStyle(bordered: true))
+            .buttonStyle(DashboardButtonStyle(bordered: true))
             .disabled(loading)
             if let endpoint, let model {
                 let unloading = pages.isPending(.unload(target, endpoint.port))
                 Button { stopping = true } label: {
                     Label(unloading ? "Stopping…" : "Stop model…", systemImage: "stop")
                 }
-                .buttonStyle(LocalDashboardButtonStyle())
+                .buttonStyle(DashboardButtonStyle())
                 .disabled(unloading)
                 .confirmationDialog("Stop \(model)?", isPresented: $stopping) {
                     Button("Stop model", role: .destructive) {
@@ -372,23 +334,10 @@ private struct LocalMachineDashboard: View {
         return "Its \(running) request\(running == 1 ? "" : "s") in flight end\(running == 1 ? "s" : "") now, and \(idle)"
     }
 
-    private var decode: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Decode")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.secondaryText)
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(dashboard?.decodeTps.map(LocalFormat.decimal) ?? "—")
-                    .font(.system(size: 44, weight: .semibold))
-                    .monospacedDigit()
-                Text("tok/s")
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            Text(decodeHint)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.secondaryText)
-        }
+    private var decodeSeries: [Double] { dashboard?.decodeSeries ?? [] }
+
+    private var decodeLabel: String {
+        "Decode, last 24 hours, peak \(LocalFormat.decimal(decodeSeries.max() ?? 0)) tokens per second"
     }
 
     private var decodeHint: String {
@@ -398,8 +347,8 @@ private struct LocalMachineDashboard: View {
         return dashboard.engines.isEmpty ? "No engine running" : "The engine reports no metrics"
     }
 
-    private var firstToken: LocalFigure {
-        LocalFigure(
+    private var firstToken: DashboardFigure {
+        DashboardFigure(
             label: "First token",
             value: dashboard?.firstTokenMs.map(LocalFormat.whole),
             unit: "ms",
@@ -407,11 +356,11 @@ private struct LocalMachineDashboard: View {
         )
     }
 
-    private var inFlight: LocalFigure {
+    private var inFlight: DashboardFigure {
         let running = dashboard?.running
         let waiting = dashboard?.waiting.flatMap { $0 > 0 ? "\($0) waiting" : nil }
         let peak = dashboard?.runningPeak.map { "peak \($0)" }
-        return LocalFigure(
+        return DashboardFigure(
             label: "In flight",
             value: running.map { "\($0)" },
             unit: running == 1 ? "request" : "requests",
@@ -419,8 +368,8 @@ private struct LocalMachineDashboard: View {
         )
     }
 
-    private var kvCache: LocalFigure {
-        LocalFigure(
+    private var kvCache: DashboardFigure {
+        DashboardFigure(
             label: "KV cache",
             value: dashboard?.kvPercent.map(LocalFormat.whole),
             unit: "% used",
@@ -428,10 +377,10 @@ private struct LocalMachineDashboard: View {
         )
     }
 
-    private var gpuFigure: LocalFigure {
-        guard let dashboard else { return LocalFigure(label: "GPUs", value: nil, unit: "cards") }
+    private var gpuFigure: DashboardFigure {
+        guard let dashboard else { return DashboardFigure(label: "GPUs", value: nil, unit: "cards") }
         let count = dashboard.gpus.count
-        return LocalFigure(
+        return DashboardFigure(
             label: "GPUs",
             value: "\(count)",
             unit: count == 1 ? "card" : "cards",
@@ -439,31 +388,27 @@ private struct LocalMachineDashboard: View {
         )
     }
 
-    private var memoryFigure: LocalFigure {
-        guard let dashboard, dashboard.memoryTotalBytes > 0 else { return LocalFigure(label: "Memory", value: nil, unit: "GB") }
+    private var memoryFigure: DashboardFigure {
+        guard let dashboard, dashboard.memoryTotalBytes > 0 else { return DashboardFigure(label: "Memory", value: nil, unit: "GB") }
         let used = LocalFormat.gigabytes(dashboard.memoryUsedBytes)
         let total = LocalFormat.gigabytes(dashboard.memoryTotalBytes)
         let free = LocalFormat.gigabytes(dashboard.memoryTotalBytes - min(dashboard.memoryUsedBytes, dashboard.memoryTotalBytes))
-        return LocalFigure(label: "Memory", value: used, unit: "of \(total) GB", hint: "\(free) GB free")
+        return DashboardFigure(label: "Memory", value: used, unit: "of \(total) GB", hint: "\(free) GB free")
     }
 
-    private var powerFigure: LocalFigure {
-        guard let dashboard, let watts = dashboard.powerWatts else { return LocalFigure(label: "Power", value: nil, unit: "W") }
+    private var powerFigure: DashboardFigure {
+        guard let dashboard, let watts = dashboard.powerWatts else { return DashboardFigure(label: "Power", value: nil, unit: "W") }
         let limit = dashboard.powerLimitWatts.map { "limit \(LocalFormat.whole($0)) W" }
         guard let flag = LocalGpuFlag.worst(dashboard.gpus) else {
-            return LocalFigure(label: "Power", value: LocalFormat.whole(watts), unit: "W", hint: limit)
+            return DashboardFigure(label: "Power", value: LocalFormat.whole(watts), unit: "W", hint: limit)
         }
-        return LocalFigure(label: "Power", value: LocalFormat.whole(watts), unit: "W", hint: flag.text, tone: flag.tone)
+        return DashboardFigure(label: "Power", value: LocalFormat.whole(watts), unit: "W", hint: flag.text, tone: flag.tone)
     }
-}
-
-enum LocalFigureTone {
-    case plain, warning, danger
 }
 
 struct LocalGpuFlag {
     let text: String
-    let tone: LocalFigureTone
+    let tone: DashboardTone
     let rank: Int
 
     static func worst(_ gpus: [LocalGpuTelemetry]) -> LocalGpuFlag? {
@@ -483,91 +428,6 @@ struct LocalGpuFlag {
         guard let worst = flags.max(by: { $0.rank < $1.rank }) else { return nil }
         let others = flags.count - 1
         return others > 0 ? LocalGpuFlag(text: "\(worst.text), \(others) more", tone: worst.tone, rank: worst.rank) : worst
-    }
-}
-
-struct LocalFigure {
-    let label: String
-    let value: String?
-    let unit: String
-    var hint: String?
-    var tone: LocalFigureTone = .plain
-}
-
-private struct LocalFigureRow: View {
-    let column: CGFloat
-    let figures: [LocalFigure]
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            ForEach(figures, id: \.label) { figure in
-                LocalFigureView(figure: figure)
-                    .frame(width: column, alignment: .leading)
-            }
-            Spacer(minLength: 0)
-        }
-    }
-}
-
-private struct LocalFigureView: View {
-    let figure: LocalFigure
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(figure.label)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.secondaryText)
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(figure.value ?? "—")
-                    .font(.system(size: 22, weight: .semibold))
-                    .monospacedDigit()
-                Text(figure.unit)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Theme.secondaryText)
-            }
-            hint
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    @ViewBuilder private var hint: some View {
-        switch figure.tone {
-        case .plain:
-            Text(figure.hint ?? " ")
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.secondaryText)
-                .lineLimit(1)
-        case .warning, .danger:
-            Label(figure.hint ?? "", systemImage: "exclamationmark.triangle")
-                .font(.system(size: 13))
-                .foregroundStyle(figure.tone == .danger ? Theme.danger : Theme.warning)
-                .lineLimit(1)
-        }
-    }
-}
-
-struct LocalDecodeSparkline: View {
-    let values: [Double]
-    let color: Color
-
-    var body: some View {
-        let peak = values.max() ?? 0
-        Chart(Array(values.enumerated()), id: \.offset) { point in
-            AreaMark(x: .value("Time", point.offset), y: .value("tok/s", point.element))
-                .interpolationMethod(.catmullRom)
-                .foregroundStyle(.linearGradient(colors: [color.opacity(0.22), color.opacity(0)], startPoint: .top, endPoint: .bottom))
-            LineMark(x: .value("Time", point.offset), y: .value("tok/s", point.element))
-                .interpolationMethod(.catmullRom)
-                .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round))
-                .foregroundStyle(color)
-        }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
-        .chartLegend(.hidden)
-        .chartXScale(domain: 0...max(1, values.count - 1))
-        .chartYScale(domain: 0...max(1, peak * 1.05))
-        .accessibilityLabel("Decode, last 24 hours, peak \(LocalFormat.decimal(peak)) tokens per second")
-        .transaction { $0.animation = nil }
     }
 }
 
@@ -638,7 +498,15 @@ enum LocalFormat {
     }()
 
     static func compact(_ value: UInt64) -> String {
-        Double(value).formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+        compact(Double(value))
+    }
+
+    static func compact(_ value: Double) -> String {
+        value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+    }
+
+    static func tokens(_ value: Double) -> String {
+        "\(compact(value)) token\(value == 1 ? "" : "s")"
     }
 
     static func decimal(_ value: Double) -> String {

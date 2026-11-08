@@ -152,6 +152,39 @@ pub fn parse_day(day: &str) -> Option<i64> {
     ((1..=12).contains(&month) && (1..=31).contains(&date)).then(|| days_from_civil(year, month, date))
 }
 
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+pub fn compact_f64(value: f64) -> String {
+    compact(if value.is_finite() { value.max(0.0).round() as u64 } else { 0 })
+}
+
+pub fn tokens(value: f64) -> String {
+    let text = compact_f64(value);
+    format!("{text} token{}", if text == "1" { "" } else { "s" })
+}
+
+pub fn plural(count: u64, noun: &str) -> String {
+    format!("{} {noun}{}", self::count(count), if count == 1 { "" } else { "s" })
+}
+
+pub fn cost(usd: f64) -> String {
+    let usd = if usd.is_finite() { usd } else { 0.0 };
+    let number = if usd >= 100.0 {
+        fixed(usd, 0)
+    } else if usd >= 0.01 || usd <= 0.0 {
+        fixed(usd, 2)
+    } else {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let places = ((-usd.log10()).ceil() as usize + 1).min(12);
+        let text = fixed(usd, places);
+        text.trim_end_matches('0').to_string()
+    };
+    if numbers().decimal == '.' {
+        format!("${number}")
+    } else {
+        format!("{number}\u{a0}$")
+    }
+}
+
 fn days_from_civil(year: i64, month: i64, date: i64) -> i64 {
     let year = if month <= 2 { year - 1 } else { year };
     let era = year.div_euclid(400);

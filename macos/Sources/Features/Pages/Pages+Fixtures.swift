@@ -202,19 +202,14 @@ enum PagesFixtures {
     }
 
     static var usage: UsageReport {
-        let daily = days(30, seed: [820_000, 1_400_000, 300_000, 2_100_000, 0, 950_000, 1_750_000])
-        let total = daily.reduce(0) { $0 + $1.tokens }
-        let cost = daily.reduce(0) { $0 + $1.costUsd }
+        let history = TokenHistory(
+            sinceDay: nil, total: 0, read: 0, written: 0, lastWeek: 0, busiestDay: nil, busiestTokens: 0, activeDays: 0, trackedDays: 0,
+            daily: Array(repeating: 0, count: 378), lastDay: "2026-11-08"
+        )
         return UsageReport(
-            period: .month, totalTokens: total, inputTokens: total * 7 / 10, outputTokens: total * 3 / 10, costUsd: cost,
-            requests: 184,
-            byModel: [
-                UsageByModel(provider: "anthropic", model: "claude-sonnet-4-5", tokens: total * 6 / 10, costUsd: cost * 0.55, requests: 112),
-                UsageByModel(provider: "openai-codex", model: "gpt-5-codex", tokens: total * 3 / 10, costUsd: cost * 0.4, requests: 58),
-                UsageByModel(provider: "local", model: "qwen3-coder-30b-a3b", tokens: total / 10, costUsd: cost * 0.05, requests: 14),
-            ],
-            daily: daily,
-            limits: []
+            period: .month, totalTokens: 0, inputTokens: 0, cacheReadTokens: 0, outputTokens: 0, costUsd: 0, requests: 0, sessions: 0,
+            byModel: [], series: [], seriesStepMs: 86_400_000, lifetime: history, lifetimeCostUsd: 0,
+            dailyCostUsd: Array(repeating: 0, count: 378), limits: []
         )
     }
 
