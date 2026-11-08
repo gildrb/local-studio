@@ -170,7 +170,7 @@ final class KeysHarness {
         case "composer.effort":
             let levels = store.conversation.thinkingLevels(settings: store.pages.settings)
             return levels.count > 1 ? .run("thread open") : .disabled("the model has \(levels.count) thinking level(s)")
-        case "composer.workspace", "composer.branch", "composer.previousWorktree", "composer.host":
+        case "composer.workspace", "composer.branch", "composer.previousWorktree":
             store.newThread(in: project)
             try await Task.sleep(for: .milliseconds(120))
             return .run("draft in a git project")
