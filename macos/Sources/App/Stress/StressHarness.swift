@@ -803,9 +803,11 @@ final class StressHarness: NSObject {
         var failures: [String] = []
         if !violationCounts.isEmpty { failures.append("\(violationCounts.values.reduce(0, +)) invariant violations") }
         if !monitor.stalls.isEmpty { failures.append("\(monitor.stalls.count) main-thread stalls") }
+        if monitor.frames.isEmpty { failures.append("no frames measured (the display link never ticked; is the display asleep?)") }
         if p99 > interval * 2 + 0.0005 { failures.append("p99 frame time \(ms(p99)) above 2 refresh intervals") }
         if failures.isEmpty {
             print("PASS macOS stress")
+            expectClose = true
             NSApp.terminate(nil)
         } else {
             print("FAIL macOS stress: " + failures.joined(separator: ", "))
