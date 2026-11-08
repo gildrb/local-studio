@@ -109,6 +109,8 @@ final class StressHarness: NSObject {
     private var lastTicks = 0
     private var lastTickAt: TimeInterval = 0
     private var spamTickGap: TimeInterval = 0
+    private var clickMonitor: Any?
+    private var timelineClicks = 0
 
     init(store: StudioStore, duration: TimeInterval, seed: UInt64) {
         self.store = store
@@ -135,6 +137,10 @@ final class StressHarness: NSObject {
             print("stress window \(Int(window.frame.width))×\(Int(window.frame.height)) key=\(window.isKeyWindow) active=\(NSApp.isActive) visible=\(window.occlusionState.contains(.visible))")
             monitor.start(window: window)
             monitor.onFrame = { [weak self] in self?.check() }
+            clickMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
+                self?.checkClick(event)
+                return event
+            }
             try await Task.sleep(for: .milliseconds(300))
             monitor.recording = true
             startTicks = store.ticks
@@ -152,6 +158,7 @@ final class StressHarness: NSObject {
                 KeyDriver.release(in: window)
             }
             monitor.stop()
+            clickMonitor.map(NSEvent.removeMonitor)
             finish()
         } catch {
             print("FAIL macOS stress: \(error)")
@@ -219,7 +226,7 @@ final class StressHarness: NSObject {
         let before = store.conversation.selectedID
         KeyDriver.press(chord, in: window, hold: hold)
         if ProcessInfo.processInfo.environment["STRESS_TRACE"] != nil {
-            print("press \(spec) \(before ?? "nil") -> \(store.conversation.selectedID ?? "nil") key=\(window.isKeyWindow) responder=\(type(of: window.firstResponder))")
+            print("press \(spec) \(before ?? "nil") -> \(store.conversation.selectedID ?? "nil") key=\(window.isKeyWindow) responder=\(window.firstResponder.map { "\(type(of: $0))" } ?? "nil")")
         }
     }
 
@@ -331,6 +338,38 @@ final class StressHarness: NSObject {
         KeyDriver.click(at: NSPoint(x: x, y: height - y), in: window)
     }
 
+    private func checkClick(_ event: NSEvent) {
+        guard monitor.recording, let window = event.window, window === store.mainWindow, store.shell.route == .thread,
+              let root = window.contentView?.superview, let height = window.contentView?.bounds.height,
+              let frame = store.shell.keys.frames[.timeline] else { return }
+        let location = CGPoint(x: event.locationInWindow.x, y: height - event.locationInWindow.y)
+        guard frame.contains(location), let hit = root.hitTest(event.locationInWindow) else { return }
+        let chain = sequence(first: hit, next: \.superview)
+        guard let timeline = chain.compactMap({ $0 as? NSScrollView }).last else { return }
+        timelineClicks += 1
+        let focused = store.conversation.selectedID ?? "draft"
+        if Self.opacity(of: hit) < 0.01 {
+            record("hidden timeline click", "a click landed in a hidden timeline while \(focused) is focused, after \(monitor.context)")
+        }
+        let bounds = timeline.convert(timeline.bounds, to: nil)
+        var visible = 0
+        func count(_ view: NSView) {
+            if let scroll = view as? NSScrollView {
+                if scroll.convert(scroll.bounds, to: nil) == bounds, Self.opacity(of: scroll) >= 0.01 { visible += 1 }
+                return
+            }
+            view.subviews.forEach(count)
+        }
+        count(root)
+        if visible != 1 {
+            record("timeline click target", "a click on the timeline found \(visible) visible timelines while \(focused) is focused, after \(monitor.context)")
+        }
+    }
+
+    private static func opacity(of view: NSView) -> Float {
+        sequence(first: view, next: \.superview).reduce(1) { $0 * Float($1.alphaValue) * ($1.layer?.opacity ?? 1) * ($1.isHidden ? 0 : 1) }
+    }
+
     private func toggleSettings(_ window: NSWindow) async throws {
         monitor.context = "Settings window"
         let before = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
@@ -375,6 +414,10 @@ final class StressHarness: NSObject {
             text = "hello \(created)"
         }
         let project = store.inbox.currentProject
+        if store.conversation.selectedID == nil {
+            store.conversation.composer(project: project).text = ""
+        }
+        let responder = window.firstResponder.map { "\(type(of: $0))" } ?? "nil"
         monitor.context = "type"
         for character in text {
             KeyDriver.type(String(character), in: window)
@@ -382,7 +425,10 @@ final class StressHarness: NSObject {
         }
         let typed = store.conversation.selectedID == nil ? store.conversation.composer(project: project).text : ""
         if typed != text {
-            record("typing", "⌘T then typing “\(text)” left the draft composer with “\(typed)”")
+            let after = window.firstResponder.map { "\(type(of: $0))" } ?? "nil"
+            let focused = store.conversation.selectedID ?? "draft"
+            let terminal = store.panels.terminalOpen
+            record("typing", "⌘T then typing “\(text)” left the draft composer with “\(typed)” (responder \(responder) → \(after), focused \(focused), region \(store.shell.region), terminal \(terminal), composer there “\(store.conversation.composer(project: project).text)”)")
             store.conversation.newThread.existingWorktree = nil
             return
         }
@@ -468,7 +514,12 @@ final class StressHarness: NSObject {
             let title = start.info.title.isEmpty ? "Untitled thread" : start.info.title
             streak("pending header", header?.title != title, "pending header shows “\(header?.title ?? "")”, expected “\(title)”")
         }
-        guard let thread else { return }
+        guard let thread else {
+            if let pending {
+                streak("stale pending timeline", probe.timeline?.pending != pending, "timeline shows \(probe.timeline?.thread ?? probe.timeline?.pending ?? "nothing") while pending \(pending) is focused")
+            }
+            return
+        }
         if let header, header.thread == thread {
             checkHeader(header, thread: thread)
         }
@@ -568,7 +619,7 @@ final class StressHarness: NSObject {
             return
         }
         if abs(frame.maxY - base) > 0.5 {
-            record("composer moved", "composer bottom at \(frame.maxY) for \(thread), expected \(base)")
+            record("composer moved", "composer bottom at \(frame.maxY) for \(thread), expected \(base), after \(monitor.context)")
         }
     }
 
@@ -578,7 +629,7 @@ final class StressHarness: NSObject {
         }
         guard scrolled.contains(thread) else {
             if scroll.distance > 2 {
-                record("not at bottom", "\(thread) shown \(Int(scroll.distance)) pt above the end")
+                record("not at bottom", "\(thread) shown \(Int(scroll.distance)) pt above the end (follows end \(store.conversation.followsEnd)), after \(monitor.context)")
             }
             return
         }
@@ -635,6 +686,7 @@ final class StressHarness: NSObject {
         print("pending starts: " + pendingOutcomes.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", "))
         print("actions: " + Action.allCases.compactMap { action in actions[action].map { "\(action.rawValue) \($0)" } }.joined(separator: ", "))
         print("input events: \(KeyDriver.native) through NSApp.sendEvent (window key), \(KeyDriver.emulated) through the window, views and monitors (app inactive)")
+        print("clicks hit-tested in the timeline area: \(timelineClicks)")
         print("invariant violations: \(violationCounts.values.reduce(0, +))")
         for (kind, count) in violationCounts.sorted(by: { $0.key < $1.key }) {
             print("  \(kind): \(count)")
