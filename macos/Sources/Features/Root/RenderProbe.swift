@@ -56,8 +56,10 @@ final class RenderProbe {
     var drawn: [DrawnElapsed]?
     private(set) var bubbles: [String: [UUID: CGRect]] = [:]
     private(set) var dispatched: [String?] = []
+    private(set) var dispatches = 0
 
     func ran(_ command: String?) {
+        dispatches += 1
         dispatched.append(command)
         if dispatched.count > 64 {
             dispatched.removeFirst(dispatched.count - 64)

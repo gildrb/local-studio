@@ -70,10 +70,11 @@ final class KeysHarness {
                 result: live ? "live, not invoked (\(reason))" : "DEAD: resolves to \(resolved ?? "nothing") (\(reason))", passed: live
             )
         case .run(let context), .disabled(let context):
-            let before = store.shell.probe.dispatched.count
+            let before = store.shell.probe.dispatches
             KeyDriver.press(chord, in: window)
             try await Task.sleep(for: .milliseconds(120))
-            let ran = store.shell.probe.dispatched.dropFirst(before).compactMap(\.self)
+            let probe = store.shell.probe
+            let ran = probe.dispatched.suffix(min(probe.dispatches - before, probe.dispatched.count)).compactMap(\.self)
             if ran.contains(binding.command) {
                 outcome = Outcome(command: binding.command, chord: display, when: when, result: "ran (\(context))", passed: true)
             } else if case .disabled = plan, resolved == nil || resolved != binding.command {
