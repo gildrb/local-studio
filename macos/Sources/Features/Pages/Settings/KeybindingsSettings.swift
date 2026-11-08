@@ -229,6 +229,18 @@ enum ShortcutFormat {
         return (parts + [key]).joined(separator: "+")
     }
 
+    static func recordShifted(_ event: NSEvent) -> String? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        guard flags.contains(.shift), keyCodes[event.keyCode] == nil,
+              let shifted = event.charactersIgnoringModifiers, shifted.count == 1, let character = shifted.first,
+              !character.isLetter, !character.isWhitespace, shifted != event.characters(byApplyingModifiers: []) else { return nil }
+        var parts: [String] = []
+        if flags.contains(.command) { parts.append("cmd") }
+        if flags.contains(.control) { parts.append("ctrl") }
+        if flags.contains(.option) { parts.append("option") }
+        return (parts + [shifted]).joined(separator: "+")
+    }
+
     static func keyboardShortcut(_ shortcut: String?) -> KeyboardShortcut? {
         guard let shortcut, !shortcut.isEmpty else { return nil }
         let (modifiers, key) = parse(shortcut)
