@@ -26,7 +26,7 @@ final class UserSender {
 
     init(store: StudioStore) {
         self.store = store
-        turnLimit = StressSeed.realModel ? 150 : 45
+        turnLimit = 150
         store.shell.probe.drawn = []
     }
 
@@ -81,7 +81,7 @@ final class UserSender {
         if try await !wait(2, { Screen.composer(in: window)?.string.isEmpty == true }) {
             record("composer kept text", "after Return the composer still shows “\(Screen.composer(in: window)?.string ?? "")”")
         }
-        if try await !wait(StressSeed.realModel ? 10 : 5, { Screen.bubbleShown(text, in: window, probe: store.shell.probe) }) {
+        if try await !wait(10, { Screen.bubbleShown(text, in: window, probe: store.shell.probe) }) {
             record("bubble missing", "after sending “\(text)” no user message with that text is on screen in the timeline (\(Screen.describeBubble(text, in: window, probe: store.shell.probe)))")
         } else {
             let latency = Date.now.timeIntervalSince(turns[index].sentAt)

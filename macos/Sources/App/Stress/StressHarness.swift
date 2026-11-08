@@ -454,7 +454,7 @@ final class StressHarness: NSObject {
             text = "doomed \(self.failing)"
             store.conversation.newThread.existingWorktree = "/nonexistent/local-studio-stress-\(self.failing)"
         } else {
-            text = StressSeed.realModel ? StressSeed.realPrompt(StressSeed.seedSends + created + followUps) : "hello \(created + 1)"
+            text = StressSeed.realPrompt(StressSeed.seedSends + created + followUps)
             created += 1
         }
         guard let index = try await sender.send(text, in: window, to: nil, failing: failing) else {
@@ -468,7 +468,7 @@ final class StressHarness: NSObject {
     }
 
     private var promptBudgetLeft: Bool {
-        !StressSeed.realModel || StressSeed.seedSends + created + followUps < StressSeed.realSendLimit
+        StressSeed.seedSends + created + followUps < StressSeed.realSendLimit
     }
 
     private func followUp(in window: NSWindow) async throws {
@@ -481,7 +481,7 @@ final class StressHarness: NSObject {
                 return record("⌘L", "⌘L did not focus the composer of \(thread) (responder \(Screen.responder(in: window)), last commands \(store.shell.probe.dispatched.suffix(3).map { $0 ?? "nil" }))")
             }
         }
-        let text = StressSeed.realModel ? StressSeed.realPrompt(StressSeed.seedSends + created + followUps) : "follow-up \(followUps + 1)"
+        let text = StressSeed.realPrompt(StressSeed.seedSends + created + followUps)
         followUps += 1
         _ = try await sender.send(text, in: window, to: thread)
         try await Task.sleep(for: .milliseconds(random.int(40)))
@@ -767,7 +767,7 @@ final class StressHarness: NSObject {
         let ms = { (value: TimeInterval) in String(format: "%.1f ms", value * 1000) }
         let p99 = monitor.percentile(0.99)
         print("stress \(Int(duration)) s, \(monitor.frames.count) frames at \(ms(interval)) refresh")
-        print("model: " + (StressSeed.realModel ? "anthropic/claude-haiku-5-5 thinking low, \(StressSeed.seedSends + created) real prompts" : "faux"))
+        print("model: anthropic/claude-haiku-5-5 thinking low, \(StressSeed.seedSends + created + followUps) real prompts")
         print("frame time p50 \(ms(monitor.percentile(0.5))) p95 \(ms(monitor.percentile(0.95))) p99 \(ms(p99)) max \(ms(monitor.frames.max() ?? 0))")
         let worst = monitor.hitches.max { $0.duration < $1.duration }
         print("hitches (>1.5× refresh): \(monitor.hitches.count)" + (worst.map { ", worst \(ms($0.duration)) at \(String(format: "%.2f", $0.at)) s after \($0.context)" } ?? ""))
