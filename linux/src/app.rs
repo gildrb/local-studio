@@ -753,7 +753,10 @@ impl App {
             let forced = self.force_steer.take();
             let steer = busy && (forced || state.settings.follow_up_behavior == FollowUpBehavior::Steer);
             drop(state);
-            self.core.run(|studio| studio.send(thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue }));
+            let request = self.core.request();
+            self.core.run(|studio| {
+                studio.send(request, thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue })
+            });
             return;
         }
         state.drafts += 1;

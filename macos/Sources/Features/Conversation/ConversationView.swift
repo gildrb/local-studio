@@ -466,18 +466,25 @@ private struct TimelineStack: View, Equatable {
 
     var body: some View {
         let conversation = store.conversation
-        LazyVStack(alignment: .leading, spacing: 22) {
-            if current {
-                LoadingPlaceholder(conversation: conversation)
+        VStack(alignment: .leading, spacing: 22) {
+            LazyVStack(alignment: .leading, spacing: 22) {
+                if current {
+                    LoadingPlaceholder(conversation: conversation)
+                }
+                ForEach(current ? conversation.rows : conversation.cachedRows(thread)) { row in
+                    TimelineRowView(row: row, store: store)
+                        .equatable()
+                        .keyboardFocusRing(current && store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
+                }
             }
-            ForEach(current ? conversation.rows : conversation.cachedRows(thread)) { row in
-                TimelineRowView(row: row, store: store)
-                    .equatable()
-                    .keyboardFocusRing(current && store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
+            .scrollTargetLayout()
+            if current {
+                ForEach(conversation.sendingMessages) { message in
+                    OutgoingBubble(message: message, store: store)
+                }
             }
             TimelineFooter(store: store, live: current)
         }
-        .scrollTargetLayout()
         .environment(\.timelineLive, current)
         .padding(.horizontal, 20)
         .padding(.top, 24)
@@ -582,6 +589,9 @@ private struct TimelineFooter: View {
                 }
                 ForEach(conversation.queued, id: \.id) { message in
                     QueuedBubble(message: message, store: store)
+                }
+                ForEach(conversation.sendingQueued) { message in
+                    QueuedBubble(message: QueuedMessage(id: message.id, text: message.text, steering: message.shape.steering, sending: true), store: store)
                 }
             }
         }

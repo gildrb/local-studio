@@ -39,6 +39,8 @@ final class ConversationStore {
     @ObservationIgnored private var drafts: [String: ComposerDraft] = [:]
     @ObservationIgnored private(set) var commandsRequest: String?
     @ObservationIgnored private var sentPrompts: [String] = []
+    private(set) var outgoing: [String: [OutgoingMessage]] = [:]
+    @ObservationIgnored var onSendFailure: ((String) -> Void)?
 
     init(core: CoreHandle, requests: RequestCenter) {
         self.core = core
@@ -51,6 +53,14 @@ final class ConversationStore {
 
     var busy: Bool {
         info?.busy == true
+    }
+
+    var sendingMessages: [OutgoingMessage] {
+        thread.flatMap { outgoing[$0] }?.filter { !$0.queued } ?? []
+    }
+
+    var sendingQueued: [OutgoingMessage] {
+        thread.flatMap { outgoing[$0] }?.filter(\.queued) ?? []
     }
 
     private(set) var worktreeSetup: [String: (stages: [SetupStage], done: Bool, error: String?)] = [:]
@@ -295,6 +305,7 @@ final class ConversationStore {
             self.loading = loading
         }
         keepTimeline(thread)
+        settleOutgoing()
     }
 
     func cachedRows(_ thread: String) -> [TimelineRow] {
@@ -359,7 +370,7 @@ final class ConversationStore {
         seeded.insert(thread)
         transcripts[thread] = CachedTranscript(
             entries: start.entries, rows: TimelineLayout.rows(for: start.entries, expanded: []), anchors: [], expandedFolds: [],
-            approvals: [], queued: start.queued, scroll: ThreadScroll()
+            approvals: [], queued: [], scroll: ThreadScroll()
         )
         recency.removeAll { $0 == thread }
         recency.insert(thread, at: 0)
@@ -367,8 +378,10 @@ final class ConversationStore {
             drafts[thread] = composer
         }
         for message in start.queued {
-            let prompt = PromptDraft(text: message.text, images: [], files: [])
-            core.run { $0.send(thread: thread, prompt: prompt, delivery: .queue) }
+            let restore = StashedPrompt(text: message.text, files: [], contexts: [])
+            deliver(PromptDraft(text: message.text, images: [], files: []), to: thread, delivery: .queue, shown: OutgoingShape(
+                text: message.text, images: [], restore: restore, queued: true, steering: false
+            ))
         }
         pendingsChanged?()
         return focusedPending == draft
@@ -428,6 +441,7 @@ final class ConversationStore {
                 entry.item = item
             }
         }
+        settleOutgoing()
         return nil
     }
 
@@ -459,6 +473,7 @@ final class ConversationStore {
     func setQueue(thread: String, queued: [QueuedMessage]) {
         guard thread == self.thread, self.queued != queued else { return }
         self.queued = queued
+        settleOutgoing()
     }
 
     func setComposerText(thread: String, text: String) {
@@ -798,18 +813,97 @@ final class ConversationStore {
             launch(start)
             return
         }
-        core.run { $0.send(thread: thread, prompt: prompt, delivery: busy ? delivery : .default) }
+        let steering = busy && (delivery == .steer || (delivery == .default && settings?.followUpBehavior == .steer))
+        let shown = OutgoingShape(text: text, images: images, restore: snapshot, queued: busy, steering: steering)
+        deliver(prompt, to: thread, delivery: busy ? delivery : .default, shown: shown)
+    }
+
+    private func deliver(_ prompt: PromptDraft, to thread: String, delivery: Delivery, shown: OutgoingShape) {
+        let ahead = outgoing[thread] ?? []
+        let (same, all) = sentCounts(thread, text: shown.text)
+        var request = ""
+        request = requests.issue { [weak self] outcome in
+            guard case .failed(let message) = outcome else { return }
+            self?.restoreFailedSend(request, thread: thread, message: message)
+        }
+        let message = OutgoingMessage(
+            id: request, shape: shown, thumbnails: Self.thumbnails(shown.images), createdAt: Int64(Date.now.timeIntervalSince1970 * 1000),
+            sameBefore: same + ahead.filter { $0.text == shown.text }.count, allBefore: all + ahead.count
+        )
+        outgoing[thread, default: []].append(message)
+        let id = request
+        core.run { $0.send(request: id, thread: thread, prompt: prompt, delivery: delivery) }
+    }
+
+    private func sentCounts(_ thread: String, text: String) -> (same: Int, all: Int) {
+        let current = thread == self.thread
+        let cached = current ? nil : transcripts[thread]
+        var same = 0
+        var all = 0
+        for entry in current ? entries : cached?.entries ?? [] {
+            guard case .user(let user, _, _, _) = entry.item.kind else { continue }
+            all += 1
+            same += user == text ? 1 : 0
+        }
+        for message in current ? queued : cached?.queued ?? [] {
+            all += 1
+            same += message.text == text ? 1 : 0
+        }
+        return (same, all)
+    }
+
+    private func settleOutgoing() {
+        guard let thread, let pending = outgoing[thread] else { return }
+        var same: [String: Int] = [:]
+        var all = 0
+        for entry in entries {
+            guard case .user(let text, _, _, _) = entry.item.kind else { continue }
+            all += 1
+            same[text, default: 0] += 1
+        }
+        for message in queued {
+            all += 1
+            same[message.text, default: 0] += 1
+        }
+        let waiting = pending.filter { same[$0.text, default: 0] <= $0.sameBefore && all <= $0.allBefore }
+        guard waiting.count != pending.count else { return }
+        for message in pending where !waiting.contains(where: { $0.id == message.id }) {
+            requests.settle(message.id)
+        }
+        outgoing[thread] = waiting.isEmpty ? nil : waiting
+    }
+
+    private func restoreFailedSend(_ request: String, thread: String, message: String) {
+        defer { onSendFailure?(message) }
+        guard var pending = outgoing[thread], let index = pending.firstIndex(where: { $0.id == request }) else { return }
+        let failed = pending.remove(at: index)
+        outgoing[thread] = pending.isEmpty ? nil : pending
+        let draft = composer(key: thread)
+        if draft.isEmpty {
+            draft.text = failed.shape.restore.text
+            draft.files = failed.shape.restore.files
+            draft.contexts = failed.shape.restore.contexts
+            draft.images = failed.shape.images
+        } else {
+            draft.text += "\n" + failed.shape.restore.text
+        }
+        if thread == self.thread {
+            focusRequest += 1
+        }
     }
 
     private static let pendingItem = UInt64.max
 
     private static func pendingEntry(text: String, images: [ComposerImage]) -> TimelineEntry {
-        let thumbnails = images.map { image in
+        let kind = ItemKind.user(text: text, images: UInt32(images.count), entry: nil, thumbnails: thumbnails(images))
+        return TimelineEntry(item: Item(id: pendingItem, turn: 1, createdAt: Int64(Date.now.timeIntervalSince1970 * 1000), kind: kind))
+    }
+
+    private static func thumbnails(_ images: [ComposerImage]) -> [ImageThumbnail] {
+        images.map { image in
             let size = image.thumbnail?.size ?? .zero
             return ImageThumbnail(mimeType: image.attachment.mimeType, data: image.attachment.data, width: UInt32(size.width), height: UInt32(size.height))
         }
-        let kind = ItemKind.user(text: text, images: UInt32(images.count), entry: nil, thumbnails: thumbnails)
-        return TimelineEntry(item: Item(id: pendingItem, turn: 1, createdAt: Int64(Date.now.timeIntervalSince1970 * 1000), kind: kind))
     }
 
     private func pendingInfo(_ draft: String, project: String?, title: String, settings: Settings?) -> ThreadInfo {
@@ -904,6 +998,26 @@ struct PendingStart {
     var thread: String?
     var failure: String?
     let at = Date.now
+}
+
+struct OutgoingShape {
+    let text: String
+    let images: [ComposerImage]
+    let restore: StashedPrompt
+    let queued: Bool
+    let steering: Bool
+}
+
+struct OutgoingMessage: Identifiable {
+    let id: String
+    let shape: OutgoingShape
+    let thumbnails: [ImageThumbnail]
+    let createdAt: Int64
+    let sameBefore: Int
+    let allBefore: Int
+
+    var text: String { shape.text }
+    var queued: Bool { shape.queued }
 }
 
 private struct CachedTranscript {

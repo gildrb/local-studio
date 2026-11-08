@@ -31,6 +31,7 @@ final class StudioStore {
         pages = PagesStore(core: core, requests: requests)
         workspace.panels.bind(conversation: conversation, inbox: inbox, pages: pages)
         conversation.pendingsChanged = { [weak self] in self?.syncPendings() }
+        conversation.onSendFailure = { [weak self] in self?.post(.error, $0) }
     }
 
     func start() throws {

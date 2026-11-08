@@ -54,13 +54,20 @@ final class RenderProbe {
     var working: WorkingProbe?
     var badges: [String: BadgeProbe] = [:]
     var drawn: [DrawnElapsed]?
-    var bubbles: [String: CGRect] = [:]
+    private(set) var bubbles: [String: [UUID: CGRect]] = [:]
     private(set) var dispatched: [String?] = []
 
     func ran(_ command: String?) {
         dispatched.append(command)
         if dispatched.count > 64 {
             dispatched.removeFirst(dispatched.count - 64)
+        }
+    }
+
+    func bubble(_ text: String, view: UUID, frame: CGRect?) {
+        bubbles[text, default: [:]][view] = frame
+        if bubbles[text]?.isEmpty == true {
+            bubbles[text] = nil
         }
     }
 
