@@ -783,7 +783,7 @@ impl App {
             drop(state);
             let request = self.core.request();
             self.core.run(|studio| {
-                studio.send(request, thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue })
+                studio.send(request, thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue });
             });
             return;
         }
