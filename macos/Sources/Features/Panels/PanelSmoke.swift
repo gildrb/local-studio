@@ -26,6 +26,7 @@ final class PanelSmoke {
     private var passed: Set<String> = []
     private var chatRequested = false
     private var entered = false
+    private var browserChecked = false
 
     init(store: StudioStore, output: URL) {
         self.store = store
@@ -159,19 +160,53 @@ final class PanelSmoke {
                 break
             }
         }
-        guard passed.count == 6, let diff else { return }
+        guard passed.count == 6, let diff, !browserChecked else { return }
+        browserChecked = true
         let commands = store.commands
         guard commands.perform("preview.toggle"), store.workspace.panels.activeContent?.kind == .browser,
               commands.canPerform("preview.refresh"), commands.canPerform("preview.focusUrl") else {
             return finish(passed: false, "preview commands are not routed to the browser surface")
         }
         print("ok preview.toggle opened the browser; preview.* commands live")
+        Task { await checkBrowser(diff) }
+    }
+
+    private func checkBrowser(_ diff: DiffModel) async {
+        let panels = store.workspace.panels
+        guard let model = panels.activeBrowser else { return finish(passed: false, "no browser surface after preview.toggle") }
+        model.webView.loadHTMLString("<html><head><script>document.title = 'smoke-' + Math.random()</script></head><body>smoke</body></html>", baseURL: nil)
+        guard await poll(5, { !model.loading && model.title.hasPrefix("smoke-") && model.webView.window != nil }) else {
+            return finish(passed: false, "the browser surface did not load its page in the window (title “\(model.title)”)")
+        }
+        let title = model.title
+        panels.toggleRightPanel()
+        guard await poll(2, { !panels.rightPanelOpen && panels.visibleMiniPlayer === model && model.webView.window != nil }) else {
+            return finish(passed: false, "closing the right panel did not move the page to the floating preview")
+        }
+        panels.toggleRightPanel()
+        guard await poll(2, { panels.rightPanelOpen && panels.visibleMiniPlayer == nil && model.webView.window != nil }) else {
+            return finish(passed: false, "reopening the right panel did not put the page back in it")
+        }
+        try? await Task.sleep(for: .milliseconds(500))
+        guard model.title == title, !model.loading else {
+            return finish(passed: false, "the browser reloaded across closing and reopening the right panel (“\(title)” → “\(model.title)”)")
+        }
+        print("ok browser kept its page (“\(title)”) across closing and reopening the right panel")
         diff.setAllCollapsed(false)
         if let problem = render(diff) {
             return finish(passed: false, problem)
         }
         session?.close()
-        finish(passed: true, "diff, files, read_file, list_devices, terminal and Add to Chat round-trips; diff snapshot \(output.path)")
+        finish(passed: true, "diff, files, read_file, list_devices, terminal, browser and Add to Chat round-trips; diff snapshot \(output.path)")
+    }
+
+    private func poll(_ seconds: TimeInterval, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date.now.addingTimeInterval(seconds)
+        while !condition() {
+            guard Date.now < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return true
     }
 
     private static func verify(_ diff: DiffModel) -> String? {
