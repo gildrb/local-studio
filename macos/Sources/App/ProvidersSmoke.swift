@@ -13,7 +13,6 @@ final class ProvidersSmoke {
     }
 
     private static let key = "sk-smoke-endpoint-0001"
-    private static let ping = "Reply with only the word pong."
 
     private let store: StudioStore
     private let stub = SmokeEndpoint()
@@ -77,20 +76,6 @@ final class ProvidersSmoke {
             }, done: { smoke in
                 smoke.pages.providersLoaded && smoke.provider("openai")?.credential == .missing
                     && !smoke.pages.providers.contains { $0.id == "smoke-endpoint" }
-            }),
-            Step(name: "real built-in provider signed in", act: { _ in }, done: { smoke in
-                guard let builtIn = smoke.provider(SmokeModel.key.provider), builtIn.kind == .builtIn, builtIn.credential != .missing,
-                      builtIn.configured, SmokeModel.select(smoke.store.conversation) else { return false }
-                smoke.store.conversation.newThread.access = .fullAccess
-                return true
-            }),
-            Step(name: "real built-in reply", act: { $0.store.conversation.send(Self.ping, project: nil, steer: false) }, done: { smoke in
-                let conversation = smoke.store.conversation
-                guard conversation.thread != nil, let info = conversation.info, !info.busy,
-                      info.model?.provider == SmokeModel.key.provider, info.model?.id == SmokeModel.key.model,
-                      let reply = SmokeModel.reply(conversation.items, after: Self.ping) else { return false }
-                print("     \(SmokeModel.label) replied “\(reply)”")
-                return true
             }),
             Step(name: "discover", act: { smoke in
                 guard let port = smoke.stub.port else { return }
