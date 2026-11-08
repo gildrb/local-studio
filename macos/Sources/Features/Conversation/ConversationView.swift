@@ -192,9 +192,10 @@ private struct ConversationColumn: View {
 
 private struct LoadingPlaceholder: View {
     let conversation: ConversationStore
+    let live: Bool
 
     var body: some View {
-        if conversation.showsLoading {
+        if live, conversation.showsLoading {
             VStack(spacing: 10) {
                 LogoMark(style: .coin)
                     .frame(width: 28, height: 28)
@@ -369,8 +370,8 @@ private struct TimelineScroll: View {
             }
         }
         .overlay(alignment: .trailing) {
-            if current, roomForMinimap {
-                TimelineMinimap(anchors: conversation.anchors, current: currentAnchor) { anchor in
+            if roomForMinimap {
+                TimelineMinimap(anchors: current ? conversation.anchors : conversation.cachedAnchors(thread), current: currentAnchor) { anchor in
                     follow(false)
                     currentAnchor = anchor
                     position.scrollTo(id: anchor, anchor: .top)
@@ -379,7 +380,6 @@ private struct TimelineScroll: View {
                 .padding(.trailing, 8)
             }
         }
-        .opacity(current ? 1 : 0)
         .accessibilityHidden(!current)
     }
 
@@ -475,9 +475,7 @@ private struct TimelineStack: View, Equatable {
         let conversation = store.conversation
         VStack(alignment: .leading, spacing: 22) {
             LazyVStack(alignment: .leading, spacing: 22) {
-                if current {
-                    LoadingPlaceholder(conversation: conversation)
-                }
+                LoadingPlaceholder(conversation: conversation, live: current)
                 ForEach(current ? conversation.rows : conversation.cachedRows(thread)) { row in
                     TimelineRowView(row: row, store: store)
                         .equatable()
@@ -485,10 +483,8 @@ private struct TimelineStack: View, Equatable {
                 }
             }
             .scrollTargetLayout()
-            if current {
-                ForEach(conversation.sendingMessages) { message in
-                    OutgoingBubble(message: message, store: store)
-                }
+            ForEach(current ? conversation.sendingMessages : []) { message in
+                OutgoingBubble(message: message, store: store)
             }
             TimelineFooter(store: store, live: current)
         }

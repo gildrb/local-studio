@@ -18,7 +18,7 @@ struct ThreadHeaderBar: View {
                     ProjectScriptsControl(store: store, project: project)
                         .id(project)
                 }
-                OpenInEditorButton(path: store.workspacePath(for: store.focusedRow))
+                OpenInEditorButton(store: store, enabled: store.workspacePath(for: store.focusedRow) != nil)
                 if let project = gitProject {
                     GitActionsButton(store: store, project: project)
                         .task(id: project) {

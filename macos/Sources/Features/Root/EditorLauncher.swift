@@ -51,7 +51,8 @@ enum EditorLauncher {
 }
 
 struct OpenInEditorButton: View {
-    let path: String?
+    let store: StudioStore
+    let enabled: Bool
     @AppStorage(EditorLauncher.favoriteKey) private var favoriteID = ""
 
     var body: some View {
@@ -87,13 +88,13 @@ struct OpenInEditorButton: View {
         .menuStyle(.button)
         .buttonStyle(.borderless)
         .fixedSize()
-        .disabled(path == nil)
+        .disabled(!enabled)
         .help(favorite.map { "Open in \($0.name)" } ?? "Open in editor")
         .accessibilityLabel(favorite.map { "Open in \($0.name)" } ?? "Open in editor")
     }
 
     private func open(with app: EditorApp) {
-        guard let path else { return }
+        guard let path = store.workspacePath(for: store.focusedRow) else { return }
         EditorLauncher.open(path, with: app)
     }
 }

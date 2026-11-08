@@ -327,6 +327,10 @@ final class ConversationStore {
         transcripts[thread]?.rows ?? []
     }
 
+    func cachedAnchors(_ thread: String) -> [TimelineAnchor] {
+        transcripts[thread]?.anchors ?? []
+    }
+
     private func keepTimeline(_ id: String?) {
         guard let id else { return }
         timelineUse.removeAll { $0 == id }
