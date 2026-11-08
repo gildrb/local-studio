@@ -32,11 +32,15 @@ final class LogoLoad {
             guard rows.count >= Self.threads else { throw StressFailure("only \(rows.count) threads still working before the measurement") }
             let visible = store.shell.sidebarVisible && store.inbox.visibleOrder.prefix(Self.threads + 4).filter(rows.contains).count >= Self.threads
             let before = Self.cpuTime()
+            let threadsBefore = Self.threadTimes()
             let started = ProcessInfo.processInfo.systemUptime
             try await Task.sleep(for: .seconds(Self.window))
             let percent = (Self.cpuTime() - before) / (ProcessInfo.processInfo.systemUptime - started) * 100
             let still = working().count
+            let threadsAfter = Self.threadTimes()
+            let busiest = threadsAfter.map { name, time in (name, time - (threadsBefore[name] ?? 0)) }.sorted { $0.1 > $1.1 }.prefix(6)
             print(String(format: "logo cpu: %.2f %% of one core over %.0f s with %d working rows in the sidebar (visible %@, %d still working at the end)", percent, Self.window, rows.count, visible ? "yes" : "no", still))
+            print("busiest threads: " + busiest.map { String(format: "%@ %.0f ms", $0.0, $0.1 * 1_000) }.joined(separator: ", "))
             store.stop()
             guard visible, still >= Self.threads else {
                 print("FAIL macOS logo load: the working rows were not all visible and working for the whole window")
@@ -100,5 +104,28 @@ final class LogoLoad {
         let user = TimeInterval(usage.ru_utime.tv_sec) + TimeInterval(usage.ru_utime.tv_usec) / 1_000_000
         let system = TimeInterval(usage.ru_stime.tv_sec) + TimeInterval(usage.ru_stime.tv_usec) / 1_000_000
         return user + system
+    }
+
+    private static func threadTimes() -> [String: TimeInterval] {
+        var list: thread_act_array_t?
+        var count: mach_msg_type_number_t = 0
+        guard task_threads(mach_task_self_, &list, &count) == KERN_SUCCESS, let list else { return [:] }
+        defer {
+            vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: list)), vm_size_t(Int(count) * MemoryLayout<thread_t>.stride))
+        }
+        var times: [String: TimeInterval] = [:]
+        for index in 0..<Int(count) {
+            let thread = list[index]
+            var info = thread_extended_info()
+            var size = mach_msg_type_number_t(MemoryLayout<thread_extended_info>.size / MemoryLayout<integer_t>.size)
+            let status = withUnsafeMutablePointer(to: &info) { pointer in
+                pointer.withMemoryRebound(to: integer_t.self, capacity: Int(size)) { thread_info(thread, thread_flavor_t(THREAD_EXTENDED_INFO), $0, &size) }
+            }
+            mach_port_deallocate(mach_task_self_, thread)
+            guard status == KERN_SUCCESS else { continue }
+            let name = withUnsafeBytes(of: info.pth_name) { String(bytes: $0.prefix { $0 != 0 }, encoding: .utf8) } ?? ""
+            times["\(name.isEmpty ? "thread" : name)#\(thread)"] = TimeInterval(info.pth_user_time + info.pth_system_time) / 1_000_000_000
+        }
+        return times
     }
 }
