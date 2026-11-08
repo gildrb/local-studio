@@ -468,7 +468,7 @@ final class StressHarness: NSObject {
     }
 
     private var promptBudgetLeft: Bool {
-        !StressSeed.realModel || StressSeed.seedSends + created + followUps < 20
+        !StressSeed.realModel || StressSeed.seedSends + created + followUps < StressSeed.realSendLimit
     }
 
     private func followUp(in window: NSWindow) async throws {
@@ -729,7 +729,7 @@ final class StressHarness: NSObject {
 
     private func checkScroll(_ scroll: ScrollProbe, thread: String) {
         if let top = scroll.top {
-            lastTop[thread] = top
+            lastTop[thread] = top == UInt64.max ? nil : top
         }
         guard scrolled.contains(thread) else {
             if scroll.distance > 2 {
