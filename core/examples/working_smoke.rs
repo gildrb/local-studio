@@ -6,13 +6,17 @@ use anyhow::{bail, Context};
 use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
-    AccessMode, Connection, DaemonLaunch, PromptDraft, Studio, StudioConfig, ThreadRow, ThreadSettings, ThreadStatus,
-    Update, Waker, WorktreeChoice,
+    AccessMode, Block, Connection, DaemonLaunch, Item, ItemKind, PromptDraft, Studio, StudioConfig, ThreadRow,
+    ThreadStatus, ToolState, TranscriptOp, Update, UsagePeriod, UsageReport, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
-const STEP_TIMEOUT: Duration = Duration::from_secs(90);
-const FAUX_SCRIPT: &str = r#"{"modelId":"faux-1","responses":[{"content":[{"type":"text","text":"Checking first."},{"type":"toolCall","name":"bash","arguments":{"i":"wait","script":"sleep 3 && echo step-done"},"id":"call-wait"}],"delayMs":1500},{"text":"All done after the tool step.","delayMs":1500}]}"#;
+#[path = "support/real_model.rs"]
+mod real_model;
+
+const STEP_TIMEOUT: Duration = Duration::from_secs(120);
+const MARK: &str = "step-done";
+const PROMPT: &str = "Say one short sentence about what you will do, then use the bash tool to run exactly this command once: `sleep 3 && echo step-done`. After it finishes, reply with only the word done.";
 
 #[derive(Default)]
 struct Signal {
@@ -38,6 +42,14 @@ impl Signal {
     }
 }
 
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum Progress {
+    #[default]
+    Started,
+    ToolDone,
+    Answered,
+}
+
 #[derive(Default)]
 struct Watch {
     connection: Option<Connection>,
@@ -50,6 +62,8 @@ struct Watch {
     pending_idle: Option<String>,
     starts: Vec<i64>,
     finished: bool,
+    progress: Progress,
+    usage: Option<UsageReport>,
 }
 
 impl Watch {
@@ -63,8 +77,39 @@ impl Watch {
     }
 }
 
+fn observe(watch: &mut Watch, item: &Item) {
+    match &item.kind {
+        ItemKind::Tool { state: ToolState::Succeeded, output, .. }
+            if output.contains(MARK) && watch.progress == Progress::Started =>
+        {
+            watch.progress = Progress::ToolDone;
+        }
+        ItemKind::Assistant { blocks, streaming: false, .. }
+            if watch.progress == Progress::ToolDone
+                && blocks.iter().any(|block| matches!(block, Block::Text { text } if !text.trim().is_empty())) =>
+        {
+            watch.progress = Progress::Answered;
+        }
+        ItemKind::User { .. }
+        | ItemKind::Assistant { .. }
+        | ItemKind::Tool { .. }
+        | ItemKind::TurnSummary { .. }
+        | ItemKind::Notice { .. }
+        | ItemKind::Compaction { .. } => {}
+    }
+}
+
 fn apply(watch: &mut Watch, update: Update) {
     match update {
+        Update::Transcript { thread, op } if watch.thread.as_deref() == Some(thread.as_str()) => match op {
+            TranscriptOp::Reset { items } => {
+                for item in &items {
+                    observe(watch, item);
+                }
+            }
+            TranscriptOp::Insert { item, .. } | TranscriptOp::Update { item, .. } => observe(watch, &item),
+        },
+        Update::Usage { report, .. } => watch.usage = Some(report),
         Update::Connection { state } => watch.connection = Some(state),
         Update::Projects { projects } => watch.projects = projects.into_iter().map(|project| project.id).collect(),
         Update::Threads { threads } => {
@@ -127,7 +172,6 @@ fn apply(watch: &mut Watch, update: Update) {
         | Update::TerminalFrame { .. }
         | Update::TerminalText { .. }
         | Update::TerminalExited { .. }
-        | Update::Usage { .. }
         | Update::Local { .. }
         | Update::LocalDashboard { .. }
         | Update::Providers { .. }
@@ -191,19 +235,16 @@ fn drive(config: StudioConfig, work: &Path) -> anyhow::Result<()> {
         studio.start_thread(
             "draft-working".to_string(),
             Some(watch.projects[0].clone()),
-            PromptDraft { text: "check, run a tool, then answer".to_string(), images: Vec::new(), files: Vec::new() },
-            ThreadSettings {
-                provider: None,
-                model: None,
-                thinking_level: None,
-                access: AccessMode::FullAccess,
-                worktree: WorktreeChoice::Local,
-            },
+            PromptDraft { text: PROMPT.to_string(), images: Vec::new(), files: Vec::new() },
+            real_model::thread_settings(AccessMode::FullAccess, WorktreeChoice::Local),
         );
         pump(&studio, &signal, &mut watch, "thread started", |watch| watch.thread.is_some())?;
         let thread = watch.thread.clone().context("thread id")?;
         studio.select_thread(Some(thread));
-        pump(&studio, &signal, &mut watch, "turn with a tool step finished", |watch| watch.finished)?;
+        pump(&studio, &signal, &mut watch, "real turn with a tool step finished", |watch| watch.finished)?;
+        pump(&studio, &signal, &mut watch, "the tool succeeded and the model answered after it", |watch| {
+            watch.progress == Progress::Answered
+        })?;
         if watch.busy_infos == 0 {
             bail!("the focused thread never reported busy while it worked");
         }
@@ -214,7 +255,9 @@ fn drive(config: StudioConfig, work: &Path) -> anyhow::Result<()> {
             bail!("the elapsed time restarted mid-turn: starts {:?}", watch.starts);
         }
         println!("ok   busy for the whole turn ({} updates), one start time", watch.busy_infos);
-        anyhow::Ok(())
+        studio.load_usage("usage-1".to_string(), UsagePeriod::Day);
+        pump(&studio, &signal, &mut watch, "usage report loaded", |watch| watch.usage.is_some())?;
+        real_model::check_usage(watch.usage.as_ref().context("usage")?)
     })();
     studio.shutdown();
     outcome
@@ -228,11 +271,8 @@ fn main() -> anyhow::Result<()> {
     let agent_dir = root.join("agent");
     let work = root.join("work");
     std::fs::create_dir_all(&work)?;
-    std::fs::create_dir_all(&agent_dir)?;
+    let _credentials = real_model::install(&agent_dir)?;
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", root.join("data"));
-    let script = root.join("faux-script.json");
-    std::fs::write(&script, FAUX_SCRIPT)?;
-    std::env::set_var("EUKHE_FAUX_SCRIPT", &script);
     let socket = root.join("d.sock");
     let config = StudioConfig {
         socket_path: Some(socket.to_string_lossy().into_owned()),

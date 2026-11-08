@@ -13,6 +13,8 @@ final class Smoke {
         case finished
     }
 
+    private static let prompt = SmokeModel.bash("echo smoke-ok")
+
     private let store: StudioStore
     private var phase = Phase.connecting
     private var subscription: AnyCancellable?
@@ -35,22 +37,28 @@ final class Smoke {
             guard store.connection == .ready else { return }
             phase = .project
             store.inbox.addProject(path: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory())
+            store.conversation.loadModels()
         case .project:
-            guard store.inbox.currentProject != nil, !store.inbox.projects.isEmpty else { return }
+            guard store.inbox.currentProject != nil, !store.inbox.projects.isEmpty, SmokeModel.select(store.conversation) else { return }
             phase = .opening
-            store.conversation.send("run the smoke command", project: store.inbox.currentProject, steer: false)
+            print("ok   real model \(SmokeModel.label)")
+            store.conversation.newThread.access = .fullAccess
+            store.conversation.send(Self.prompt, project: store.inbox.currentProject, steer: false)
         case .opening:
             guard store.conversation.thread != nil else { return }
             phase = .replying
         case .replying:
             let items = store.conversation.items
             guard let info = store.conversation.info, !info.busy, let last = items.last,
-                  case .assistant(let blocks, let streaming, _, _) = last.kind, !streaming,
-                  blocks.contains(where: { if case .text = $0 { true } else { false } }) else { return }
+                  case .assistant(_, false, _, _) = last.kind, let reply = SmokeModel.reply(items, after: Self.prompt) else { return }
             for item in items {
-                print("item \(item.kind)")
+                print("item \(item.kind)".prefix(400))
             }
-            finish(passed: true, "\(items.count) transcript items")
+            guard SmokeModel.toolSucceeded(items, output: "smoke-ok") else {
+                finish(passed: false, "the turn finished without a succeeded bash call printing smoke-ok")
+                return
+            }
+            finish(passed: true, "real bash call succeeded and the model replied “\(reply)” (\(items.count) transcript items)")
         case .finished:
             return
         }
