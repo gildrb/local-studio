@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keys: KeysHarness?
 
     override init() {
+        UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
         commandRefresh = CommandRefresh(store: store)
         super.init()

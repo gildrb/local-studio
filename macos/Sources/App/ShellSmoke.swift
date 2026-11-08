@@ -233,9 +233,7 @@ final class ShellSmoke {
 extension ShellSmoke {
     private func keyboardSteps() -> [Step] {
         [
-            Step(name: "main window", act: { smoke in
-                Task { _ = try? await presentMainWindow(smoke.store) }
-            }, done: { $0.store.mainWindow?.isVisible == true }),
+            Step(name: "main window at launch", act: { _ in }, done: { $0.store.mainWindow?.isVisible == true }),
             Step(name: "⌘T opens a draft in the current project", act: { $0.store.dispatch("chat.newTab") }, done: { smoke in
                 smoke.store.focusedThread == nil && smoke.store.shell.route == .thread && smoke.store.inbox.currentProject == smoke.project
                     && smoke.store.currentRegion == .composer && smoke.menuItem("New Thread Here")?.keyEquivalent == "t"

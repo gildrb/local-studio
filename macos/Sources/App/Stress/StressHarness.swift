@@ -127,7 +127,7 @@ final class StressHarness: NSObject {
         do {
             try await until("the core connection", 60) { store.connection == .ready }
             store.shell.onboardingDismissed = true
-            let window = try await reopenMainWindow()
+            let window = watch(try await launchedMainWindow(store))
             var seed = StressSeed(store: store)
             try await seed.run()
             prompts = seed.prompts
@@ -172,8 +172,7 @@ final class StressHarness: NSObject {
         store.mainWindow.flatMap { $0.isVisible ? $0 : nil }
     }
 
-    private func reopenMainWindow() async throws -> NSWindow {
-        let window = try await presentMainWindow(store)
+    private func watch(_ window: NSWindow) -> NSWindow {
         if watched !== window {
             if let watched {
                 NotificationCenter.default.removeObserver(self, name: NSWindow.willCloseNotification, object: watched)
@@ -397,7 +396,7 @@ final class StressHarness: NSObject {
         try await until("⌘W on an empty draft to close the main window", 3) { visibleMainWindow == nil }
         guard NSApp.isRunning else { throw StressFailure("⌘W on an empty draft quit the app") }
         let start = monitor.elapsed()
-        let reopened = try await reopenMainWindow()
+        let reopened = watch(try await reopenMainWindow(store))
         reopenLatencies.append(monitor.elapsed() - start)
         monitor.attach(window: reopened)
     }

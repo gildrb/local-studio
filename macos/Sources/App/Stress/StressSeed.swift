@@ -163,9 +163,16 @@ func until(_ label: String, _ timeout: TimeInterval, _ condition: () -> Bool) as
 }
 
 @MainActor
-func presentMainWindow(_ store: StudioStore) async throws -> NSWindow {
-    let visible = { store.mainWindow.flatMap { $0.isVisible ? $0 : nil } }
-    if visible() == nil {
+func launchedMainWindow(_ store: StudioStore) async throws -> NSWindow {
+    try await until("the main window to appear at launch", 20) { visibleMainWindow(store) != nil }
+    guard let window = visibleMainWindow(store) else { throw StressFailure("no main window at launch") }
+    window.orderFront(nil)
+    return window
+}
+
+@MainActor
+func reopenMainWindow(_ store: StudioStore) async throws -> NSWindow {
+    if visibleMainWindow(store) == nil {
         let reopen = NSAppleEventDescriptor(
             eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEReopenApplication),
             targetDescriptor: NSAppleEventDescriptor(processIdentifier: ProcessInfo.processInfo.processIdentifier),
@@ -173,8 +180,13 @@ func presentMainWindow(_ store: StudioStore) async throws -> NSWindow {
         )
         _ = try? reopen.sendEvent(options: [.noReply], timeout: 2)
     }
-    try await until("the main window", 20) { visible() != nil }
-    guard let window = visible() else { throw StressFailure("no main window") }
+    try await until("the main window to reopen", 20) { visibleMainWindow(store) != nil }
+    guard let window = visibleMainWindow(store) else { throw StressFailure("no main window after reopen") }
     window.orderFront(nil)
     return window
+}
+
+@MainActor
+private func visibleMainWindow(_ store: StudioStore) -> NSWindow? {
+    store.mainWindow.flatMap { $0.isVisible ? $0 : nil }
 }
