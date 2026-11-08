@@ -7,7 +7,14 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class ConversationStore {
-    private(set) var thread: String?
+    private(set) var thread: String? {
+        didSet {
+            if thread != oldValue {
+                threadChanged?(thread)
+            }
+        }
+    }
+    @ObservationIgnored var threadChanged: ((String?) -> Void)?
     private(set) var info: ThreadInfo?
     private(set) var entries: [TimelineEntry] = []
     private(set) var rows: [TimelineRow] = []

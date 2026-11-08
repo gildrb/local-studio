@@ -79,8 +79,7 @@ struct RootView: View {
         .sheet(isPresented: Bindable(shell).cloneShown) {
             CloneRepositorySheet(store: store)
         }
-        .onChange(of: store.conversation.thread, initial: true) { _, thread in
-            store.panels.focus(thread)
+        .onChange(of: store.conversation.thread) {
             shell.headerRenaming = false
         }
         .themeRoot()
