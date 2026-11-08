@@ -249,6 +249,7 @@ private struct TimelineScroll: View {
         }
         .scrollPosition($position)
         .defaultScrollAnchor(restoredTop == nil ? .bottom : nil, for: .initialOffset)
+        .defaultScrollAnchor(current && conversation.followsEnd ? .bottom : nil, for: .sizeChanges)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .onScrollPhaseChange { _, phase in
             let wasUserDriven = tracker.userDriven
@@ -275,7 +276,7 @@ private struct TimelineScroll: View {
             }
         }
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentSize.height
+            geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom - geometry.containerSize.height
         } action: { _, _ in
             if current, conversation.followsEnd, !tracker.userDriven {
                 position.scrollTo(edge: .bottom)
