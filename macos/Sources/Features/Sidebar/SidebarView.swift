@@ -50,7 +50,7 @@ struct SidebarView: View {
         } else if store.inbox.projects.isEmpty, store.inbox.sections.isEmpty, store.connection == .ready || store.inbox.receivedThreads {
             NoProjectsSidebar(store: store)
         } else {
-            TimelineView(.periodic(from: .now, by: 30)) { context in
+            TimelineView(.aligned(every: 30)) { context in
                 inbox(now: context.date)
             }
         }

@@ -20,9 +20,9 @@ struct StatusBadge: View {
                         .accessibilityHidden(true)
                 }
                 if row.status == .working, row.statusSince != nil {
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(.aligned(every: 1)) { context in
                         let text = label(glyph.title, now: context.date)
-                        Text(text)
+                        TickingText(text)
                             .font(.system(size: 11.5))
                             .monospacedDigit()
                             .onChange(of: text, initial: true) { _, text in
