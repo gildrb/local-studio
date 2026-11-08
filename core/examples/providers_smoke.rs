@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
+use std::collections::{BTreeSet, HashMap};
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -13,9 +13,13 @@ use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
     AccessMode, Block, Connection, CustomProvider, DaemonLaunch, Delivery, Item, ItemKind, LocalEngine, ModelOption,
     PromptDraft, ProviderApi, ProviderCredential, ProviderKey, ProviderKind, ProviderModel, ProviderStatus, Studio,
-    StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, TranscriptOp, Update, Waker, WorktreeChoice,
+    StudioConfig, ThreadRow, ThreadSettings, ThreadStatus, TranscriptOp, Update, UsagePeriod, UsageReport, Waker,
+    WorktreeChoice,
 };
 use serde_json::{Map, Value};
+
+#[path = "support/real_model.rs"]
+mod real_model;
 
 const STEP_TIMEOUT: Duration = Duration::from_secs(90);
 const KEY: &str = "sk-stub-local-smoke-0001";
@@ -62,6 +66,12 @@ struct View {
     local: Vec<String>,
     done: Vec<(String, String)>,
     failed: Vec<(String, String)>,
+    usage: Option<UsageReport>,
+}
+
+struct Original {
+    providers: Value,
+    keys: BTreeSet<String>,
 }
 
 impl View {
@@ -188,8 +198,8 @@ impl Harness {
         Ok(())
     }
 
-    fn start(&mut self, draft: &str, project: &str, text: &str, model: Option<(&str, &str)>) -> anyhow::Result<String> {
-        self.studio.start_thread(draft.to_string(), Some(project.to_string()), prompt(text), settings(model));
+    fn start(&mut self, draft: &str, project: &str, text: &str, settings: ThreadSettings) -> anyhow::Result<String> {
+        self.studio.start_thread(draft.to_string(), Some(project.to_string()), prompt(text), settings);
         let key = draft.to_string();
         self.pump_until(&format!("{draft} started"), move |view| view.started.contains_key(&key))?;
         let thread = self.view.started.get(draft).cloned().context("thread")?;
@@ -222,6 +232,7 @@ impl Harness {
                 }
             }
             Update::Models { models, .. } => view.models = models,
+            Update::Usage { report, .. } => view.usage = Some(report),
             Update::Providers { providers, engines, errors } => {
                 view.providers = Some(providers);
                 view.engines = engines;
@@ -263,7 +274,6 @@ impl Harness {
             | Update::TerminalFrame { .. }
             | Update::TerminalText { .. }
             | Update::TerminalExited { .. }
-            | Update::Usage { .. }
             | Update::Settings { .. }
             | Update::Keybindings { .. }
             | Update::ProjectScripts { .. }
@@ -280,10 +290,10 @@ fn prompt(text: &str) -> PromptDraft {
     PromptDraft { text: text.to_string(), images: Vec::new(), files: Vec::new() }
 }
 
-fn settings(model: Option<(&str, &str)>) -> ThreadSettings {
+fn settings(provider: &str, model: &str) -> ThreadSettings {
     ThreadSettings {
-        provider: model.map(|(provider, _)| provider.to_string()),
-        model: model.map(|(_, model)| model.to_string()),
+        provider: Some(provider.to_string()),
+        model: Some(model.to_string()),
         thinking_level: None,
         access: AccessMode::FullAccess,
         worktree: WorktreeChoice::Local,
@@ -339,17 +349,48 @@ fn read_json(path: &Path) -> anyhow::Result<Value> {
     Ok(serde_json::from_slice(&std::fs::read(path)?)?)
 }
 
+fn auth_keys(agent: &Path) -> anyhow::Result<BTreeSet<String>> {
+    Ok(read_json(&agent.join("auth.json"))?.as_object().map(|map| map.keys().cloned().collect()).unwrap_or_default())
+}
+
 fn main() -> anyhow::Result<()> {
     let usage = "usage: providers_smoke <eukhe-daemon> [scratch dir, default /tmp/ls-providers]";
     let mut args = std::env::args_os().skip(1);
     let daemon = PathBuf::from(args.next().context(usage)?);
     let base = args.next().map_or_else(|| PathBuf::from("/tmp/ls-providers"), PathBuf::from);
     let root = base.join(format!("run-{}", std::process::id()));
+    let real = root.join("real");
+    let _credentials = real_model::install(&real.join("agent"))?;
+    run(&daemon, &real, None)?;
+    let custom = root.join("custom");
+    let agent = custom.join("agent");
+    std::fs::create_dir_all(&agent)?;
+    for (name, content) in [("auth.json", "{}"), ("models.json", r#"{"providers":{}}"#)] {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(agent.join(name))?
+            .write_all(content.as_bytes())?;
+    }
+    let (stub, port) = start_stub()?;
+    let outcome = run(&daemon, &custom, Some(port));
+    let stopped_stub = stop_stub(stub);
+    outcome?;
+    stopped_stub?;
+    println!("PASS providers smoke ({})", root.display());
+    Ok(())
+}
+
+fn run(daemon: &Path, root: &Path, stub: Option<u16>) -> anyhow::Result<()> {
     let agent = root.join("agent");
     let work = root.join("work");
-    std::fs::create_dir_all(&agent)?;
     std::fs::create_dir_all(&work)?;
-    std::env::remove_var("EUKHE_FAUX_SCRIPT");
+    let models = agent.join("models.json");
+    let original = Original {
+        providers: if models.exists() { read_json(&models)?["providers"].clone() } else { Value::Null },
+        keys: auth_keys(&agent)?,
+    };
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", root.join("data"));
     std::env::set_var("LOCAL_STUDIO_CONTROLLER_URL", format!("http://127.0.0.1:{}", free_port()?));
     let socket = root.join("d.sock");
@@ -363,33 +404,67 @@ fn main() -> anyhow::Result<()> {
         }),
         controller_main: Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../controller/src/main.ts").to_string()),
     };
-    let (stub, port) = start_stub()?;
     let outcome = Harness::new(config).and_then(|mut harness| {
-        let outcome = drive(&mut harness, &agent, &work, port);
+        let outcome = drive(&mut harness, &agent, &work, stub, &original);
         harness.studio.shutdown();
         outcome
     });
-    let stopped_stub = stop_stub(stub);
     let stopped = stop_daemon(&socket);
     outcome?;
-    stopped_stub?;
-    stopped?;
-    println!("PASS providers smoke ({})", root.display());
-    Ok(())
+    stopped
 }
 
-fn drive(harness: &mut Harness, agent: &Path, work: &Path, port: u16) -> anyhow::Result<()> {
+fn drive(
+    harness: &mut Harness,
+    agent: &Path,
+    work: &Path,
+    stub: Option<u16>,
+    original: &Original,
+) -> anyhow::Result<()> {
     let studio = Arc::clone(&harness.studio);
     harness.pump_until("daemon launched and connected", |view| matches!(view.connection, Some(Connection::Ready)))?;
     studio.add_project(work.to_string_lossy().into_owned());
     harness.pump_until("project added", |view| view.projects.len() == 1)?;
     let project = harness.view.projects[0].clone();
-
+    let Some(port) = stub else {
+        built_in(harness, &project)?;
+        let request = harness.request();
+        harness.studio.load_usage(request, UsagePeriod::Day);
+        harness.pump_until("usage report loaded", |view| view.usage.is_some())?;
+        return real_model::check_usage(harness.view.usage.as_ref().context("usage")?);
+    };
     discovery(harness, port)?;
     add_and_chat(harness, agent, port, &project)?;
     edit_and_keys(harness, agent, port)?;
     local_fleet(harness, port, &project)?;
-    cleanup(harness, agent)
+    cleanup(harness, agent, original)
+}
+
+fn built_in(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
+    let (provider, model) = (real_model::PROVIDER, real_model::MODEL);
+    harness.studio.load_models();
+    harness.pump_until("the real built-in provider is signed in and its model is configured", |view| {
+        view.provider(provider).is_some_and(|status| {
+            status.kind == ProviderKind::BuiltIn
+                && status.credential != ProviderCredential::Missing
+                && status.configured
+        }) && view.has_model(provider, model)
+    })?;
+    let thread = harness.start(
+        "real-draft",
+        project,
+        "Reply with only the word pong.",
+        real_model::thread_settings(AccessMode::FullAccess, WorktreeChoice::Local),
+    )?;
+    let watched = thread.clone();
+    let expected = format!("{provider}/{model}");
+    harness.pump_until("a thread on the real built-in provider gets a streamed reply", move |view| {
+        !view.answer(&watched).trim().is_empty()
+            && view.idle(&watched)
+            && view.thread_models.get(&watched) == Some(&expected)
+    })?;
+    println!("     {provider}/{model} replied: {}", harness.view.answer(&thread).trim());
+    Ok(())
 }
 
 fn discovery(harness: &mut Harness, port: u16) -> anyhow::Result<()> {
@@ -403,7 +478,7 @@ fn discovery(harness: &mut Harness, port: u16) -> anyhow::Result<()> {
         }) && view
             .providers
             .as_ref()
-            .is_some_and(|providers| providers.iter().all(|provider| provider.kind != ProviderKind::Custom))
+            .is_some_and(|providers| providers.iter().all(|provider| !provider.id.starts_with("stub-")))
     })?;
 
     let closed = free_port()?;
@@ -478,7 +553,7 @@ fn add_and_chat(harness: &mut Harness, agent: &Path, port: u16, project: &str) -
     })?;
     check_files(agent, "stub-endpoint", 1)?;
 
-    let thread = harness.start("stub-draft", project, "ping", Some(("stub-endpoint", "stub-1")))?;
+    let thread = harness.start("stub-draft", project, "ping", settings("stub-endpoint", "stub-1"))?;
     let watched = thread.clone();
     harness
         .pump_until("a new thread on the endpoint gets the stub's streamed reply with the saved key", move |view| {
@@ -583,7 +658,7 @@ fn edit_and_keys(harness: &mut Harness, agent: &Path, port: u16) -> anyhow::Resu
     Ok(())
 }
 
-fn cleanup(harness: &mut Harness, agent: &Path) -> anyhow::Result<()> {
+fn cleanup(harness: &mut Harness, agent: &Path, original: &Original) -> anyhow::Result<()> {
     let studio = Arc::clone(&harness.studio);
     for id in ["stub-endpoint", "stub-two"] {
         let request = harness.request();
@@ -594,11 +669,16 @@ fn cleanup(harness: &mut Harness, agent: &Path) -> anyhow::Result<()> {
         })?;
     }
     let models = read_json(&agent.join("models.json"))?;
-    ensure!(models["providers"].as_object().is_some_and(Map::is_empty), "models.json still lists providers: {models}");
-    let auth = read_json(&agent.join("auth.json"))?;
-    ensure!(auth.as_object().is_some_and(Map::is_empty), "keys left in auth.json");
+    ensure!(
+        models["providers"] == original.providers,
+        "models.json providers changed: {} (was {})",
+        models["providers"],
+        original.providers
+    );
+    let keys = auth_keys(agent)?;
+    ensure!(keys == original.keys, "auth.json providers changed: {keys:?} (was {:?})", original.keys);
     ensure!(harness.view.errors.is_empty(), "models.json errors: {:?}", harness.view.errors);
-    println!("ok   models.json and auth.json cleaned up");
+    println!("ok   models.json and auth.json back to the providers they started with");
     Ok(())
 }
 
@@ -649,7 +729,7 @@ fn local_fleet(harness: &mut Harness, port: u16, project: &str) -> anyhow::Resul
     harness.pump_until("engine provider reaches the picker", move |view| {
         view.has_model(&shown, "stub-1") && view.engines.iter().any(|engine| engine.provider == shown && engine.added)
     })?;
-    let thread = harness.start("engine-draft", project, "ping", Some((&provider, "stub-1")))?;
+    let thread = harness.start("engine-draft", project, "ping", settings(&provider, "stub-1"))?;
     harness.pump_until("a thread on the fleet engine gets the stub's reply through the controller", move |view| {
         view.answer(&thread).contains("Stub reply from stub-1")
     })?;

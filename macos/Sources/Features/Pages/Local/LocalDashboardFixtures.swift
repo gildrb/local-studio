@@ -76,7 +76,7 @@ extension PagesFixtures {
         )
     }
 
-    static var tokenHistory: LocalTokenHistory {
+    static var tokenHistory: TokenHistory {
         let since = 6
         let daily: [UInt64] = (0..<378).map { day in
             guard day >= since else { return 0 }
@@ -84,7 +84,7 @@ extension PagesFixtures {
             guard hash > 0.14 else { return 0 }
             return UInt64(hash * hash * hash * 24_000_000 * (1 + Double(day) / 378))
         }
-        return LocalTokenHistory(
+        return TokenHistory(
             sinceDay: "2025-11-03", total: 3_404_000_000, read: 3_200_000_000, written: 204_000_000,
             lastWeek: 100_900_000, busiestDay: "2026-10-21", busiestTokens: 34_800_000, activeDays: 314, trackedDays: 364,
             daily: daily, lastDay: "2026-11-01"

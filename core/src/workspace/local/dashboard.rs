@@ -4,13 +4,12 @@ use reqwest::Method;
 use serde_json::Value;
 
 use super::{array, float, optional_text, port, small, strings, text, unsigned, Endpoint, Local};
-use crate::workspace::model::{LocalDashboard, LocalEngineTelemetry, LocalGpuTelemetry, LocalTokenHistory, Settings};
-use crate::workspace::time::{day_key, days_since_epoch, now_ms, parse_rfc3339_ms, DAY_MS};
+use crate::workspace::history::{self, DayTokens};
+use crate::workspace::model::{LocalDashboard, LocalEngineTelemetry, LocalGpuTelemetry, Settings, TokenHistory};
+use crate::workspace::time::{days_since_epoch, now_ms, parse_rfc3339_ms};
 
 const HISTORY_EVERY: Duration = Duration::from_secs(60);
 const TELEMETRY_TIMEOUT: Duration = Duration::from_secs(8);
-const HEATMAP_DAYS: usize = 378;
-const YEAR_DAYS: i64 = 365;
 const MIB: u64 = 1024 * 1024;
 
 pub(crate) struct DashboardWatch {
@@ -52,40 +51,12 @@ fn day_number(day: &str) -> Option<i64> {
     parse_rfc3339_ms(&format!("{day}T00:00:00Z")).map(days_since_epoch)
 }
 
-fn token_history(days: &[Value], now: i64) -> LocalTokenHistory {
-    let today = days_since_epoch(now);
-    let mut daily = vec![0_u64; HEATMAP_DAYS];
-    let mut history = LocalTokenHistory { last_day: day_key(now), ..LocalTokenHistory::default() };
-    let mut since: Option<i64> = None;
-    let mut busiest: Option<(i64, u64)> = None;
-    for day in days {
-        let Some(number) = day_number(&text(day, "day")) else { continue };
-        since = Some(since.map_or(number, |since| since.min(number)));
-        let (read, written) = (unsigned(day, "prompt"), unsigned(day, "generation"));
-        let tokens = read.saturating_add(written);
-        history.read = history.read.saturating_add(read);
-        history.written = history.written.saturating_add(written);
-        let age = today - number;
-        if (0..7).contains(&age) {
-            history.last_week = history.last_week.saturating_add(tokens);
-        }
-        if tokens > 0 && (0..YEAR_DAYS).contains(&age) {
-            history.active_days += 1;
-            if busiest.is_none_or(|(_, most)| tokens > most) {
-                busiest = Some((number, tokens));
-            }
-        }
-        if let Some(slot) = usize::try_from(age).ok().filter(|age| *age < HEATMAP_DAYS) {
-            daily[HEATMAP_DAYS - 1 - slot] = tokens;
-        }
-    }
-    history.total = history.read.saturating_add(history.written);
-    history.since_day = since.map(|since| day_key(since * DAY_MS));
-    history.tracked_days = since.map_or(0, |since| u32::try_from((today - since + 1).clamp(0, YEAR_DAYS)).unwrap_or(0));
-    history.busiest_day = busiest.map(|(number, _)| day_key(number * DAY_MS));
-    history.busiest_tokens = busiest.map_or(0, |(_, tokens)| tokens);
-    history.daily = daily;
-    history
+fn token_history(days: &[Value], now: i64) -> TokenHistory {
+    let days = days.iter().filter_map(|day| {
+        let number = day_number(&text(day, "day"))?;
+        Some(DayTokens { day: number, read: unsigned(day, "prompt"), written: unsigned(day, "generation") })
+    });
+    history::token_history(days, None, now)
 }
 
 fn dashboard(controller: &str, live: &Value, history: Option<&Value>, now: i64) -> LocalDashboard {

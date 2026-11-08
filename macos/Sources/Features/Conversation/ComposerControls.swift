@@ -7,22 +7,31 @@ struct ComposerControls: View {
     let draft: ComposerDraft
     let project: String?
     let canSend: Bool
+    var compact = false
     let send: () -> Void
 
     var body: some View {
         let conversation = store.conversation
         let settings = store.pages.settings
         HStack(spacing: 2) {
-            ComposerIconButton(title: "Attach files", symbol: "paperclip", action: attach)
-            ModelPickerButton(store: store)
-            ThinkingMenu(store: store)
-            ServiceTierMenu(store: store)
-            AccessMenu(store: store)
-            StashMenu(store: store, project: project)
-            GoalChip(store: store)
+            HStack(spacing: 2) {
+                ComposerIconButton(title: "Attach files", symbol: "paperclip", action: attach)
+                ModelPickerButton(store: store)
+                ThinkingMenu(store: store)
+                ServiceTierMenu(store: store)
+                AccessMenu(store: store)
+                StashMenu(store: store, project: project)
+                GoalChip(store: store)
+            }
+            .opacity(compact ? 0 : 1)
+            .allowsHitTesting(!compact)
+            .accessibilityHidden(compact)
             Spacer(minLength: 8)
             if settings?.contextWindowMeter ?? true {
                 ContextMeter(store: store)
+                    .opacity(compact ? 0 : 1)
+                    .allowsHitTesting(!compact)
+                    .accessibilityHidden(compact)
             }
             if conversation.busy {
                 RoundActionButton(title: "Stop generation", symbol: "stop.fill", size: 9, fill: .red, enabled: true) {

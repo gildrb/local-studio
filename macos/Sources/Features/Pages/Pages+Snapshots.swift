@@ -107,8 +107,8 @@ extension SnapshotCatalog {
                 view: { store in AnyView(LocalPage(store: store)) }
             ),
             SnapshotEntry(
-                name: "pages-usage",
-                size: CGSize(width: 1100, height: 820),
+                name: "pages-usage-empty",
+                size: CGSize(width: 1740, height: 1300),
                 updates: PagesFixtures.base,
                 view: { store in
                     store.pages.loadUsage(.month)
@@ -388,7 +388,41 @@ extension SnapshotCatalog {
                     return AnyView(LocalPage(store: store))
                 }
             ),
+            liveUsage("pages-usage-live", period: .month),
+            liveUsage("pages-usage-live-cost", period: .month, mode: .cost),
+            liveUsage("pages-usage-live-day", period: .day),
+            liveUsage("pages-usage-live-week", period: .week),
+            liveUsage("pages-usage-live-gildrb", period: .month, theme: themed("gildrb")),
         ]
+    }
+
+    @MainActor private static func liveUsage(_ name: String, period: UsagePeriod, mode: UsageMode = .tokens, theme: [Update] = []) -> SnapshotEntry {
+        SnapshotEntry(name: name, size: CGSize(width: 1740, height: 1480), updates: []) { store in
+            captureLiveUsage(store, period: period)
+            store.receive(theme)
+            return AnyView(UsagePage(store: store, mode: mode))
+        }
+    }
+
+    @MainActor private static func captureLiveUsage(_ store: StudioStore, period: UsagePeriod) {
+        guard store.core.studio == nil else { return }
+        do {
+            try store.start()
+        } catch {
+            print("live snapshot: \(error.localizedDescription)")
+            return
+        }
+        pump(30) { store.connection != .connecting }
+        store.pages.loadUsage(period)
+        pump(60) { store.pages.usage != nil || store.pages.usageError != nil }
+        store.stop()
+    }
+
+    @MainActor private static func pump(_ timeout: TimeInterval, until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline, !done() {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
     }
 
     @MainActor private static func captureLiveLocal(_ store: StudioStore) {
@@ -398,12 +432,6 @@ extension SnapshotCatalog {
         } catch {
             print("live snapshot: \(error.localizedDescription)")
             return
-        }
-        let pump: (TimeInterval, () -> Bool) -> Void = { timeout, done in
-            let deadline = Date().addingTimeInterval(timeout)
-            while Date() < deadline, !done() {
-                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-            }
         }
         store.pages.refreshLocal()
         pump(90) { store.pages.local != nil || store.pages.localError != nil }

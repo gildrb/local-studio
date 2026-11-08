@@ -1,8 +1,10 @@
 import LocalStudioKit
 import SwiftUI
 
-struct LocalTokenSummary: View {
-    let tokens: LocalTokenHistory?
+struct TokenSummary: View {
+    let tokens: TokenHistory?
+    let empty: String
+    var rows: [(label: String, value: String?)] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -17,12 +19,17 @@ struct LocalTokenSummary: View {
             Text(split)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 0) {
                 row("Last 7 days", tokens.map { LocalFormat.compact($0.lastWeek) })
                 Rectangle().fill(Theme.hairline).frame(height: 1)
                 row("Busiest day", busiest)
                 Rectangle().fill(Theme.hairline).frame(height: 1)
                 row("Active days", tokens.map { "\($0.activeDays.formatted()) of \($0.trackedDays.formatted())" })
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, extra in
+                    Rectangle().fill(Theme.hairline).frame(height: 1)
+                    row(extra.label, extra.value)
+                }
             }
             .padding(.top, 26)
         }
@@ -36,7 +43,7 @@ struct LocalTokenSummary: View {
 
     private var split: String {
         guard let tokens else { return " " }
-        guard tokens.total > 0 else { return "Counted from engine metrics as models serve requests." }
+        guard tokens.total > 0 else { return empty }
         return "\(LocalFormat.compact(tokens.read)) read, \(LocalFormat.compact(tokens.written)) written"
     }
 
@@ -59,15 +66,18 @@ struct LocalTokenSummary: View {
     }
 }
 
-struct LocalTokenHeatmap: View {
-    let tokens: LocalTokenHistory?
+struct DailyHeatmap: View {
+    let values: [Double]?
+    let lastDay: String?
+    let label: String
+    let format: (Double) -> String
     @State private var width: CGFloat = 900
     @State private var hovered: Int?
 
     var body: some View {
-        let layout = HeatmapLayout(tokens: tokens, width: width)
+        let layout = HeatmapLayout(values: values, lastDay: lastDay, width: width)
         VStack(alignment: .leading, spacing: 10) {
-            LocalHeatmapGrid(
+            HeatmapGrid(
                 layout: layout,
                 empty: Theme.text.opacity(0.06),
                 accent: Theme.primary,
@@ -91,7 +101,7 @@ struct LocalTokenHeatmap: View {
                 }
             }
             .accessibilityElement()
-            .accessibilityLabel("Tokens per day, last year")
+            .accessibilityLabel(label)
             .accessibilityValue(caption(layout))
             HStack(spacing: 6) {
                 Text(caption(layout))
@@ -114,10 +124,9 @@ struct LocalTokenHeatmap: View {
     }
 
     private func caption(_ layout: HeatmapLayout) -> String {
-        guard let tokens, let index = hovered ?? (tokens.daily.isEmpty ? nil : tokens.daily.count - 1),
+        guard let values, let index = hovered ?? (values.isEmpty ? nil : values.count - 1),
               let date = layout.date(of: index) else { return " " }
-        let count = tokens.daily[index]
-        return "\(LocalFormat.day(date, year: true)): \(LocalFormat.compact(count)) token\(count == 1 ? "" : "s")"
+        return "\(LocalFormat.day(date, year: true)): \(format(values[index]))"
     }
 }
 
@@ -127,7 +136,7 @@ struct HeatmapLayout: Equatable {
     static let gap: CGFloat = 3
     static let labelHeight: CGFloat = 20
 
-    let daily: [UInt64]
+    let daily: [Double]
     let levels: [Int]
     let width: CGFloat
     let lastRow: Int
@@ -138,16 +147,16 @@ struct HeatmapLayout: Equatable {
         lhs.daily == rhs.daily && lhs.width == rhs.width && lhs.lastRow == rhs.lastRow && lhs.last == rhs.last
     }
 
-    init(tokens: LocalTokenHistory?, width: CGFloat) {
-        let daily = tokens?.daily ?? Array(repeating: 0, count: Self.columns * 7)
+    init(values: [Double]?, lastDay: String?, width: CGFloat) {
+        let daily = values ?? Array(repeating: 0, count: Self.columns * 7)
         let calendar = Self.calendar
-        let last = tokens.flatMap { LocalFormat.date($0.lastDay) } ?? calendar.startOfDay(for: .now)
+        let last = lastDay.flatMap(LocalFormat.date) ?? calendar.startOfDay(for: .now)
         let weekday = calendar.component(.weekday, from: last)
         let lastRow = (weekday - Calendar.current.firstWeekday + 7) % 7
         let nonzero = daily.filter { $0 > 0 }.sorted()
-        let scale = Double(nonzero.isEmpty ? 1 : nonzero[min(nonzero.count - 1, nonzero.count * 9 / 10)])
+        let scale = nonzero.isEmpty ? 1 : nonzero[min(nonzero.count - 1, nonzero.count * 9 / 10)]
         self.daily = daily
-        self.levels = daily.map { value in value == 0 ? 0 : 1 + min(3, Int(4 * Double(value) / scale)) }
+        self.levels = daily.map { value in value <= 0 ? 0 : 1 + min(3, Int(4 * value / scale)) }
         self.width = width
         self.lastRow = lastRow
         self.last = last
@@ -199,7 +208,7 @@ struct HeatmapLayout: Equatable {
     }
 }
 
-private struct LocalHeatmapGrid: View, Equatable {
+private struct HeatmapGrid: View, Equatable {
     let layout: HeatmapLayout
     let empty: Color
     let accent: Color

@@ -17,7 +17,6 @@ final class ConversationSmoke {
         case settled
         case image
         case editing
-        case tier
         case fanOut
         case setupProject
         case setup
@@ -30,12 +29,11 @@ final class ConversationSmoke {
     private var thread: String?
     private var anchor: String?
     private var imageRequest: String?
-    private var tier: String?
-    private var threadCount = 0
+    private var before: Set<String> = []
     private var repository: String?
 
-    private static let prompt = "run the smoke command"
-    private static let followUp = "queued follow-up"
+    private static let prompt = SmokeModel.bash("echo smoke-ok > smoke.txt && cat smoke.txt")
+    private static let followUp = "Reply with only the word queued."
     private static let cancelled = "cancel me"
 
     init(store: StudioStore) {
@@ -61,8 +59,9 @@ final class ConversationSmoke {
             conversation.loadCommands(project: nil)
         case .project:
             guard let project = store.inbox.currentProject, !store.inbox.projects.isEmpty, conversation.modelsLoaded else { return }
-            guard !conversation.providerUnavailable, let model = conversation.currentModel(settings: store.pages.settings) else {
-                finish(passed: false, "the draft composer found no default model in \(conversation.models.count) models")
+            guard !conversation.providerUnavailable, SmokeModel.select(conversation), let model = conversation.currentModel(settings: store.pages.settings),
+                  model.provider == SmokeModel.key.provider, model.id == SmokeModel.key.model else {
+                finish(passed: false, "\(SmokeModel.label) is not a configured model among \(conversation.models.count) models")
                 return
             }
             if let failure = composerChecks(project: project) {
@@ -73,7 +72,7 @@ final class ConversationSmoke {
             conversation.composer(project: project).text = Self.prompt
             conversation.composer(project: project).attach(image: Self.png, mimeType: "image/png")
             conversation.submit(project: project, alternate: false, settings: store.pages.settings)
-            move(to: .opening, "composer started a supervised thread in \(project) with default model \(model.provider)/\(model.id)")
+            move(to: .opening, "composer started a supervised thread in \(project) on the real model \(SmokeModel.label)")
         case .opening:
             guard let thread = conversation.thread else { return }
             self.thread = thread
@@ -111,13 +110,25 @@ final class ConversationSmoke {
             let items = conversation.items
             guard let info = conversation.info, !info.busy, conversation.queued.isEmpty,
                   let last = items.last, case .assistant(_, false, _, _) = last.kind,
-                  items.contains(where: { if case .user(Self.followUp, _, _, _) = $0.kind { true } else { false } }),
-                  items.contains(where: { if case .tool(_, _, _, _, _, .succeeded, _, _, _, _) = $0.kind { true } else { false } }) else { return }
+                  SmokeModel.reply(items, after: Self.followUp) != nil, SmokeModel.toolSucceeded(items, output: "smoke-ok") else { return }
             guard let anchor = items.lazy.compactMap({ item -> String? in
                 if case .user(Self.prompt, _, let entry, _) = item.kind { entry } else { nil }
             }).first else { return }
             for item in items {
                 print("     item \(item.id) turn \(item.turn) \(item.kind)".prefix(400))
+            }
+            let users = items.compactMap { item -> String? in if case .user(let text, _, _, _) = item.kind { text } else { nil } }
+            let promptAt = users.firstIndex { $0.contains(Self.prompt) }
+            let followUpAt = users.firstIndex { $0.contains(Self.followUp) }
+            guard let promptAt, let followUpAt, promptAt < followUpAt, !users.contains(where: { $0.contains(Self.cancelled) }) else {
+                finish(passed: false, "the transcript order of the prompt and the queued follow-up is wrong: \(users)")
+                return
+            }
+            let home = ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory()
+            let written = (try? String(contentsOfFile: (home as NSString).appendingPathComponent("smoke.txt"), encoding: .utf8)) ?? ""
+            guard written.trimmingCharacters(in: .whitespacesAndNewlines) == "smoke-ok" else {
+                finish(passed: false, "the approved bash call did not write smoke.txt (found “\(written)”)")
+                return
             }
             print("     \(conversation.rows.count) timeline rows for \(items.count) items")
             let thumbnails = items.lazy.compactMap { item -> [ImageThumbnail]? in
@@ -143,21 +154,16 @@ final class ConversationSmoke {
         case .editing:
             let rewound = !conversation.items.contains { if case .user(Self.followUp, _, _, _) = $0.kind { true } else { false } }
             guard let thread, rewound, conversation.composer(project: nil).text == Self.prompt, conversation.thread == thread else { return }
-            move(to: .tier, "edit from here filled the composer with “\(Self.prompt)”")
-            if let first = conversation.info?.serviceTiers.first {
-                tier = first
-                conversation.setServiceTier(first)
-            } else {
-                print("     faux model offers no service tiers; setServiceTier round-trip skipped")
-                startFanOut()
-            }
-        case .tier:
-            guard let tier, conversation.info?.serviceTier == tier else { return }
-            print("ok   setServiceTier(\(tier)) came back in ThreadInfo")
+            print("ok   edit from here filled the composer with the first prompt")
             startFanOut()
         case .fanOut:
-            guard store.inbox.threads.count >= threadCount + 2 else { return }
-            move(to: .setupProject, "fan-out over 2 models started \(store.inbox.threads.count - threadCount) threads")
+            let started = store.inbox.threads.filter { !before.contains($0.id) }
+            if let failed = started.first(where: { $0.status == .failed }) {
+                finish(passed: false, "fan-out thread \(failed.id) failed")
+                return
+            }
+            guard started.count >= 2, started.allSatisfy({ $0.status == .done || $0.status == .idle }) else { return }
+            move(to: .setupProject, "fan-out over \(SmokeModel.label) ×2 answered in \(started.count) threads")
             guard let repository = Self.makeRepository() else {
                 finish(passed: true, "git is unavailable; worktree setup cancel skipped")
                 return
@@ -204,17 +210,13 @@ final class ConversationSmoke {
 
     private func startFanOut() {
         let conversation = store.conversation
-        guard let model = conversation.models.first(where: \.configured) else {
-            finish(passed: false, "no configured model to fan out over")
-            return
-        }
-        let key = ModelKey(provider: model.provider, model: model.id)
-        threadCount = store.inbox.threads.count
+        let key = SmokeModel.key
+        before = Set(store.inbox.threads.map(\.id))
         store.select(nil)
         store.inbox.selectProject(nil)
         conversation.newThread.multiModel = true
         conversation.newThread.fanOut = [key, key]
-        conversation.composer(project: nil).text = "fan out"
+        conversation.composer(project: nil).text = "Reply with only the word fan."
         conversation.submit(project: nil, alternate: false, settings: store.pages.settings)
         move(to: .fanOut, "startThreads over \(key.provider)/\(key.model) ×2")
     }

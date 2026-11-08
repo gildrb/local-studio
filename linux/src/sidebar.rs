@@ -24,6 +24,7 @@ struct Card {
     renaming: bool,
     hint: Option<u8>,
     when: String,
+    since: Option<i64>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -582,6 +583,9 @@ impl Sidebar {
                     renaming: renaming.as_deref() == Some(row.id.as_str()),
                     hint: (self.hints.get() && hint <= 9).then_some(hint),
                     when,
+                    since: (row.status == ThreadStatus::Working)
+                        .then(|| state.run_start(&row.id, row.status_since))
+                        .flatten(),
                 })));
             }
             if rows.len() > limit {
@@ -1064,6 +1068,9 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
         let label = gtk::Label::new(Some(label));
         label.add_css_class("ls-meta");
         label.add_css_class(class);
+        if let Some(since) = card.since {
+            tick(&label, since);
+        }
         top.append(&label);
     } else {
         let stamp = gtk::Label::new(Some(&card.when));
@@ -1171,4 +1178,16 @@ fn small_icon(name: &str, class: &str) -> gtk::Image {
     image.set_pixel_size(12);
     image.add_css_class(class);
     image
+}
+
+fn tick(label: &gtk::Label, since: i64) {
+    let text = move || format!("Working {}", format::duration(u64::try_from(format::now_ms() - since).unwrap_or(0)));
+    label.set_label(&text());
+    label.add_css_class("ls-working-badge");
+    let weak = label.downgrade();
+    glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
+        let Some(label) = weak.upgrade() else { return glib::ControlFlow::Break };
+        label.set_label(&text());
+        glib::ControlFlow::Continue
+    });
 }

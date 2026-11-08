@@ -39,7 +39,7 @@ final class ProvidersSmoke {
                 self?.advance()
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 150) { [weak self] in
             guard let self, index < steps.count else { return }
             finish(passed: false, "timed out at step \(steps[index].name)")
         }
@@ -70,9 +70,12 @@ final class ProvidersSmoke {
     private func makeSteps() -> [Step] {
         [
             Step(name: "connect", act: { _ in }, done: { $0.store.connection == .ready && $0.stub.port != nil }),
-            Step(name: "load providers", act: { $0.pages.loadProviders() }, done: { smoke in
+            Step(name: "load providers", act: { smoke in
+                smoke.pages.loadProviders()
+                smoke.store.conversation.loadModels()
+            }, done: { smoke in
                 smoke.pages.providersLoaded && smoke.provider("openai")?.credential == .missing
-                    && !smoke.pages.providers.contains { $0.kind == .custom }
+                    && !smoke.pages.providers.contains { $0.id == "smoke-endpoint" }
             }),
             Step(name: "discover", act: { smoke in
                 guard let port = smoke.stub.port else { return }

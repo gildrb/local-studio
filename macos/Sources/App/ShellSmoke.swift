@@ -20,6 +20,8 @@ final class ShellSmoke {
     private var project = ""
     private var thread = ""
     private let title = "Shell smoke renamed"
+    private static let prompt = SmokeModel.bash("echo smoke-ok")
+    private static let second = "Reply with only the word second."
     private var second = ""
     private var expectedPinned: [String] = []
     private var revision = 0
@@ -105,17 +107,27 @@ final class ShellSmoke {
             Step(name: "clear project script", act: { $0.store.inbox.saveProjectScripts($0.project, []) }, done: { smoke in
                 smoke.store.inbox.projectScripts[smoke.project]?.isEmpty == true
             }),
+            Step(name: "real model", act: { $0.store.conversation.loadModels() }, done: { smoke in
+                guard SmokeModel.select(smoke.store.conversation) else { return false }
+                smoke.store.conversation.newThread.access = .fullAccess
+                print("     real model \(SmokeModel.label)")
+                return true
+            }),
             Step(name: "start thread", act: { smoke in
                 smoke.store.newThread(in: smoke.project)
-                smoke.store.conversation.send("run the smoke command", project: smoke.project, steer: false)
+                smoke.store.conversation.send(Self.prompt, project: smoke.project, steer: false)
             }, done: { smoke in
                 guard let id = smoke.store.focusedThread, smoke.store.inbox.thread(id) != nil else { return false }
                 smoke.thread = id
                 return smoke.store.inbox.thread(id)?.project == smoke.project
             }),
             Step(name: "turn settles", act: { _ in }, done: { smoke in
-                guard let row = smoke.row else { return false }
-                return row.status != .working && smoke.store.conversation.info?.busy == false
+                guard let row = smoke.row, row.status != .working, row.status != .approval,
+                      smoke.store.conversation.info?.busy == false else { return false }
+                let items = smoke.store.conversation.items
+                guard let reply = SmokeModel.reply(items, after: Self.prompt), SmokeModel.toolSucceeded(items, output: "smoke-ok") else { return false }
+                print("     real bash call succeeded; reply “\(reply)”")
+                return true
             }),
             Step(name: "pin", act: { $0.store.togglePin([$0.thread]) }, done: { $0.row?.shelf == .pinned && $0.row?.pinned == true }),
             Step(name: "unpin", act: { $0.store.inbox.setPinned([$0.thread], false) }, done: { $0.row?.pinned == false && $0.row?.shelf != .pinned }),
@@ -138,13 +150,16 @@ final class ShellSmoke {
             Step(name: "auto-settle on", act: { $0.store.inbox.setAutoSettle($0.thread, true) }, done: { $0.row?.autoSettle == true }),
             Step(name: "second thread", act: { smoke in
                 smoke.store.newThread(in: smoke.project)
-                smoke.store.conversation.send("second smoke thread", project: smoke.project, steer: false)
+                smoke.store.conversation.send(Self.second, project: smoke.project, steer: false)
             }, done: { smoke in
                 guard let id = smoke.store.focusedThread, id != smoke.thread, smoke.store.inbox.thread(id) != nil else { return false }
                 smoke.second = id
                 return true
             }),
-            Step(name: "second turn settles", act: { _ in }, done: { $0.store.inbox.thread($0.second)?.status != .working }),
+            Step(name: "second turn settles", act: { _ in }, done: { smoke in
+                guard let row = smoke.store.inbox.thread(smoke.second), row.status != .working, row.status != .approval else { return false }
+                return smoke.store.focusedThread != smoke.second || SmokeModel.reply(smoke.store.conversation.items, after: Self.second) != nil
+            }),
         ] + keyboardSteps() + [
             Step(name: "pin both", act: { $0.store.inbox.setPinned([$0.thread, $0.second], true) }, done: { smoke in
                 smoke.store.inbox.sections.pinned.count == 2

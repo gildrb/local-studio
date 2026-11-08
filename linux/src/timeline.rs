@@ -16,6 +16,7 @@ pub struct Timeline {
     pub root: gtk::Overlay,
     minimap: gtk::DrawingArea,
     store: gio::ListStore,
+    local: gio::ListStore,
     items: RefCell<Vec<Item>>,
     hidden: Rc<RefCell<HashSet<u64>>>,
     expanded: Rc<RefCell<HashSet<u64>>>,
@@ -40,6 +41,11 @@ impl Timeline {
                 .is_none_or(|object| !filter_hidden.borrow().contains(&object.borrow::<Item>().id))
         });
         let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
+        let local = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let parts = gio::ListStore::new::<gio::ListModel>();
+        parts.append(&filtered);
+        parts.append(&local);
+        let joined = gtk::FlattenListModel::new(Some(parts));
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(|_, object| {
             let Some(item) = object.downcast_ref::<gtk::ListItem>() else { return };
@@ -69,7 +75,7 @@ impl Timeline {
             }
             clamp.set_child(Some(&widget));
         });
-        let list = gtk::ListView::new(Some(gtk::NoSelection::new(Some(filtered))), Some(factory));
+        let list = gtk::ListView::new(Some(gtk::NoSelection::new(Some(joined))), Some(factory));
         list.add_css_class("ls-timeline");
         list.set_focusable(true);
         install_keys(&keyboard, &list);
@@ -123,6 +129,7 @@ impl Timeline {
             root,
             minimap,
             store,
+            local,
             items: RefCell::new(Vec::new()),
             hidden,
             expanded,
@@ -133,6 +140,43 @@ impl Timeline {
             cursor,
             ring,
         }
+    }
+
+    pub fn set_local(&self, items: &[Item]) {
+        let shown: Vec<Item> = (0..self.local.n_items())
+            .filter_map(|position| self.local.item(position).and_downcast::<glib::BoxedAnyObject>())
+            .map(|object| object.borrow::<Item>().clone())
+            .collect();
+        if shown == items {
+            return;
+        }
+        let grew = items.len() > shown.len();
+        let objects: Vec<glib::BoxedAnyObject> =
+            items.iter().map(|item| glib::BoxedAnyObject::new(item.clone())).collect();
+        self.local.splice(0, self.local.n_items(), &objects);
+        if grew {
+            self.follow.set(true);
+            self.scroll_to_end();
+        }
+    }
+
+    pub fn local_texts(&self) -> Vec<String> {
+        (0..self.local.n_items())
+            .filter_map(|position| self.local.item(position).and_downcast::<glib::BoxedAnyObject>())
+            .filter_map(|object| match &object.borrow::<Item>().kind {
+                ItemKind::User { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn user_count(&self, text: &str) -> usize {
+        self.items.try_borrow().map_or(0, |items| {
+            items
+                .iter()
+                .filter(|item| matches!(&item.kind, ItemKind::User { text: shown, .. } if shown.trim() == text))
+                .count()
+        })
     }
 
     pub fn refresh_minimap(&self) {

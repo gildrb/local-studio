@@ -1,180 +1,139 @@
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
-use local_studio_core::{UsageDay, UsagePeriod, UsageReport};
+use local_studio_core::{UsageDay, UsagePeriod};
 
 use crate::app::App;
-use crate::format;
+use crate::dashboard_parts as parts;
 use crate::state::State;
+use crate::usage_dashboard::{LimitsView, Metric, UsageView};
+
+const MODES: [(&str, &str); 3] = [("tokens", "Tokens"), ("cost", "Cost"), ("limits", "Limits")];
 
 pub struct UsagePage {
     pub root: gtk::ScrolledWindow,
-    periods: adw::ToggleGroup,
-    modes: adw::ToggleGroup,
-    body: adw::Bin,
+    tabs: Vec<(&'static str, gtk::ToggleButton)>,
+    mode: Cell<&'static str>,
+    period: Cell<UsagePeriod>,
+    request: RefCell<Option<String>>,
+    failed: Cell<bool>,
+    stack: gtk::Stack,
+    failure: adw::StatusPage,
+    view: UsageView,
+    limits: LimitsView,
 }
 
 impl UsagePage {
-    pub fn new(app: Weak<App>) -> Self {
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 20);
-        content.set_margin_top(24);
+    pub fn new(app: &Weak<App>) -> Self {
+        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let mut tabs = Vec::new();
+        for (name, title) in MODES {
+            let button = parts::tab(&gtk::Label::new(Some(title)));
+            button.set_tooltip_text(Some(&format!("{title} ({})", &name[..1])));
+            if let Some((_, leader)) = tabs.first() {
+                button.set_group(Some(leader));
+            }
+            button.set_active(name == "tokens");
+            let weak = app.clone();
+            button.connect_toggled(move |button| {
+                let Some(app) = weak.upgrade() else { return };
+                if button.is_active() && app.usage.mode.replace(name) != name {
+                    app.usage.render(&app.state.borrow());
+                }
+            });
+            bar.append(&button);
+            tabs.push((name, button));
+        }
+        let view = UsageView::build(app);
+        let limits = LimitsView::build();
+        let loading = adw::StatusPage::builder().title("Loading usage…").build();
+        loading.set_size_request(-1, 360);
+        let failure =
+            adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title("Couldn’t load usage").build();
+        failure.set_size_request(-1, 360);
+        let stack = gtk::Stack::new();
+        stack.set_vhomogeneous(false);
+        stack.add_named(&view.root, Some("dashboard"));
+        stack.add_named(&limits.root, Some("limits"));
+        stack.add_named(&loading, Some("loading"));
+        stack.add_named(&failure, Some("failure"));
+        stack.set_visible_child_name("loading");
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        content.set_margin_start(40);
+        content.set_margin_end(40);
+        content.set_margin_top(12);
         content.set_margin_bottom(32);
-        content.set_margin_start(20);
-        content.set_margin_end(20);
-        let periods = adw::ToggleGroup::new();
-        for (name, label) in [("day", "Day"), ("week", "Week"), ("month", "Month"), ("quarter", "Quarter")] {
-            periods.add(adw::Toggle::builder().name(name).label(label).build());
-        }
-        periods.set_active_name(Some("week"));
-        let modes = adw::ToggleGroup::new();
-        for (name, label) in [("tokens", "Tokens"), ("cost", "Cost"), ("limits", "Limits")] {
-            modes.add(
-                adw::Toggle::builder().name(name).label(label).tooltip(format!("{label} ({})", &name[..1])).build(),
-            );
-        }
-        modes.set_active_name(Some("tokens"));
-        let bar = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        bar.append(&periods);
-        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        spacer.set_hexpand(true);
-        bar.append(&spacer);
-        bar.append(&modes);
-        let body = adw::Bin::new();
         content.append(&bar);
-        content.append(&body);
-        let clamp = adw::Clamp::builder().maximum_size(860).child(&content).build();
-        let root = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&clamp).build();
-        let weak = app.clone();
-        periods.connect_active_name_notify(move |_| {
-            if let Some(app) = weak.upgrade() {
-                app.usage.refresh(&app);
-            }
-        });
-        modes.connect_active_name_notify(move |_| {
-            if let Some(app) = app.upgrade() {
-                app.usage.render(&app.state.borrow());
-            }
-        });
-        Self { root, periods, modes, body }
+        content.append(&stack);
+        let root = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&content).build();
+        Self {
+            root,
+            tabs,
+            mode: Cell::new("tokens"),
+            period: Cell::new(UsagePeriod::Week),
+            request: RefCell::new(None),
+            failed: Cell::new(false),
+            stack,
+            failure,
+            view,
+            limits,
+        }
     }
 
     pub fn set_mode(&self, mode: &str) {
-        self.modes.set_active_name(Some(mode));
+        if let Some((_, button)) = self.tabs.iter().find(|(name, _)| *name == mode) {
+            button.set_active(true);
+        }
+    }
+
+    pub fn choose(&self, period: UsagePeriod) {
+        self.period.set(period);
     }
 
     pub fn set_period(&self, app: &Rc<App>, period: UsagePeriod) {
-        let name = match period {
-            UsagePeriod::Day => "day",
-            UsagePeriod::Week => "week",
-            UsagePeriod::Month => "month",
-            UsagePeriod::Quarter => "quarter",
-        };
-        if self.periods.active_name().as_deref() == Some(name) {
-            self.refresh(app);
-        } else {
-            self.periods.set_active_name(Some(name));
+        if self.period.replace(period) != period {
+            app.state.borrow_mut().usage = None;
         }
-    }
-
-    fn period(&self) -> UsagePeriod {
-        match self.periods.active_name().as_deref() {
-            Some("day") => UsagePeriod::Day,
-            Some("month") => UsagePeriod::Month,
-            Some("quarter") => UsagePeriod::Quarter,
-            _ => UsagePeriod::Week,
-        }
+        self.refresh(app);
+        self.render(&app.state.borrow());
     }
 
     pub fn refresh(&self, app: &Rc<App>) {
-        let period = self.period();
+        let period = self.period.get();
         app.state.borrow_mut().usage_period = Some(period);
         let request = app.core.request();
+        self.request.replace(Some(request.clone()));
+        self.failed.set(false);
         app.core.run(|studio| studio.load_usage(request, period));
     }
 
-    pub fn render(&self, state: &State) {
-        let child = if let Some(report) = &state.usage {
-            report_view(report, self.modes.active_name().as_deref().unwrap_or("tokens"))
-        } else {
-            let label = gtk::Label::new(Some("Loading usage…"));
-            label.add_css_class("dim-label");
-            label.upcast()
-        };
-        self.body.set_child(Some(&child));
-    }
-}
-
-fn report_view(report: &UsageReport, mode: &str) -> gtk::Widget {
-    let column = gtk::Box::new(gtk::Orientation::Vertical, 20);
-    let metrics = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    metrics.set_homogeneous(true);
-    metrics.append(&metric("Cost", &format::cost(report.cost_usd), "estimated"));
-    metrics.append(&metric(
-        "Tokens",
-        &format::tokens(report.total_tokens),
-        &format!("{} in · {} out", format::tokens(report.input_tokens), format::tokens(report.output_tokens)),
-    ));
-    metrics.append(&metric("Sessions", &report.requests.to_string(), "with usage"));
-    column.append(&metrics);
-    if mode == "limits" && report.limits.is_empty() {
-        let empty = gtk::Label::new(Some("No provider rate windows reported for this period."));
-        empty.add_css_class("dim-label");
-        column.append(&empty);
-    }
-    if !report.limits.is_empty() && mode == "limits" {
-        let limits = adw::PreferencesGroup::builder()
-            .title("Limits")
-            .description("Provider rate windows reported by the Eukhe daemon")
-            .build();
-        for limit in &report.limits {
-            let mut subtitle = Vec::new();
-            if let Some(percent) = limit.used_percent {
-                subtitle.push(format!("{percent:.0}% used"));
-            }
-            if let Some(resets) = limit.resets_at {
-                subtitle.push(format!("resets in {}", format::countdown(resets, format::now_ms())));
-            }
-            let row = adw::ActionRow::builder()
-                .title(format::escape(&format!("{} · {}", limit.provider, limit.window)))
-                .subtitle(subtitle.join(" · "))
-                .build();
-            if limit.parked {
-                row.add_suffix(&pill("Parked"));
-            }
-            if let Some(percent) = limit.used_percent {
-                let bar = gtk::LevelBar::for_interval(0.0, 100.0);
-                bar.set_value(percent.clamp(0.0, 100.0));
-                bar.set_size_request(140, 6);
-                bar.set_valign(gtk::Align::Center);
-                row.add_suffix(&bar);
-            }
-            limits.add(&row);
+    pub fn failed(&self, request: &str, message: &str) -> bool {
+        if self.request.borrow().as_deref() != Some(request) {
+            return false;
         }
-        column.append(&limits);
+        self.failure.set_description(Some(&crate::format::escape(message)));
+        self.failed.set(true);
+        true
     }
-    if mode == "limits" {
-        return column.upcast();
+
+    pub fn render(&self, state: &State) {
+        let Some(report) = &state.usage else {
+            self.stack.set_visible_child_name(if self.failed.get() { "failure" } else { "loading" });
+            return;
+        };
+        match self.mode.get() {
+            "limits" => {
+                self.limits.fill(&report.limits, &state.providers);
+                self.stack.set_visible_child_name("limits");
+            }
+            mode => {
+                let metric = if mode == "cost" { Metric::Cost } else { Metric::Tokens };
+                self.view.fill(report, metric, self.period.get());
+                self.stack.set_visible_child_name("dashboard");
+            }
+        }
     }
-    let cost = mode == "cost";
-    column.append(&chart_card(if cost { "Daily cost" } else { "Daily tokens" }, &report.daily, cost));
-    let group = adw::PreferencesGroup::builder().title("By model").build();
-    if report.by_model.is_empty() {
-        group.add(&adw::ActionRow::builder().title("No usage in this period").build());
-    }
-    let mut models: Vec<_> = report.by_model.iter().collect();
-    if cost {
-        models.sort_by(|left, right| right.cost_usd.total_cmp(&left.cost_usd));
-    }
-    for model in models {
-        let row = adw::ActionRow::builder()
-            .title(format::escape(&model.model))
-            .subtitle(format::escape(&format!("{} · {} sessions", model.provider, model.requests)))
-            .build();
-        row.add_suffix(&meta(&format!("{} tokens · {}", format::tokens(model.tokens), format::cost(model.cost_usd))));
-        group.add(&row);
-    }
-    column.append(&group);
-    column.upcast()
 }
 
 pub(crate) fn metric(title: &str, value: &str, caption: &str) -> gtk::Box {

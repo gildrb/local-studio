@@ -5,6 +5,7 @@ mod diff;
 mod files;
 mod forge;
 mod git;
+mod history;
 mod links;
 mod local;
 pub mod model;
@@ -83,6 +84,7 @@ struct Inner {
     protected: Mutex<Vec<PathBuf>>,
     project_adder: Mutex<Option<ProjectAdder>>,
     text: TextGen,
+    usage: Arc<Mutex<usage::Ledger>>,
 }
 
 #[derive(Clone)]
@@ -143,6 +145,7 @@ impl Workspace {
             protected: Mutex::new(Vec::new()),
             project_adder: Mutex::new(None),
             text,
+            usage: Arc::default(),
         });
         let workspace = Self { inner };
         let refresher = workspace.clone();
@@ -603,9 +606,10 @@ impl Workspace {
 
     pub(crate) fn load_usage(&self, request: String, period: UsagePeriod) {
         let daemon = self.inner.daemon.clone();
+        let ledger = Arc::clone(&self.inner.usage);
         let reply = request.clone();
         self.answer(request, async move {
-            let report = usage::load(&daemon, period, time::now_ms()).await?;
+            let report = usage::load(&daemon, ledger, period, time::now_ms()).await?;
             Ok(vec![Update::Usage { request: reply, report }])
         });
     }

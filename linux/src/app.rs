@@ -5,8 +5,8 @@ use std::rc::{Rc, Weak};
 use adw::prelude::*;
 use gtk::gio;
 use local_studio_core::{
-    ChatWidth, Connection, Delivery, FollowUpBehavior, NotificationKind, NotificationMode, PromptDraft, Shelf,
-    ThreadSettings, TranscriptOp, Update,
+    ChatWidth, Connection, Delivery, FollowUpBehavior, Item, ItemKind, NotificationKind, NotificationMode, PromptDraft,
+    Shelf, ThreadSettings, TranscriptOp, Update,
 };
 
 use crate::branches::BranchBar;
@@ -24,9 +24,11 @@ use crate::pulls::PullsPage;
 use crate::search::ProjectSearch;
 use crate::settings::SettingsDialog;
 use crate::sidebar::Sidebar;
-use crate::state::{Page, State};
+use crate::state::{Page, PendingSend, State};
 use crate::theme;
 use crate::timeline::Timeline;
+
+const LOCAL_ITEM: u64 = 1 << 62;
 
 pub type Hook = Rc<dyn Fn(&Rc<App>)>;
 pub type SavedAccels = Vec<(String, Vec<String>)>;
@@ -149,7 +151,7 @@ impl App {
             let drawer = Drawer::new(weak.clone());
             let goto = GotoFile::new(weak.clone());
             let local = LocalPage::new(weak.clone());
-            let usage = UsagePage::new(weak.clone());
+            let usage = UsagePage::new(weak);
             let hero = Hero::new(weak.clone());
             let pulls = PullsPage::new(weak.clone());
             let branches = BranchBar::new(weak.clone());
@@ -387,6 +389,11 @@ impl App {
             Update::Thread { thread, info } => {
                 let mut state = self.state.borrow_mut();
                 if state.selected.as_deref() == Some(thread.as_str()) {
+                    let info = crate::state::continued(info, state.info.as_ref());
+                    let start = |info: Option<&local_studio_core::ThreadInfo>| {
+                        info.filter(|info| info.busy).and_then(|info| info.run_started_at)
+                    };
+                    dirty.sidebar |= start(state.info.as_ref()) != start(Some(&info));
                     state.info = Some(info);
                     dirty.header = true;
                     dirty.composer = true;
@@ -400,6 +407,7 @@ impl App {
                     }
                     self.timeline.apply(op);
                     self.timeline.refresh_minimap();
+                    dirty.composer |= self.render_pending();
                 }
             }
             Update::Subagents { thread, agents } => {
@@ -435,6 +443,8 @@ impl App {
                 if state.selected.as_deref() == Some(thread.as_str()) {
                     state.queue = queued;
                     dirty.composer = true;
+                    drop(state);
+                    self.render_pending();
                 }
             }
             Update::ComposerText { thread, text } => {
@@ -603,8 +613,15 @@ impl App {
                 _ => self.toast(&message),
             },
             Update::RequestFailed { request, message } => {
+                if self.send_failed(&request, &message) {
+                    return;
+                }
                 self.local.settled(&request, Some(&message));
                 dirty.local = true;
+                if self.usage.failed(&request, &message) {
+                    dirty.usage = true;
+                    return;
+                }
                 match self.take_request(&request) {
                     Some(Target::Mentions | Target::Commands | Target::ThreadSearch) => {}
                     Some(Target::PanelPulls | Target::PanelPull) => self.panel.pulls.failed(&message),
@@ -718,6 +735,7 @@ impl App {
             state.queue.clear();
         }
         self.timeline.clear();
+        self.render_pending();
         self.composer.reset();
         self.core.run(|studio| studio.select_thread(thread.clone()));
         let running = thread.as_deref().map_or(0, |id| {
@@ -774,17 +792,31 @@ impl App {
         self.requests.borrow_mut().remove(request)
     }
 
-    pub fn send(self: &Rc<Self>, prompt: PromptDraft) {
+    pub fn send(self: &Rc<Self>, prompt: PromptDraft, draft: String) {
         let mut state = self.state.borrow_mut();
         if let Some(thread) = state.selected.clone() {
             let busy = state.info.as_ref().is_some_and(|info| info.busy);
             let forced = self.force_steer.take();
             let steer = busy && (forced || state.settings.follow_up_behavior == FollowUpBehavior::Steer);
-            drop(state);
             let request = self.core.request();
-            self.core.run(|studio| {
-                studio.send(request, thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue })
+            let text = prompt.text.trim().to_string();
+            let queue_baseline = state.queue.iter().filter(|queued| queued.text.trim() == text).count();
+            state.pending.push(PendingSend {
+                request: request.clone(),
+                thread: thread.clone(),
+                baseline: self.timeline.user_count(&text),
+                text,
+                draft,
+                images: u32::try_from(prompt.images.len()).unwrap_or(u32::MAX),
+                queued: busy,
+                queue_baseline,
             });
+            drop(state);
+            self.core.run(|studio| {
+                studio.send(request, thread, prompt, if steer { Delivery::Steer } else { Delivery::Queue });
+            });
+            self.render_pending();
+            self.render(Dirty { composer: true, ..Dirty::default() });
             return;
         }
         state.drafts += 1;
@@ -809,6 +841,58 @@ impl App {
         } else {
             self.core.run(|studio| studio.start_thread(draft, project, prompt, settings));
         }
+    }
+
+    pub fn render_pending(&self) -> bool {
+        let removed;
+        let bubbles: Vec<Item> = {
+            let mut state = self.state.borrow_mut();
+            let selected = state.selected.clone();
+            let queue: Vec<String> = state.queue.iter().map(|queued| queued.text.trim().to_string()).collect();
+            let before = state.pending.len();
+            state.pending.retain(|pending| {
+                Some(&pending.thread) != selected.as_ref()
+                    || (self.timeline.user_count(&pending.text) <= pending.baseline
+                        && queue.iter().filter(|text| **text == pending.text).count() <= pending.queue_baseline)
+            });
+            removed = state.pending.len() != before;
+            state
+                .pending
+                .iter()
+                .filter(|pending| Some(&pending.thread) == selected.as_ref() && !pending.queued)
+                .enumerate()
+                .map(|(index, pending)| Item {
+                    id: LOCAL_ITEM + index as u64,
+                    turn: u64::MAX,
+                    created_at: None,
+                    kind: ItemKind::User {
+                        text: pending.text.clone(),
+                        images: pending.images,
+                        entry: None,
+                        thumbnails: Vec::new(),
+                    },
+                })
+                .collect()
+        };
+        self.timeline.set_local(&bubbles);
+        removed
+    }
+
+    fn send_failed(self: &Rc<Self>, request: &str, message: &str) -> bool {
+        let pending = {
+            let mut state = self.state.borrow_mut();
+            let Some(index) = state.pending.iter().position(|pending| pending.request == request) else { return false };
+            state.pending.remove(index)
+        };
+        self.render_pending();
+        self.toast(&format!("Could not send the message: {message}"));
+        if self.state.borrow().selected.as_deref() == Some(pending.thread.as_str())
+            && self.composer.text().trim().is_empty()
+        {
+            self.composer.set_text(&pending.draft);
+        }
+        self.render(Dirty { composer: true, ..Dirty::default() });
+        true
     }
 
     pub fn add_project(self: &Rc<Self>) {
