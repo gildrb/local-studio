@@ -263,6 +263,11 @@ final class ConversationStore {
     @ObservationIgnored private var seeded: Set<String> = []
     @ObservationIgnored var scrollTop: UInt64?
     private(set) var timelines: [String] = []
+    private(set) var loading = false
+
+    var showsLoading: Bool {
+        rows.isEmpty && (info == nil || (loading && thread != nil))
+    }
 
     static let cachedThreads = 12
     static let liveTimelines = 10
@@ -285,6 +290,10 @@ final class ConversationStore {
         followsEnd = cached?.scroll.followsEnd ?? true
         scrollTop = cached?.scroll.top
         awaitingReset = cached != nil
+        let loading = thread != nil && cached == nil
+        if self.loading != loading {
+            self.loading = loading
+        }
         keepTimeline(thread)
     }
 
@@ -373,6 +382,9 @@ final class ConversationStore {
 
     func apply(thread: String, op: TranscriptOp) -> String? {
         guard thread == self.thread else { return nil }
+        if loading {
+            loading = false
+        }
         switch op {
         case .reset(let items):
             awaitingReset = false

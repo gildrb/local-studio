@@ -594,7 +594,7 @@ final class StressHarness: NSObject {
     }
 
     private func checkTimeline(_ timeline: TimelineProbe, thread: String) {
-        if timeline.rows == 0, let seen = seenRows[thread], seen > 0 {
+        if timeline.rows == 0, !timeline.placeholder, let seen = seenRows[thread], seen > 0 {
             record("blank timeline", "\(thread) rendered 0 rows after showing \(seen)")
         }
         if let first = timeline.firstUser {

@@ -187,7 +187,7 @@ private struct LoadingPlaceholder: View {
     let conversation: ConversationStore
 
     var body: some View {
-        if conversation.rows.isEmpty, conversation.info == nil {
+        if conversation.showsLoading {
             VStack(spacing: 10) {
                 LogoMark(style: .coin)
                     .frame(width: 28, height: 28)
@@ -374,7 +374,7 @@ private struct TimelineScroll: View {
         }.first
         return TimelineProbe(
             thread: conversation.thread, pending: conversation.focusedPending, rows: conversation.rows.count, firstUser: firstUser,
-            placeholder: conversation.rows.isEmpty && conversation.info == nil
+            placeholder: conversation.showsLoading
         )
     }
 
