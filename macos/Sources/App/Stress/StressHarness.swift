@@ -821,7 +821,7 @@ final class StressHarness: NSObject {
 
 private extension InboxSections {
     func contains(title: String) -> Bool {
-        [pinned, active, working, snoozed, settled].contains { rows in rows.contains { $0.title == title } }
+        [pinned, active, working, snoozed, settled].contains { rows in rows.contains { UserSender.sameTitle($0.title, title) } }
     }
 }
 
