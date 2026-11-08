@@ -20,12 +20,12 @@ struct StressSeed {
     let store: StudioStore
     private(set) var prompts: [String: String] = [:]
 
-    static let realModel = ProcessInfo.processInfo.environment["STRESS_MODEL"] == "haiku"
-    static let realSendLimit = 20
+    static let realModel = ProcessInfo.processInfo.environment["STRESS_MODEL"] != "faux"
+    static let realSendLimit = 36
 
     static var plans: [Plan] {
         guard realModel else { return fauxPlans }
-        return [Plan(project: "alpha", turns: 3), Plan(project: "beta", turns: 2), Plan(project: "gamma", turns: 1), Plan(project: "alpha", turns: 1)]
+        return [Plan(project: "alpha", turns: 3), Plan(project: "beta", turns: 2), Plan(project: "gamma", turns: 2), Plan(project: "alpha", turns: 2)]
     }
 
     static var seedSends: Int {
@@ -39,11 +39,14 @@ struct StressSeed {
     ]
 
     private static let realPrompts = [
-        "Run ls here, then summarize in one line",
-        "Say hello in three words",
-        "Read README.md and quote its first line",
-        "What is 7 times 6? One line",
-        "Count the files here with a shell command",
+        "List the source files here, pick the largest one, read it and summarize its structure in five bullets",
+        "Now propose one concrete refactor of that file that would make it simpler, as a short unified diff (do not apply it)",
+        "Which other files would that change touch? Grep for the names involved and list each call site with one line on why",
+        "Read the two files that look most central to this project and explain how they interact, citing function names",
+        "Grep for TODO, FIXME or unwrap-like shortcuts here and summarize the three most worrying ones with file and line",
+        "Pick one public type here, read its definition and every place it is used, then describe its lifecycle step by step",
+        "Write a short design note (under 200 words) for making the slowest-looking code path here faster, with a code sketch",
+        "Count the lines of each source file with a shell command and comment on which files are too large and how to split one",
     ]
 
     static func realPrompt(_ index: Int) -> String {
@@ -118,7 +121,7 @@ struct StressSeed {
         for name in ["alpha", "beta", "gamma"] {
             let path = (home as NSString).appendingPathComponent("stress/\(name)")
             try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
-            if Self.realModel {
+            if Self.realModel, !FileManager.default.fileExists(atPath: (path as NSString).appendingPathComponent("README.md")) {
                 try? "# \(name)\n\nScratch project for the Local Studio stress harness.\n".write(toFile: (path as NSString).appendingPathComponent("README.md"), atomically: true, encoding: .utf8)
             }
             if name == "alpha" {
