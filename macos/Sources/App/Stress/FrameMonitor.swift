@@ -118,7 +118,9 @@ final class Watchdog: Sendable {
             $0.answered = now
             $0.progressed = now
         }
+        let samplePath = ProcessInfo.processInfo.environment["STRESS_HANG_SAMPLE"]
         let thread = Thread { [state] in
+            var sampled = false
             while state.withLock({ $0.running }) {
                 let now = ProcessInfo.processInfo.systemUptime
                 let current = state.withLock { current -> State in
@@ -130,6 +132,13 @@ final class Watchdog: Sendable {
                     let answered = String(format: "%.1f", now - current.answered)
                     print("FAIL macOS stress: the harness made no progress for \(Int(Self.progressLimit)) s after \(current.context); the main queue last answered \(answered) s ago, core ticks \(current.ticks)")
                     exit(1)
+                }
+                if let samplePath, !sampled, now - current.answered > 3 {
+                    sampled = true
+                    let sample = Process()
+                    sample.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
+                    sample.arguments = ["\(getpid())", "4", "1", "-mayDie", "-file", samplePath]
+                    try? sample.run()
                 }
                 if !current.outstanding {
                     let posted = now
