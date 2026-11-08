@@ -2,20 +2,23 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use anyhow::{bail, Context};
+use anyhow::{bail, ensure, Context};
 use eukhe_client::daemon_client::DaemonClient;
 use eukhe_types::daemon::DaemonCommand;
 use local_studio_core::{
     AccessMode, Block, Connection, DaemonLaunch, Item, ItemKind, PromptDraft, Studio, StudioConfig, ThreadRow,
-    ThreadSettings, ThreadStatus, TranscriptOp, Update, Waker, WorktreeChoice,
+    ThreadStatus, ToolState, TranscriptOp, Update, UsagePeriod, UsageReport, Waker, WorktreeChoice,
 };
 use serde_json::Map;
 
-const STEP_TIMEOUT: Duration = Duration::from_secs(60);
-const ANSWER: &str = "Finished while the app was closed: durable-ok.";
-const ANSWER_DELAY: Duration = Duration::from_secs(8);
-const FAUX_SCRIPT: &str =
-    r#"{"modelId":"faux-1","responses":[{"text":"Finished while the app was closed: durable-ok.","delayMs":8000}]}"#;
+#[path = "support/real_model.rs"]
+mod real_model;
+
+const STEP_TIMEOUT: Duration = Duration::from_secs(120);
+const MARK: &str = "durable-ok";
+const PROMPT: &str =
+    "Use the bash tool to run exactly this command once: `sleep 8 && echo durable-ok`. Then reply with only the word finished.";
+const CLOSED_FOR: Duration = Duration::from_secs(20);
 
 #[derive(Default)]
 struct Signal {
@@ -48,6 +51,7 @@ struct View {
     threads: Vec<ThreadRow>,
     started: Option<String>,
     items: Vec<Item>,
+    usage: Option<UsageReport>,
 }
 
 impl View {
@@ -101,6 +105,7 @@ impl Harness {
             }
             Update::Notice { level, text } => println!("     notice {level:?}: {text}"),
             Update::RequestFailed { request, message } => println!("     request {request} failed: {message}"),
+            Update::Usage { report, .. } => self.view.usage = Some(report),
             Update::ArchivedThreads { .. }
             | Update::ThreadSearch { .. }
             | Update::Thread { .. }
@@ -126,7 +131,6 @@ impl Harness {
             | Update::TerminalFrame { .. }
             | Update::TerminalText { .. }
             | Update::TerminalExited { .. }
-            | Update::Usage { .. }
             | Update::Local { .. }
             | Update::LocalDashboard { .. }
             | Update::Providers { .. }
@@ -164,10 +168,17 @@ fn apply_op(items: &mut Vec<Item>, op: TranscriptOp) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn tool_ran(items: &[Item]) -> Option<usize> {
+    items.iter().position(
+        |item| matches!(&item.kind, ItemKind::Tool { state: ToolState::Succeeded, output, .. } if output.contains(MARK)),
+    )
+}
+
 fn answered(items: &[Item]) -> bool {
-    items.iter().any(|item| match &item.kind {
+    let Some(tool) = tool_ran(items) else { return false };
+    items[tool + 1..].iter().any(|item| match &item.kind {
         ItemKind::Assistant { blocks, streaming, .. } => {
-            !streaming && blocks.iter().any(|block| matches!(block, Block::Text { text } if text.contains(ANSWER)))
+            !streaming && blocks.iter().any(|block| matches!(block, Block::Text { text } if !text.trim().is_empty()))
         }
         ItemKind::User { .. }
         | ItemKind::Tool { .. }
@@ -186,14 +197,8 @@ fn quit_mid_turn(harness: &mut Harness, work: &Path) -> anyhow::Result<String> {
     studio.start_thread(
         "draft-durable".to_string(),
         Some(project),
-        PromptDraft { text: "keep working while I quit".to_string(), images: Vec::new(), files: Vec::new() },
-        ThreadSettings {
-            provider: None,
-            model: None,
-            thinking_level: None,
-            access: AccessMode::Supervised,
-            worktree: WorktreeChoice::Local,
-        },
+        PromptDraft { text: PROMPT.to_string(), images: Vec::new(), files: Vec::new() },
+        real_model::thread_settings(AccessMode::FullAccess, WorktreeChoice::Local),
     );
     harness.pump_until("thread started and working", |view| {
         view.started
@@ -202,8 +207,8 @@ fn quit_mid_turn(harness: &mut Harness, work: &Path) -> anyhow::Result<String> {
             .is_some_and(|row| row.status == ThreadStatus::Working)
     })?;
     let thread = harness.view.started.clone().context("thread id")?;
-    if answered(&harness.view.items) {
-        bail!("the answer arrived before the app quit; the turn was not in flight");
+    if tool_ran(&harness.view.items).is_some() {
+        bail!("the tool finished before the app quit; the turn was not in flight");
     }
     Ok(thread)
 }
@@ -237,19 +242,28 @@ fn drive(config: &StudioConfig, socket: &Path, work: &Path) -> anyhow::Result<()
     println!("ok   app quit while the turn was still running");
     daemon_alive(socket)?;
     println!("ok   the Eukhe daemon kept running after the app quit");
-    std::thread::sleep(ANSWER_DELAY + Duration::from_secs(2));
+    std::thread::sleep(CLOSED_FOR);
     let mut reopened = Harness::new(config.clone())?;
     let outcome = reopened
         .pump_until("reopened app connected", |view| matches!(view.connection, Some(Connection::Ready)))
         .and_then(|()| {
             reopened.view.started = Some(thread.clone());
             reopened.studio.select_thread(Some(thread.clone()));
-            reopened.pump_until("the turn finished while the app was closed and its answer is shown", |view| {
+            reopened.pump_until("the turn kept running while the app was closed and its answer is shown", |view| {
                 answered(&view.items)
                     && view
                         .row(&thread)
                         .is_some_and(|row| !matches!(row.status, ThreadStatus::Working | ThreadStatus::Approval))
             })
+        })
+        .and_then(|()| {
+            ensure!(
+                reopened.view.items.iter().filter(|item| matches!(item.kind, ItemKind::User { .. })).count() == 1,
+                "the reopened thread replayed its prompt"
+            );
+            reopened.studio.load_usage("usage-1".to_string(), UsagePeriod::Day);
+            reopened.pump_until("usage report loaded", |view| view.usage.is_some())?;
+            real_model::check_usage(reopened.view.usage.as_ref().context("usage")?)
         });
     reopened.studio.shutdown();
     outcome
@@ -263,11 +277,8 @@ fn main() -> anyhow::Result<()> {
     let agent_dir = root.join("agent");
     let work = root.join("work");
     std::fs::create_dir_all(&work)?;
-    std::fs::create_dir_all(&agent_dir)?;
+    let _credentials = real_model::install(&agent_dir)?;
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", root.join("data"));
-    let script = root.join("faux-script.json");
-    std::fs::write(&script, FAUX_SCRIPT)?;
-    std::env::set_var("EUKHE_FAUX_SCRIPT", &script);
     let socket = root.join("d.sock");
     let config = StudioConfig {
         socket_path: Some(socket.to_string_lossy().into_owned()),

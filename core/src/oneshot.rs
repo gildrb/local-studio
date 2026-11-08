@@ -32,9 +32,6 @@ impl TextGen {
         if let Some(dir) = &self.session_dir {
             config["sessionDir"] = Value::String(dir.to_string_lossy().into_owned());
         }
-        if let Some(script) = std::env::var_os("EUKHE_FAUX_SCRIPT").filter(|value| !value.is_empty()) {
-            config["script"] = Value::String(script.to_string_lossy().into_owned());
-        }
         if let (Some(provider), Some(model)) = (provider, model) {
             config["provider"] = Value::String(provider);
             config["model"] = Value::String(model);

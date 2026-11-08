@@ -9,8 +9,8 @@
   - App icon: `macos/AppIcon.icon` (Icon Composer document) compiled by `actool`; needs Xcode 26+ after `sudo xcodebuild -runFirstLaunch`. Edit it in Icon Composer, check renditions with its `ictool`.
 - Lint with SwiftLint (`macos/.swiftlint.yml`), zero violations:
   - `env TOOLCHAIN_DIR=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain nix run nixpkgs#swiftlint -- lint --strict` from `macos/`.
-- Verify end to end in an isolated environment (see root `AGENTS.md`):
-  - `LocalStudio +smoke`, `+smoke-shell`, `+smoke-conversation`, `+smoke-panels [png]`: each drives the real core and daemon and exits non-zero on failure.
+- Verify end to end in an isolated environment on the real model (see root `AGENTS.md`): `HOME`, `EUKHE_DAEMON_SOCKET`, `LOCAL_STUDIO_DATA_DIR` and `EUKHE_CODING_AGENT_DIR` under a scratch dir, the credentials copied into that agent dir with mode 0600 and the `auth.json` copy deleted after the run.
+  - `LocalStudio +smoke`, `+smoke-shell`, `+smoke-conversation`, `+smoke-panels [png]`, `+smoke-providers`: each drives the real core and daemon and exits non-zero on failure. The model-driven ones select `anthropic/claude-haiku-5-5` thinking `low` (`App/SmokeModel.swift`) and assert behavior: a real bash call succeeds and writes its file, the reply arrives, a supervised write asks for approval while queued and steered follow-ups land after their prompt, fan-out threads answer, the built-in provider round-trips.
   - `LocalStudio +snapshot <dir> [name-filter]`: renders every `SnapshotCatalog` entry offscreen in dark and light from `Update` fixtures. Look at the PNGs.
 - Structure: `App/` (scenes, commands, smokes), `Design/` (Theme tokens, shared controls), `Features/<Area>/`, `Generated/` (build output, ignored). `StudioStore` routes every core `Update` to one feature store.
 - UI rules: native controls (grouped `Form`, `Picker(.menu)`, `Menu`, `Toggle`); `Theme` tokens only (dashboards palette); simple light-weight SF Symbols; no animation on repeatable actions and no looping animations; window chrome never moves.

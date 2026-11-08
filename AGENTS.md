@@ -20,15 +20,16 @@ Native desktop clients for local LLM work. The agent core is [Eukhe](https://git
 - Add no code comments.
 - Never stop processes, controllers, engines, or GPU jobs this work did not start. Kill only PIDs you spawned.
 - Controller: keep native inference requests as passthrough. Never disable CUDA graphs, enforce eager, or set output caps on vLLM/SGLang. New controllers use port 18091 and a separate data root.
-- Never run against real user state in checks: isolate with `HOME`, `EUKHE_DAEMON_SOCKET`, `EUKHE_CODING_AGENT_DIR`, `LOCAL_STUDIO_DATA_DIR` under a scratch dir and `EUKHE_OFFLINE=1 EUKHE_FAUX_SCRIPT=<script.json>`; stop the daemon after (`core` smoke example `--stop <socket>`).
+- Never run against real user state in checks: isolate with `HOME`, `EUKHE_DAEMON_SOCKET`, `EUKHE_CODING_AGENT_DIR`, `LOCAL_STUDIO_DATA_DIR` under a scratch dir; stop the daemon after (`core` smoke example `--stop <socket>`).
+- Checks drive a real model, never a faux one: `anthropic/claude-haiku-5-5`, thinking `low`, a handful of short prompts per run. Copy (never link) `auth.json`, `models.json` and `settings.json` from a credentialed agent dir into the scratch `EUKHE_CODING_AGENT_DIR` with mode 0600 (`install -m 600 <creds>/{auth,models,settings}.json <scratch>/agent/`) and delete the `auth.json` copy after the run. The core examples do this themselves from `LOCAL_STUDIO_SMOKE_AGENT=<creds dir>`. Assert behavior a correct app always shows (a real tool call and its file, the reply arriving, transcript order, usage with real tokens and cost), never model wording.
 - `macos/AGENTS.md` and `linux/AGENTS.md` hold the per-platform build and lint rules.
 
 ## Commands
 
 - Core: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings`
-- Core end to end: `cargo run -p local-studio-core --example smoke -- <eukhe-daemon> <scratch>` and `--example workspace_smoke -- <eukhe-daemon> <scratch>`
-- Providers end to end: `cargo build -p local-studio-core --examples`, then `providers_smoke <eukhe-daemon> <scratch>` from the examples dir; it starts the `provider_stub` example on a random 127.0.0.1 port, round-trips a custom endpoint through Eukhe without real keys, and stops the stub by PID
-- Durability end to end: `--example durable_smoke -- <eukhe-daemon> <scratch>` quits the core mid-turn, checks the Eukhe daemon survives, and requires the reopened core to show the answer finished while it was closed
+- Core end to end (each needs `LOCAL_STUDIO_SMOKE_AGENT`, ends with a usage report that must count real tokens and cost, and removes its credential copy): `cargo run -p local-studio-core --example smoke -- <eukhe-daemon> <scratch>`, `--example workspace_smoke -- <eukhe-daemon> <scratch>`, `--example working_smoke -- <eukhe-daemon> <scratch>` (a tool step keeps the thread busy with one start time)
+- Providers end to end: `cargo build -p local-studio-core --examples`, then `providers_smoke <eukhe-daemon> <scratch>` from the examples dir; it round-trips the built-in `anthropic` provider on the real model, starts the `provider_stub` example (the custom endpoint under test) on a random 127.0.0.1 port, round-trips a custom endpoint through Eukhe, checks models.json and auth.json return to the providers they started with, and stops the stub by PID
+- Durability end to end: `--example durable_smoke -- <eukhe-daemon> <scratch>` quits the core mid-turn (a real `sleep 8` bash call), checks the Eukhe daemon survives, and requires the reopened core to show the turn's tool output and reply
 - Stop a scratch daemon: `cargo run -p local-studio-core --example smoke -- --stop <socket>`
 - Controller: `cd controller && bun install && bun run typecheck && bun run test`
 - Share one cargo target across worktrees: `CARGO_TARGET_DIR=/tmp/ls-cargo-target`
