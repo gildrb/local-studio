@@ -541,6 +541,16 @@ private struct TimelineFooter: View {
                 }
             }
         }
+        .onChange(of: live ? workingProbe : nil, initial: true) { _, probe in
+            guard let probe else { return }
+            store.shell.probe.working = probe
+        }
+    }
+
+    private var workingProbe: WorkingProbe {
+        let conversation = store.conversation
+        guard let info = conversation.info, info.busy else { return WorkingProbe(thread: conversation.thread, shown: false, started: nil) }
+        return WorkingProbe(thread: conversation.thread, shown: true, started: info.runStartedAt)
     }
 }
 

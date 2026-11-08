@@ -21,11 +21,18 @@ struct ScrollProbe: Equatable {
     var top: UInt64?
 }
 
+struct WorkingProbe: Equatable {
+    var thread: String?
+    var shown: Bool
+    var started: Int64?
+}
+
 @MainActor
 final class RenderProbe {
     var header: HeaderProbe?
     var timeline: TimelineProbe?
     var scroll: ScrollProbe?
+    var working: WorkingProbe?
     private(set) var dispatched: [String?] = []
 
     func ran(_ command: String?) {

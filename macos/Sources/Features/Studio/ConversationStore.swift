@@ -375,9 +375,20 @@ final class ConversationStore {
     }
 
     func setInfo(thread: String, info: ThreadInfo) {
+        let info = Self.continued(info, previous: infoCache[thread])
         infoCache[thread] = info
         guard thread == self.thread, self.info != info else { return }
         self.info = info
+    }
+
+    private static let startSkew: Int64 = 2_000
+
+    private static func continued(_ info: ThreadInfo, previous: ThreadInfo?) -> ThreadInfo {
+        guard info.busy, let previous, previous.busy, let earlier = previous.runStartedAt, let start = info.runStartedAt,
+              start > earlier, start - earlier < startSkew else { return info }
+        var info = info
+        info.runStartedAt = earlier
+        return info
     }
 
     func apply(thread: String, op: TranscriptOp) -> String? {

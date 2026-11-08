@@ -85,6 +85,7 @@ final class StressHarness: NSObject {
     private var expectedTop: [String: UInt64] = [:]
     private var restoreFrames = 0
     private var streaks: [String: Int] = [:]
+    private var workStarts: [String: Int64] = [:]
     private var sends: [Send] = []
     private var switchStart: (target: String, at: TimeInterval)?
     private var switchLatencies: [TimeInterval] = []
@@ -537,6 +538,24 @@ final class StressHarness: NSObject {
         if let scroll = probe.scroll, scroll.thread == thread, timeline.rows > 0 {
             checkScroll(scroll, thread: thread)
         }
+        checkWorking(thread: thread)
+    }
+
+    private func checkWorking(thread: String) {
+        guard store.inbox.thread(thread)?.status == .working else {
+            workStarts[thread] = nil
+            streaks["working row"] = 0
+            return
+        }
+        guard store.conversation.followsEnd, store.conversation.info?.thread == thread else { return }
+        let probe = store.shell.probe.working
+        let started = probe?.thread == thread && probe?.shown == true ? probe?.started : nil
+        streak("working row", started == nil, "\(thread) is Working in the sidebar but its timeline shows \(probe?.thread == thread && probe?.shown == true ? "a working row without a start time" : "no working row"), after \(monitor.context)")
+        guard let started else { return }
+        if let previous = workStarts[thread], started > previous {
+            record("working reset", "\(thread) working row restarted its elapsed time \(started - previous) ms later mid-turn, after \(monitor.context)")
+        }
+        workStarts[thread] = started
     }
 
     private func checkPendings() {
