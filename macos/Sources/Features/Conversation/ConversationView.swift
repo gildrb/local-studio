@@ -136,7 +136,7 @@ private struct ConversationColumn: View {
         let selected = store.conversation.selectedID
         ZStack {
             ForEach(store.conversation.timelines.filter { $0 == selected || built.contains($0) }, id: \.self) { thread in
-                TimelineScroll(store: store, width: width, thread: thread, current: thread == selected)
+                TimelineSlot(store: store, width: width, thread: thread, current: thread == selected)
             }
         }
         .onChange(of: selected, initial: true) { _, selected in
@@ -199,6 +199,34 @@ private struct LoadingPlaceholder: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 40)
         }
+    }
+}
+
+private final class SlotSize {
+    var size: CGSize?
+}
+
+private struct TimelineSlot: View {
+    let store: StudioStore
+    let width: CGFloat
+    let thread: String
+    let current: Bool
+    @State private var measured = SlotSize()
+
+    private static let parkedOffset: CGFloat = 100_000
+
+    var body: some View {
+        let pinned = current ? nil : measured.size
+        TimelineScroll(store: store, width: width, thread: thread, current: current)
+            .frame(width: pinned?.width, height: pinned?.height)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { [measured, current] size in
+                if current {
+                    measured.size = size
+                }
+            }
+            .offset(x: current ? 0 : Self.parkedOffset)
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+            .zIndex(current ? 1 : 0)
     }
 }
 
@@ -336,7 +364,6 @@ private struct TimelineScroll: View {
         }
         .opacity(current ? 1 : 0)
         .accessibilityHidden(!current)
-        .zIndex(current ? 1 : 0)
     }
 
     private var timelineProbe: TimelineProbe {
