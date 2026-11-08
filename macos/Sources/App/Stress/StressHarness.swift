@@ -404,6 +404,10 @@ final class StressHarness: NSObject {
 
     private func newThread(in window: NSWindow, failing: Bool) async throws {
         press("cmd+t", window)
+        let project = store.inbox.currentProject
+        if store.conversation.selectedID == nil {
+            store.conversation.composer(project: project).text = ""
+        }
         try await Task.sleep(for: .milliseconds(30 + random.int(60)))
         let text: String
         if failing {
@@ -413,10 +417,6 @@ final class StressHarness: NSObject {
         } else {
             created += 1
             text = "hello \(created)"
-        }
-        let project = store.inbox.currentProject
-        if store.conversation.selectedID == nil {
-            store.conversation.composer(project: project).text = ""
         }
         let responder = window.firstResponder.map { "\(type(of: $0))" } ?? "nil"
         monitor.context = "type"

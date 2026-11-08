@@ -44,7 +44,7 @@ const DEFAULT_KEYBINDINGS: &[(&str, &str, Option<&str>)] = &[
     ("chat.new", "cmd+n", Some("!terminalFocus")),
     ("chat.newLocal", "cmd+shift+n", Some("!terminalFocus")),
     ("chat.newWithoutProject", "cmd+option+n", Some("!terminalFocus")),
-    ("chat.newTab", "cmd+t", Some("!terminalFocus")),
+    ("chat.newTab", "cmd+t", None),
     ("modelPicker.toggle", "cmd+shift+m", Some("!terminalFocus")),
     ("composer.host", "cmd+shift+h", Some("!terminalFocus")),
     ("composer.effort", "cmd+shift+e", Some("!terminalFocus")),

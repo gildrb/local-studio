@@ -383,6 +383,9 @@ final class PanelState {
         rightPanelMaximized = restored.maximized
         rightPanelOpen = restored.rightPanelOpen
         terminalOpen = restored.terminalOpen
+        if terminalOpen, let project {
+            decks[project]?.groups.flatMap(\.sessions).forEach { $0.focusOnAttach = false }
+        }
         miniPlayer = restored.miniPlayer
         wasBusy = false
         turnRevision = nil

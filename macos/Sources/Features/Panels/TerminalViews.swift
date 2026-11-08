@@ -383,7 +383,8 @@ final class TerminalPaneCoordinator: NSObject {
         self.view = view
         view.attach(session)
         registerCommands()
-        if session.status == .starting {
+        if session.status == .starting, session.focusOnAttach {
+            session.focusOnAttach = false
             Task { @MainActor [weak view] in
                 guard let view else { return }
                 view.window?.makeFirstResponder(view)
