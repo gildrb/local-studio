@@ -90,7 +90,7 @@ impl Harness {
         match update {
             Update::Connection { state } => self.view.connection = Some(state),
             Update::Projects { projects } => {
-                self.view.projects = projects.into_iter().map(|project| project.id).collect()
+                self.view.projects = projects.into_iter().map(|project| project.id).collect();
             }
             Update::Threads { threads } => self.view.threads = threads,
             Update::ThreadStarted { thread, .. } => self.view.started = Some(thread),
