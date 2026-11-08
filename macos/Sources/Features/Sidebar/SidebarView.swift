@@ -96,6 +96,7 @@ struct SidebarView: View {
                 .padding(.horizontal, Theme.Metrics.sidebarInset)
                 .padding(.vertical, 4)
                 .frame(minHeight: viewport, alignment: .top)
+                .motion(Motion.reorder, value: order)
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewport = $0 }
             .scrollIndicators(.never)

@@ -169,17 +169,21 @@ struct CodeBlockView: View {
 struct CopyButton: View {
     let text: String
     var size: CGFloat = 13
-    @State private var copied = false
+    @State private var copies = 0
 
     var body: some View {
+        let copied = copies > 0
         MessageActionButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc", size: size) {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            copied = true
-            Task {
-                try? await Task.sleep(for: .seconds(1.5))
-                copied = false
-            }
+            copies += 1
+        }
+        .motion(Motion.confirm, value: copied)
+        .task(id: copies) {
+            guard copies > 0 else { return }
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled else { return }
+            copies = 0
         }
     }
 }
@@ -201,6 +205,7 @@ struct MessageActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
+                .contentTransition(.symbolEffect(.replace))
                 .font(.system(size: size, weight: .light))
                 .foregroundStyle(hovering ? Color.primary : Theme.secondaryText)
                 .frame(width: 24, height: 24)

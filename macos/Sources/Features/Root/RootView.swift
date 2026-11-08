@@ -39,10 +39,7 @@ struct RootView: View {
             PanelToggles(store: store)
         }
         .overlay(alignment: .top) {
-            if let notice = store.notice {
-                ToastView(notice: notice) { store.dismissNotice() }
-                    .padding(.top, Theme.Metrics.titlebarHeight + 6)
-            }
+            ToastLayer(store: store)
         }
         .overlay(alignment: .top) {
             if let page = shell.palette {
@@ -193,6 +190,50 @@ struct WindowChrome: View {
 
     private func hint(_ title: String, _ command: String) -> String {
         store.shortcutText(command).map { "\(title) (\($0))" } ?? title
+    }
+}
+
+/// Slides a notice in from the top and back out. The exit animates the still-mounted toast up and out and
+/// unmounts it once the slide has finished: as a removal transition the exit does not show (the `+motion`
+/// strips capture no frames between shown and gone). A notice arriving mid-exit turns the toast back.
+struct ToastLayer: View {
+    let store: StudioStore
+    @State private var shown: StudioNotice?
+    @State private var leaving = false
+
+    var body: some View {
+        ZStack {
+            if let shown {
+                ToastView(notice: shown) { store.dismissNotice() }
+                    .padding(.top, Theme.Metrics.titlebarHeight + 6)
+                    .offset(y: leaving ? -48 : 0)
+                    .opacity(leaving ? 0 : 1)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .onChange(of: store.notice, initial: true) { _, notice in present(notice) }
+    }
+
+    private func present(_ notice: StudioNotice?) {
+        guard notice == nil else {
+            withAnimation(Motion.structural) {
+                shown = notice
+                leaving = false
+            }
+            return
+        }
+        guard let exiting = shown?.id else { return }
+        guard let animation = Motion.structural else {
+            shown = nil
+            return
+        }
+        withAnimation(animation) {
+            leaving = true
+        } completion: {
+            guard leaving, shown?.id == exiting else { return }
+            shown = nil
+            leaving = false
+        }
     }
 }
 

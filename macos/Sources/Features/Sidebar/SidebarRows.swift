@@ -6,6 +6,7 @@ struct StatusBadge: View {
     let row: ThreadRow
     let now: Date
     let store: StudioStore
+    @State private var attention = 0
 
     var body: some View {
         if let glyph = Self.glyph(row.status) {
@@ -17,6 +18,8 @@ struct StatusBadge: View {
                 } else {
                     Image(systemName: glyph.symbol)
                         .font(.system(size: 11, weight: .regular))
+                        .symbolEffect(.bounce.up, options: .nonRepeating, value: attention)
+                        .motion(Motion.confirm, value: attention)
                         .accessibilityHidden(true)
                 }
                 if row.status == .working, row.statusSince != nil {
@@ -44,6 +47,10 @@ struct StatusBadge: View {
             .fixedSize()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(label(glyph.title, now: now))
+            .onChange(of: row.status) { _, status in
+                guard status == .approval || status == .failed, !Motion.reduced else { return }
+                Task { @MainActor in attention += 1 }
+            }
         } else {
             Text(RelativeAge.text(millis: row.updatedAt, now: now))
                 .font(.system(size: 11.5))
