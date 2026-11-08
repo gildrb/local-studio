@@ -148,6 +148,7 @@ window, dialog { font-size: 13px; }
 .ls-dash-small { font-size: 11.5px; }
 .ls-dash-num { font-feature-settings: 'tnum'; }
 .ls-dash-model { font-size: 17px; font-weight: 600; }
+.ls-dash-name { font-size: 15px; font-weight: 500; }
 .ls-dash-hero { font-size: 44px; font-weight: 600; font-feature-settings: 'tnum'; }
 .ls-dash-total { font-size: 44px; font-weight: 700; font-feature-settings: 'tnum'; }
 .ls-dash-value { font-size: 22px; font-weight: 600; font-feature-settings: 'tnum'; }

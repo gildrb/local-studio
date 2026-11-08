@@ -8,6 +8,7 @@ use gtk::{gdk, glib, graphene};
 
 use crate::app::App;
 use crate::fixtures;
+use crate::usage_scenes;
 
 pub fn start(app: &Rc<App>, dir: PathBuf, filter: Option<String>, failed: Rc<Cell<bool>>) {
     if let Err(error) = std::fs::create_dir_all(&dir) {
@@ -28,6 +29,17 @@ pub fn start(app: &Rc<App>, dir: PathBuf, filter: Option<String>, failed: Rc<Cel
             }
             fixtures::stage(&app, scene);
             settle(700).await;
+            let mut waited = 0;
+            while !usage_scenes::ready(&app, scene) && waited < 120_000 {
+                settle(250).await;
+                waited += 250;
+                if waited % 5_000 == 0 {
+                    usage_scenes::retry(&app, scene);
+                }
+            }
+            if usage_scenes::finish(&app, scene) {
+                settle(700).await;
+            }
             let path = dir.join(format!("{scene}.png"));
             match capture(&app.window, &path) {
                 Ok(()) => {

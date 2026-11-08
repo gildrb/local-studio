@@ -4,12 +4,11 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{glib, pango};
-use local_studio_core::{
-    LocalAction, LocalController, LocalDashboard, LocalGpuTelemetry, LocalRecipe, LocalTokenHistory,
-};
+use local_studio_core::{LocalAction, LocalController, LocalDashboard, LocalGpuTelemetry, LocalRecipe};
 
 use crate::app::App;
 use crate::dashboard_charts::{Heatmap, Sparkline};
+use crate::dashboard_parts::{self as parts, label, Figure, FigureView, Hero, TokenSummary, Tone};
 use crate::format;
 use crate::numbers;
 use crate::state::{Page, State};
@@ -47,104 +46,6 @@ impl Machine {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Tone {
-    Plain,
-    Warning,
-    Danger,
-}
-
-struct Figure {
-    value: Option<String>,
-    unit: String,
-    hint: Option<String>,
-    tone: Tone,
-}
-
-impl Figure {
-    fn new(value: Option<String>, unit: &str, hint: Option<String>) -> Self {
-        Self { value, unit: unit.to_string(), hint, tone: Tone::Plain }
-    }
-}
-
-fn label(text: &str, classes: &[&str]) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    for class in classes {
-        label.add_css_class(class);
-    }
-    label.set_xalign(0.0);
-    label
-}
-
-struct FigureView {
-    root: gtk::Box,
-    value: gtk::Label,
-    unit: gtk::Label,
-    hint_row: gtk::Box,
-    icon: gtk::Image,
-    hint: gtk::Label,
-}
-
-impl FigureView {
-    fn build(title: &str) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        root.append(&label(title, &["dim-label", "ls-dash-label"]));
-        let value = label("—", &["ls-dash-value"]);
-        let unit = label("", &["dim-label", "ls-dash-label"]);
-        value.set_valign(gtk::Align::BaselineFill);
-        unit.set_valign(gtk::Align::BaselineFill);
-        let line = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-        line.append(&value);
-        line.append(&unit);
-        root.append(&line);
-        let icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
-        icon.set_visible(false);
-        let hint = label(" ", &["ls-dash-label"]);
-        hint.set_ellipsize(pango::EllipsizeMode::End);
-        let hint_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-        hint_row.append(&icon);
-        hint_row.append(&hint);
-        root.append(&hint_row);
-        Self { root, value, unit, hint_row, icon, hint }
-    }
-
-    fn set(&self, figure: &Figure) {
-        self.value.set_label(figure.value.as_deref().unwrap_or("—"));
-        self.unit.set_label(&figure.unit);
-        self.hint.set_label(figure.hint.as_deref().unwrap_or(" "));
-        self.icon.set_visible(figure.tone != Tone::Plain);
-        if figure.tone == Tone::Plain {
-            self.hint.add_css_class("dim-label");
-        } else {
-            self.hint.remove_css_class("dim-label");
-        }
-        if figure.tone == Tone::Warning {
-            self.hint_row.add_css_class("warning");
-        } else {
-            self.hint_row.remove_css_class("warning");
-        }
-        if figure.tone == Tone::Danger {
-            self.hint_row.add_css_class("error");
-        } else {
-            self.hint_row.remove_css_class("error");
-        }
-    }
-}
-
-fn summary_row(title: &str) -> (gtk::Box, gtk::Label) {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    row.set_margin_top(8);
-    row.set_margin_bottom(8);
-    let name = label(title, &["dim-label", "ls-dash-label"]);
-    name.set_hexpand(true);
-    let value = label("—", &["ls-dash-label", "ls-dash-num"]);
-    value.set_xalign(1.0);
-    value.set_ellipsize(pango::EllipsizeMode::End);
-    row.append(&name);
-    row.append(&value);
-    (row, value)
-}
-
 struct View {
     root: gtk::Box,
     model: gtk::Label,
@@ -155,16 +56,10 @@ struct View {
     stop_button: gtk::Button,
     error: gtk::Box,
     error_label: gtk::Label,
-    decode: gtk::Label,
-    decode_hint: gtk::Label,
+    decode: Hero,
     sparkline: Sparkline,
     figures: [FigureView; 6],
-    since: gtk::Label,
-    total: gtk::Label,
-    split: gtk::Label,
-    week: gtk::Label,
-    busiest: gtk::Label,
-    active: gtk::Label,
+    summary: TokenSummary,
     heatmap: Heatmap,
 }
 
@@ -184,9 +79,7 @@ impl View {
         titles.append(&detail);
         let switch =
             adw::ButtonContent::builder().icon_name("media-playlist-repeat-symbolic").label("Switch model…").build();
-        let switch_button = gtk::Button::builder().child(&switch).valign(gtk::Align::Start).build();
-        switch_button.add_css_class("ls-dash-button");
-        switch_button.add_css_class("bordered");
+        let switch_button = parts::button(&switch, true);
         let weak = app.clone();
         switch_button.connect_clicked(move |_| {
             if let Some(app) = weak.upgrade() {
@@ -194,9 +87,7 @@ impl View {
             }
         });
         let stop = adw::ButtonContent::builder().icon_name("media-playback-stop-symbolic").label("Stop model…").build();
-        let stop_button = gtk::Button::builder().child(&stop).valign(gtk::Align::Start).build();
-        stop_button.add_css_class("flat");
-        stop_button.add_css_class("ls-dash-button");
+        let stop_button = parts::button(&stop, false);
         let weak = app.clone();
         stop_button.connect_clicked(move |_| {
             if let Some(app) = weak.upgrade() {
@@ -217,8 +108,7 @@ impl View {
         error.append(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
         error.append(&error_label);
         error.set_visible(false);
-        let decode = label("—", &["ls-dash-hero"]);
-        let decode_hint = label(" ", &["dim-label", "ls-dash-label"]);
+        let decode = Hero::build("Decode", "tok/s");
         let sparkline = Sparkline::build();
         let figures = [
             FigureView::build("First token"),
@@ -228,49 +118,18 @@ impl View {
             FigureView::build("Memory"),
             FigureView::build("Power"),
         ];
-        let grid = figure_grid(&decode, &decode_hint, &sparkline, &figures);
+        let chart_title = label("Decode, last 24 hours", &["dim-label", "ls-dash-label"]);
+        let grid = parts::figure_grid(&decode, &chart_title, &sparkline, &[&figures[..3], &figures[3..]]);
         let left = gtk::Box::new(gtk::Orientation::Vertical, 0);
         left.set_hexpand(true);
         left.append(&header);
         left.append(&error);
         left.append(&grid);
-        let since = label("Tokens", &["dim-label", "ls-dash-label"]);
-        let total = label("—", &["ls-dash-total"]);
-        total.set_ellipsize(pango::EllipsizeMode::End);
-        let split = label(" ", &["dim-label", "ls-dash-label"]);
-        split.set_wrap(true);
-        let (week_row, last_week) = summary_row("Last 7 days");
-        let (busiest_row, busiest) = summary_row("Busiest day");
-        let (active_row, active) = summary_row("Active days");
-        let rows = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        rows.set_margin_top(26);
-        rows.append(&week_row);
-        rows.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        rows.append(&busiest_row);
-        rows.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
-        rows.append(&active_row);
-        let summary = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        summary.set_margin_top(2);
-        summary.set_size_request(244, -1);
-        summary.set_hexpand(false);
-        summary.append(&since);
-        summary.append(&total);
-        summary.append(&split);
-        summary.append(&rows);
-        let divider = gtk::Separator::new(gtk::Orientation::Vertical);
-        divider.set_margin_start(44);
-        divider.set_margin_end(44);
-        let top = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        top.append(&left);
-        top.append(&divider);
-        top.append(&summary);
-        let rule = gtk::Separator::new(gtk::Orientation::Horizontal);
-        rule.set_margin_top(36);
-        rule.set_margin_bottom(44);
+        let summary = TokenSummary::build(&[]);
         let heatmap = Heatmap::build();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        root.append(&top);
-        root.append(&rule);
+        root.append(&parts::columns(&left, &summary));
+        root.append(&parts::hairline(36, 44));
         root.append(&heatmap.root);
         Self {
             root,
@@ -283,15 +142,9 @@ impl View {
             error,
             error_label,
             decode,
-            decode_hint,
             sparkline,
             figures,
-            since,
-            total,
-            split,
-            week: last_week,
-            busiest,
-            active,
+            summary,
             heatmap,
         }
     }
@@ -325,80 +178,21 @@ impl View {
         let error = dashboard.and_then(|dashboard| dashboard.error.as_deref());
         self.error.set_visible(error.is_some());
         self.error_label.set_label(error.unwrap_or_default());
-        self.decode.set_label(
-            &dashboard.and_then(|dashboard| dashboard.decode_tps).map_or_else(|| "—".to_string(), numbers::decimal),
-        );
-        self.decode_hint.set_label(&decode_hint(dashboard));
+        let decode = dashboard.and_then(|dashboard| dashboard.decode_tps).map(numbers::decimal);
+        self.decode.set("Decode", decode.as_deref(), "tok/s", &decode_hint(dashboard));
         self.sparkline.set(dashboard.map_or(&[][..], |dashboard| dashboard.decode_series.as_slice()));
         let figures = figures(dashboard);
         for (view, figure) in self.figures.iter().zip(figures.iter()) {
             view.set(figure);
         }
-        self.summary(dashboard.map(|dashboard| &dashboard.tokens));
-    }
-
-    fn summary(&self, tokens: Option<&LocalTokenHistory>) {
-        let since = tokens.and_then(|tokens| tokens.since_day.as_deref()).and_then(numbers::parse_day);
-        self.since.set_label(
-            &since.map_or_else(|| "Tokens".to_string(), |day| format!("Tokens since {}", numbers::day(day, true))),
+        let tokens = dashboard.map(|dashboard| &dashboard.tokens);
+        self.summary.set(tokens, "Counted from engine metrics as models serve requests.");
+        self.heatmap.set(
+            tokens.map(|tokens| (parts::token_values(tokens), tokens.last_day.as_str())),
+            numbers::tokens,
+            "Tokens per day, last year",
         );
-        self.total.set_label(&tokens.map_or_else(|| "—".to_string(), |tokens| numbers::compact(tokens.total)));
-        self.split.set_label(&match tokens {
-            None => " ".to_string(),
-            Some(tokens) if tokens.total == 0 => "Counted from engine metrics as models serve requests.".to_string(),
-            Some(tokens) => {
-                format!("{} read, {} written", numbers::compact(tokens.read), numbers::compact(tokens.written))
-            }
-        });
-        self.week.set_label(&tokens.map_or_else(|| "—".to_string(), |tokens| numbers::compact(tokens.last_week)));
-        self.busiest.set_label(&tokens.map_or_else(
-            || "—".to_string(),
-            |tokens| {
-                tokens.busiest_day.as_deref().and_then(numbers::parse_day).map_or_else(
-                    || "—".to_string(),
-                    |day| format!("{}, {}", numbers::compact(tokens.busiest_tokens), numbers::day(day, false)),
-                )
-            },
-        ));
-        self.active.set_label(&tokens.map_or_else(
-            || "—".to_string(),
-            |tokens| {
-                format!(
-                    "{} of {}",
-                    numbers::count(tokens.active_days.into()),
-                    numbers::count(tokens.tracked_days.into())
-                )
-            },
-        ));
-        self.heatmap.set(tokens);
     }
-}
-
-fn figure_grid(decode: &gtk::Label, hint: &gtk::Label, sparkline: &Sparkline, figures: &[FigureView; 6]) -> gtk::Grid {
-    let grid = gtk::Grid::builder().column_homogeneous(true).column_spacing(12).build();
-    let tok = label("tok/s", &["dim-label", "ls-dash-label"]);
-    decode.set_valign(gtk::Align::BaselineFill);
-    tok.set_valign(gtk::Align::BaselineFill);
-    let line = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    line.append(decode);
-    line.append(&tok);
-    let hero = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    hero.set_margin_top(44);
-    hero.append(&label("Decode", &["dim-label", "ls-dash-label"]));
-    hero.append(&line);
-    hero.append(hint);
-    let chart = gtk::Box::new(gtk::Orientation::Vertical, 10);
-    chart.set_margin_top(44);
-    chart.append(&label("Decode, last 24 hours", &["dim-label", "ls-dash-label"]));
-    chart.append(&sparkline.area);
-    grid.attach(&hero, 0, 0, 1, 1);
-    grid.attach(&chart, 1, 0, 2, 1);
-    for (index, figure) in figures.iter().enumerate() {
-        let (column, row) = (i32::try_from(index % 3).unwrap_or(0), i32::try_from(index / 3).unwrap_or(0) + 1);
-        figure.root.set_margin_top(if row == 1 { 48 } else { 40 });
-        grid.attach(&figure.root, column, row, 1, 1);
-    }
-    grid
 }
 
 fn header_detail(controller: &LocalController, dashboard: Option<&LocalDashboard>) -> String {
@@ -822,9 +616,7 @@ impl LocalPage {
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 7);
             content.append(&dot);
             content.append(&gtk::Label::new(Some(name.as_str())));
-            let button = gtk::ToggleButton::builder().child(&content).build();
-            button.add_css_class("flat");
-            button.add_css_class("ls-dash-tab");
+            let button = parts::tab(&content);
             button.update_property(&[gtk::accessible::Property::Label(&format!("{name}, {}", machine.label()))]);
             if let Some((_, leader)) = buttons.first() {
                 button.set_group(Some(leader));

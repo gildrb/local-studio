@@ -6,8 +6,8 @@ use local_studio_core::{
     FileDiff, GitStatus, Item, ItemKind, Keybinding, LocalController, LocalEndpoint, LocalGpu, LocalHardware, LocalJob,
     LocalModelUsage, LocalRecipe, LocalRegistry, LocalRegistryMatch, LocalSnapshot, LocalUsage, ModelKey, ModelOption,
     ModelRef, NoticeLevel, Project, ProviderCredential, ProviderKind, ProviderStatus, QueuedMessage, RegistryModel,
-    RegistryVariant, Settings, Shelf, ThreadInfo, ThreadRow, ThreadStatus, ToolKind, ToolState, TranscriptOp, Update,
-    UsageByModel, UsageDay, UsageLimit, UsagePeriod, UsageReport,
+    RegistryVariant, Settings, Shelf, ThreadInfo, ThreadRow, ThreadStatus, TokenHistory, ToolKind, ToolState,
+    TranscriptOp, Update, UsageDay, UsagePeriod, UsageReport,
 };
 
 use crate::app::{App, Dirty};
@@ -20,10 +20,11 @@ pub fn scenes() -> Vec<&'static str> {
     all.extend(crate::scenes_pickers::SCENES);
     all.extend(crate::dashboard_scenes::SCENES);
     all.extend(crate::keyboard::SCENES);
+    all.extend(crate::usage_scenes::scenes());
     all
 }
 
-pub const SCENES: [&str; 57] = [
+pub const SCENES: [&str; 58] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -37,6 +38,7 @@ pub const SCENES: [&str; 57] = [
     "11-settings-keybindings",
     "12-local",
     "13-usage",
+    "13-usage-limits",
     "14-conversation-light",
     "15-command-palette",
     "16-composer-commands",
@@ -88,6 +90,9 @@ const MINUTE: i64 = 60_000;
 
 #[allow(clippy::too_many_lines)]
 pub fn stage(app: &Rc<App>, scene: &str) {
+    if crate::usage_scenes::stage(app, scene) {
+        return;
+    }
     match scene {
         "01-empty" => {
             app.apply(vec![
@@ -191,9 +196,11 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             conversation(app, false);
             crate::palette::open(app);
         }
-        "13-usage" => {
+        "13-usage" | "13-usage-limits" => {
             app.apply(base());
             app.open_page(Page::Usage);
+            app.usage.set_mode(if scene == "13-usage" { "tokens" } else { "limits" });
+            app.usage.choose(UsagePeriod::Week);
             app.apply(vec![Update::Usage { request: "fixture".to_string(), report: usage_report() }]);
         }
         _ => crate::scenes::stage(app, scene),
@@ -948,66 +955,26 @@ fn local_snapshot() -> LocalSnapshot {
 }
 
 fn usage_report() -> UsageReport {
+    let (year, month, date) = crate::numbers::civil(crate::numbers::today());
     UsageReport {
         period: UsagePeriod::Week,
-        total_tokens: 48_300_000,
-        input_tokens: 44_100_000,
-        output_tokens: 4_200_000,
-        cost_usd: 61.42,
-        requests: 37,
-        by_model: vec![
-            UsageByModel {
-                provider: "anthropic".to_string(),
-                model: "claude-sonnet-4-5".to_string(),
-                tokens: 31_200_000,
-                cost_usd: 44.10,
-                requests: 22,
-            },
-            UsageByModel {
-                provider: "openai".to_string(),
-                model: "gpt-5-codex".to_string(),
-                tokens: 12_900_000,
-                cost_usd: 17.32,
-                requests: 11,
-            },
-            UsageByModel {
-                provider: "local".to_string(),
-                model: "qwen3-coder-30b".to_string(),
-                tokens: 4_200_000,
-                cost_usd: 0.0,
-                requests: 4,
-            },
-            UsageByModel {
-                provider: "anthropic".to_string(),
-                model: "claude-haiku-4-5".to_string(),
-                tokens: 3_100,
-                cost_usd: 0.0045,
-                requests: 2,
-            },
-        ],
-        daily: days(7, 4_000_000),
-        limits: vec![
-            UsageLimit {
-                provider: "anthropic".to_string(),
-                window: "5-hour".to_string(),
-                used_percent: Some(62.0),
-                resets_at: Some(format::now_ms() + 95 * MINUTE),
-                parked: false,
-            },
-            UsageLimit {
-                provider: "anthropic".to_string(),
-                window: "Weekly".to_string(),
-                used_percent: Some(28.0),
-                resets_at: Some(format::now_ms() + 3 * 24 * 60 * MINUTE),
-                parked: false,
-            },
-            UsageLimit {
-                provider: "openai".to_string(),
-                window: "5-hour".to_string(),
-                used_percent: Some(100.0),
-                resets_at: Some(format::now_ms() + 40 * MINUTE),
-                parked: true,
-            },
-        ],
+        total_tokens: 0,
+        input_tokens: 0,
+        cache_read_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0.0,
+        requests: 0,
+        sessions: 0,
+        by_model: Vec::new(),
+        series: Vec::new(),
+        series_step_ms: 86_400_000,
+        lifetime: TokenHistory {
+            daily: vec![0; 378],
+            last_day: format!("{year:04}-{month:02}-{date:02}"),
+            ..TokenHistory::default()
+        },
+        lifetime_cost_usd: 0.0,
+        daily_cost_usd: vec![0.0; 378],
+        limits: Vec::new(),
     }
 }

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use local_studio_core::{
     ColorScheme, LocalController, LocalDashboard, LocalEndpoint, LocalEngineTelemetry, LocalGpu, LocalGpuTelemetry,
-    LocalHardware, LocalJob, LocalRecipe, LocalSnapshot, LocalTokenHistory, Settings, Update,
+    LocalHardware, LocalJob, LocalRecipe, LocalSnapshot, Settings, TokenHistory, Update,
 };
 
 use crate::app::App;
@@ -199,7 +199,7 @@ fn telemetry_gpu(index: u32, used: f64, watts: f64, temperature: f64) -> LocalGp
 }
 
 #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn token_history() -> LocalTokenHistory {
+fn token_history() -> TokenHistory {
     let daily = (0_u64..378)
         .map(|day| {
             if day < 6 {
@@ -212,7 +212,7 @@ fn token_history() -> LocalTokenHistory {
             (hash * hash * hash * 24_000_000.0 * (1.0 + day as f64 / 378.0)) as u64
         })
         .collect();
-    LocalTokenHistory {
+    TokenHistory {
         since_day: Some("2025-11-03".to_string()),
         total: 3_404_000_000,
         read: 3_200_000_000,

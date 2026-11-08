@@ -151,7 +151,7 @@ impl App {
             let drawer = Drawer::new(weak.clone());
             let goto = GotoFile::new(weak.clone());
             let local = LocalPage::new(weak.clone());
-            let usage = UsagePage::new(weak.clone());
+            let usage = UsagePage::new(weak);
             let hero = Hero::new(weak.clone());
             let pulls = PullsPage::new(weak.clone());
             let branches = BranchBar::new(weak.clone());
@@ -618,6 +618,10 @@ impl App {
                 }
                 self.local.settled(&request, Some(&message));
                 dirty.local = true;
+                if self.usage.failed(&request, &message) {
+                    dirty.usage = true;
+                    return;
+                }
                 match self.take_request(&request) {
                     Some(Target::Mentions | Target::Commands | Target::ThreadSearch) => {}
                     Some(Target::PanelPulls | Target::PanelPull) => self.panel.pulls.failed(&message),
