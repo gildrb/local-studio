@@ -1261,7 +1261,9 @@ impl Actor {
         let flags = self.store.flags(id);
         let mut info = live.state.info(id, self.title(id), flags.access.unwrap_or(AccessMode::FullAccess));
         info.project = threads::project_for(&live.state.cwd, &flags, &self.store.projects);
-        info.run_started_at = thread.run_started_at.filter(|_| live.state.busy);
+        let running = self.running(id);
+        info.busy = running;
+        info.run_started_at = if running { thread.run_started_at } else { None };
         let head = threads::git_head(&live.state.cwd);
         info.branch = head.branch;
         info.worktree = head.worktree;
@@ -1662,7 +1664,11 @@ impl Actor {
         };
         if let Some(thread) = self.threads.get_mut(id) {
             thread.pending_run = true;
+            if thread.run_started_at.is_none() {
+                thread.run_started_at = Some(now_ms());
+            }
         }
+        self.emit_info(id);
         self.store.update(id, |flags| {
             flags.settled_at = None;
             flags.unread = false;
@@ -1680,7 +1686,9 @@ impl Actor {
         if let Err(error) = self.call(command).await {
             if let Some(thread) = self.threads.get_mut(id) {
                 thread.pending_run = false;
+                thread.run_started_at = None;
             }
+            self.emit_info(id);
             return Err(error);
         }
         Ok(())
@@ -2435,7 +2443,17 @@ impl Actor {
                     self.run_finished(&id, row.failed);
                 }
             }
+            let flipped = was_running != row.running;
+            let stopped = was_running && !row.running;
             self.roster.insert(agent, row);
+            if stopped && !self.running(&id) {
+                if let Some(thread) = self.threads.get_mut(&id) {
+                    thread.run_started_at = None;
+                }
+            }
+            if flipped {
+                self.emit_info(&id);
+            }
         }
         if children_changed || children_before != self.children.len() {
             if let Some(focused) = self.focused.clone() {
@@ -2639,7 +2657,7 @@ impl Actor {
         let mut failure = None;
         match event {
             SessionEvent::AgentStart => {
-                thread.run_started_at = Some(now);
+                thread.run_started_at = thread.run_started_at.or(Some(now));
                 thread.failed_at = None;
             }
             SessionEvent::MessageStart { message: AgentMessage::User(user), .. } => {
@@ -2703,7 +2721,11 @@ impl Actor {
         if let Some(thread) = self.threads.get_mut(id) {
             thread.pending_run = false;
             thread.ended_by_events = true;
-            thread.run_started_at = None;
+        }
+        if !self.running(id) {
+            if let Some(thread) = self.threads.get_mut(id) {
+                thread.run_started_at = None;
+            }
         }
         self.fetch_entries(id, true).await;
         if !failed {
