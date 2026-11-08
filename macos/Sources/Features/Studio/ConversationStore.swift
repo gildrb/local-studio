@@ -797,6 +797,7 @@ final class ConversationStore {
         followsEnd = true
         scrollTop = nil
         focusedPending = start.draft
+        keepTimeline(start.draft)
         pendingsChanged?()
     }
 

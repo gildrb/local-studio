@@ -34,7 +34,7 @@ private struct SelectionOnHover: ViewModifier {
         content
             .environment(\.selectableText, active)
             .onHover { inside in
-                if inside, !active {
+                if inside, live, !active {
                     active = true
                 }
             }
