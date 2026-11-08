@@ -146,6 +146,7 @@ private struct UserBubble: View {
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.leading, 96)
+        .modifier(BubbleFrameProbe(text: text, probe: store.shell.probe))
         .hoverActions(alignment: .bottomTrailing, hovering: $hovering) {
             if let createdAt {
                 TimestampText(millis: createdAt)
@@ -160,6 +161,25 @@ private struct UserBubble: View {
 
     private var collapsible: Bool {
         text.count > 1_200 || text.reduce(0) { $1 == "\n" ? $0 + 1 : $0 } > 16
+    }
+}
+
+private struct BubbleFrameProbe: ViewModifier {
+    let text: String
+    let probe: RenderProbe
+
+    func body(content: Content) -> some View {
+        if probe.drawn != nil {
+            content
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                    probe.bubbles[text] = frame
+                }
+                .onDisappear {
+                    probe.bubbles[text] = nil
+                }
+        } else {
+            content
+        }
     }
 }
 
@@ -813,6 +833,7 @@ private struct CompactionDivider: View {
 struct WorkingRow: View {
     let info: ThreadInfo
     let waitingForApproval: Bool
+    var probe: RenderProbe?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -828,16 +849,26 @@ struct WorkingRow: View {
             }
             if let started = info.runStartedAt, !waitingForApproval, !info.compacting, info.retryAttempt == 0 {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text("Working for \(elapsed(since: started, now: context.date))")
+                    let text = "Working for \(elapsed(since: started, now: context.date))"
+                    Text(text)
                         .monospacedDigit()
+                        .onChange(of: text, initial: true) { _, text in
+                            probe?.drew(info.thread, .workingRow, text)
+                        }
                 }
             } else {
                 Text(label)
+                    .onChange(of: label, initial: true) { _, label in
+                        probe?.drew(info.thread, .workingRow, label)
+                    }
             }
         }
         .font(.system(size: 12.5))
         .foregroundStyle(Theme.secondaryText)
         .frame(height: 22)
+        .onDisappear {
+            probe?.drew(info.thread, .workingRow, nil)
+        }
     }
 
     private var label: String {

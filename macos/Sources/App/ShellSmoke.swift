@@ -66,7 +66,8 @@ final class ShellSmoke {
                 smoke.store.dispatch("composer.stash")
                 smoke.store.dispatch("diff.toggle")
                 smoke.store.commands.unregister(owner: smoke)
-            }, done: { $0.routed == ["composer.stash", "terminal.split"] && !$0.store.commands.isRegistered("composer.stash") }),
+                smoke.store.dispatch("composer.stash")
+            }, done: { $0.routed == ["composer.stash", "terminal.split"] }),
             Step(name: "add project", act: { smoke in
                 let home = ProcessInfo.processInfo.environment["HOME"] ?? NSTemporaryDirectory()
                 let path = URL(fileURLWithPath: home).appendingPathComponent("shell-smoke-project").path
@@ -233,9 +234,7 @@ final class ShellSmoke {
 extension ShellSmoke {
     private func keyboardSteps() -> [Step] {
         [
-            Step(name: "main window", act: { smoke in
-                Task { _ = try? await presentMainWindow(smoke.store) }
-            }, done: { $0.store.mainWindow?.isVisible == true }),
+            Step(name: "main window at launch", act: { _ in }, done: { $0.store.mainWindow?.isVisible == true }),
             Step(name: "⌘T opens a draft in the current project", act: { $0.store.dispatch("chat.newTab") }, done: { smoke in
                 smoke.store.focusedThread == nil && smoke.store.shell.route == .thread && smoke.store.inbox.currentProject == smoke.project
                     && smoke.store.currentRegion == .composer && smoke.menuItem("New Thread Here")?.keyEquivalent == "t"

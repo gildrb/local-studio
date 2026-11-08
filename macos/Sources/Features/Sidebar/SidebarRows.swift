@@ -27,6 +27,10 @@ struct StatusBadge: View {
                             .monospacedDigit()
                             .onChange(of: text, initial: true) { _, text in
                                 store.shell.probe.badges[row.id] = BadgeProbe(text: text, at: context.date)
+                                store.shell.probe.drew(row.id, .badge, text)
+                            }
+                            .onDisappear {
+                                store.shell.probe.drew(row.id, .badge, nil)
                             }
                     }
                 } else {

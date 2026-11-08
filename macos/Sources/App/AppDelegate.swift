@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var keys: KeysHarness?
 
     override init() {
+        UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
         commandRefresh = CommandRefresh(store: store)
         super.init()
@@ -42,6 +43,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSAlert(error: error).runModal()
             NSApp.terminate(nil)
             return
+        }
+        if ["+smoke", "+smoke-conversation", "+smoke-panels", "+smoke-providers"].contains(where: arguments.contains) {
+            store.shell.onboardingDismissed = true
         }
         if arguments.contains("+smoke") {
             let smoke = Smoke(store: store)
@@ -81,6 +85,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             harness.start()
             keys = harness
         }
+        DispatchQueue.main.async { [weak self] in
+            self?.presentMainWindowIfMissing()
+        }
+    }
+
+    private func presentMainWindowIfMissing() {
+        guard store.mainWindow == nil else { return }
+        _ = NSApp.delegate?.applicationOpenUntitledFile?(NSApp)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

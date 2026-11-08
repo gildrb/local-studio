@@ -34,8 +34,8 @@ final class KeysHarness {
     private func run() async {
         do {
             try await until("the core connection", 60) { store.connection == .ready }
-            store.shell.onboardingDismissed = true
-            let window = try await presentMainWindow(store)
+            let window = try await launchedMainWindow(store)
+            try await skipOnboarding(store, window)
             var seed = StressSeed(store: store)
             try await seed.run()
             threads = store.inbox.visibleOrder
