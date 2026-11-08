@@ -79,6 +79,7 @@ extension StudioStore {
         case "terminal.toggle": return { self.panels.toggleTerminal() }
         case "rightPanel.toggle": return { self.panels.toggleRightPanel() }
         case "rightPanel.close":
+            if let window = NSApp.keyWindow, window !== mainWindow { return { window.performClose(nil) } }
             guard panels.rightPanelOpen else { return nil }
             return { self.panels.closeActiveSurface() }
         case "diff.toggle": return { self.panels.toggleDiff() }
@@ -95,6 +96,7 @@ extension StudioStore {
         case "chat.newWithoutProject": return { self.newThread(in: nil) }
         case "chat.newTab": return { self.newThreadTab() }
         case "thread.close":
+            if let window = NSApp.keyWindow, window !== mainWindow { return { window.performClose(nil) } }
             guard !panels.rightPanelOpen else { return nil }
             guard shell.route == .thread, conversation.selectedID != nil else { return { self.mainWindow?.performClose(nil) } }
             return { self.closeThread() }

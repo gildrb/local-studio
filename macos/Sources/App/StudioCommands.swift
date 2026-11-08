@@ -133,6 +133,10 @@ struct StudioCommands: Commands {
                 button("Close Terminal", "terminal.close")
             }
         }
+        CommandGroup(replacing: .saveItem) {
+            Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+        }
         CommandGroup(replacing: .undoRedo) {
             Button(state.undoLabel.map { "Undo \($0)" } ?? "Undo") { store.dispatch("thread.undo") }
                 .keyboardShortcut(refresh.command("thread.undo").shortcut ?? KeyboardShortcut("z"))
