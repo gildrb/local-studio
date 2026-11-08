@@ -98,7 +98,6 @@ fn display_name(id: &str) -> String {
         "ollama" => Some("Ollama"),
         "lmstudio" => Some("LM Studio"),
         "local" | "local-studio" => Some("Local"),
-        "faux" => Some("Faux"),
         _ => None,
     };
     if let Some(name) = known {
@@ -709,9 +708,7 @@ impl Workspace {
 
     fn taken_ids(&self) -> BTreeSet<String> {
         let state = self.inner.providers.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut taken: BTreeSet<String> = state.catalog.iter().flatten().map(|model| model.provider.clone()).collect();
-        taken.insert("faux".to_string());
-        taken
+        state.catalog.iter().flatten().map(|model| model.provider.clone()).collect()
     }
 
     pub(crate) fn discover_provider_models(

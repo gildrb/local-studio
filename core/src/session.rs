@@ -219,9 +219,10 @@ pub(crate) fn model_options(data: &Value) -> anyhow::Result<(Vec<ModelOption>, V
         models_json_errors: Vec<String>,
     }
     let catalog = Catalog::deserialize(data)?;
-    let mut options: Vec<ModelOption> = faux_option().into_iter().collect();
-    options.extend(catalog.models.into_iter().map(|entry| {
-        ModelOption {
+    let options = catalog
+        .models
+        .into_iter()
+        .map(|entry| ModelOption {
             configured: catalog.configured_providers.contains(&entry.model.provider),
             thinking_levels: entry
                 .thinking_levels
@@ -240,25 +241,9 @@ pub(crate) fn model_options(data: &Value) -> anyhow::Result<(Vec<ModelOption>, V
                 .filter_map(|tier| serde_json::to_value(tier).ok())
                 .filter_map(|tier| tier.as_str().map(str::to_string))
                 .collect(),
-        }
-    }));
+        })
+        .collect();
     Ok((options, catalog.models_json_errors))
-}
-
-fn faux_option() -> Option<ModelOption> {
-    let path = std::env::var_os("EUKHE_FAUX_SCRIPT")?;
-    let script: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
-    let id = script.get("modelId").and_then(Value::as_str).unwrap_or("faux-1").to_string();
-    Some(ModelOption {
-        provider: "faux".to_string(),
-        name: "Faux Model".to_string(),
-        id,
-        reasoning: false,
-        thinking_levels: Vec::new(),
-        context_window: script.get("contextWindow").and_then(Value::as_u64).unwrap_or(128_000),
-        configured: true,
-        service_tiers: Vec::new(),
-    })
 }
 
 pub(crate) fn model_ref(value: &Value) -> Option<ModelRef> {
