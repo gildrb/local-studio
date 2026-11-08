@@ -65,8 +65,12 @@ struct ComposerTextView: NSViewRepresentable {
         context.coordinator.textView = textView
         context.coordinator.draft = draft
         context.coordinator.focusToken = focusToken
+        textView.focusOnWindow = true
         DispatchQueue.main.async {
-            textView.window?.makeFirstResponder(textView)
+            if let window = textView.window {
+                textView.focusOnWindow = false
+                window.makeFirstResponder(textView)
+            }
             context.coordinator.measure()
             context.coordinator.reportCaret()
             coordinator.parent.onVimMode(textView.vim.mode)
@@ -188,6 +192,7 @@ final class ComposerNSTextView: NSTextView {
     var onFiles: (([URL]) -> Void)?
     var onKey: ((ComposerKey, Int) -> Bool)?
     var markdownShortcuts = false
+    var focusOnWindow = false
     private(set) lazy var vim = ComposerVim()
     var vimEnabled = false {
         didSet {
@@ -195,6 +200,13 @@ final class ComposerNSTextView: NSTextView {
                 vim.reset()
             }
         }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard focusOnWindow, let window else { return }
+        focusOnWindow = false
+        window.makeFirstResponder(self)
     }
 
     override func keyDown(with event: NSEvent) {
