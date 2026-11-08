@@ -79,9 +79,6 @@ struct RootView: View {
         .sheet(isPresented: Bindable(shell).cloneShown) {
             CloneRepositorySheet(store: store)
         }
-        .onChange(of: store.conversation.thread) {
-            shell.headerRenaming = false
-        }
         .themeRoot()
         .onAppear { PageCommands.install(store) }
         .transaction { $0.disablesAnimations = true }

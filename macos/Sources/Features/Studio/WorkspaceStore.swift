@@ -377,16 +377,30 @@ final class PanelState {
         let carried = previous == nil && memory[Self.key(thread)] == nil
         let restored = carried ? memory.removeValue(forKey: Self.key(nil)) ?? PanelMemory() : memory[Self.key(thread)] ?? PanelMemory()
         self.thread = thread
-        surfaces = restored.surfaces
-        activeSurface = restored.active
-        rightPanelWidth = restored.width
-        rightPanelMaximized = restored.maximized
-        rightPanelOpen = restored.rightPanelOpen
-        terminalOpen = restored.terminalOpen
+        if surfaces.map(\.id) != restored.surfaces.map(\.id) {
+            surfaces = restored.surfaces
+        }
+        if activeSurface != restored.active {
+            activeSurface = restored.active
+        }
+        if rightPanelWidth != restored.width {
+            rightPanelWidth = restored.width
+        }
+        if rightPanelMaximized != restored.maximized {
+            rightPanelMaximized = restored.maximized
+        }
+        if rightPanelOpen != restored.rightPanelOpen {
+            rightPanelOpen = restored.rightPanelOpen
+        }
+        if terminalOpen != restored.terminalOpen {
+            terminalOpen = restored.terminalOpen
+        }
         if terminalOpen, let project {
             decks[project]?.groups.flatMap(\.sessions).forEach { $0.focusOnAttach = false }
         }
-        miniPlayer = restored.miniPlayer
+        if miniPlayer !== restored.miniPlayer {
+            miniPlayer = restored.miniPlayer
+        }
         wasBusy = false
         turnRevision = nil
     }
