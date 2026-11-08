@@ -3,51 +3,107 @@ import LocalStudioKit
 import SwiftUI
 import Observation
 
+struct MenuCommand: Equatable {
+    var enabled: Bool
+    var shortcut: KeyboardShortcut?
+}
+
+struct MenuState: Equatable {
+    var commands: [String: MenuCommand] = [:]
+    var sidebarVisible = true
+    var terminalOpen = false
+    var rightPanelOpen = false
+    var hasProjects = false
+    var hasSettings = false
+    var colorScheme: LocalStudioKit.ColorScheme = .system
+    var timeFormat: TimeFormat?
+    var undoLabel: String?
+    var row: ThreadRow?
+    var project: String?
+    var scripts: [ProjectScript] = []
+    var jumpTitles: [String] = []
+    var hasThread = false
+    var onThread = false
+}
+
 @MainActor
 final class CommandRefresh: ObservableObject {
+    private static let coalescing = Duration.milliseconds(200)
+
     private let store: StudioStore
+    private var known: Set<String> = []
+    private var scheduled = false
+    private(set) var state = MenuState()
 
     init(store: StudioStore) {
         self.store = store
         track()
     }
 
-    private func track() {
-        withObservationTracking {
-            read()
-        } onChange: { [weak self] in
-            Task { @MainActor in
-                self?.objectWillChange.send()
-                self?.track()
-            }
+    func command(_ id: String) -> MenuCommand {
+        if let command = state.commands[id] { return command }
+        known.insert(id)
+        let command = Self.command(id, store: store)
+        state.commands[id] = command
+        schedule()
+        return command
+    }
+
+    private func schedule() {
+        guard !scheduled else { return }
+        scheduled = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: Self.coalescing)
+            self?.scheduled = false
+            self?.track()
         }
     }
 
-    private func read() {
-        _ = store.pages.keybindings
-        _ = store.pages.settings?.colorScheme
-        _ = store.shell.sidebarVisible
-        _ = store.shell.route
-        _ = store.shell.canGoBack
-        _ = store.shell.canGoForward
-        _ = store.panels.terminalOpen
-        _ = store.panels.rightPanelOpen
-        _ = store.conversation.thread
-        _ = store.conversation.info?.project
-        _ = store.inbox.threads
-        _ = store.inbox.visibleOrder
-        _ = store.inbox.projects
-        _ = store.inbox.undo
-        _ = store.connection
+    private func track() {
+        let next = withObservationTracking {
+            snapshot()
+        } onChange: { [weak self] in
+            Task { @MainActor in
+                self?.schedule()
+            }
+        }
+        if next != state {
+            objectWillChange.send()
+            state = next
+        }
+    }
+
+    private func snapshot() -> MenuState {
         _ = store.commands.revision
-        _ = store.conversation.queued
-        _ = store.pages.settings?.timeFormat
-        _ = store.workspace.gitStatus
-        _ = store.inbox.projectScripts
-        _ = store.shell.region
-        _ = store.shell.timelineCursor
-        _ = store.panels.surfaces
-        _ = store.pages.settings?.vimMode
+        let inbox = store.inbox
+        let settings = store.pages.settings
+        let project = store.focusedProject
+        var next = MenuState()
+        for id in known {
+            next.commands[id] = Self.command(id, store: store)
+        }
+        next.sidebarVisible = store.shell.sidebarVisible
+        next.terminalOpen = store.panels.terminalOpen
+        next.rightPanelOpen = store.panels.rightPanelOpen
+        next.hasProjects = !inbox.projects.isEmpty
+        next.hasSettings = settings != nil
+        next.colorScheme = settings?.colorScheme ?? .system
+        next.timeFormat = settings?.timeFormat
+        next.undoLabel = inbox.undo?.label
+        next.row = store.focusedRow
+        next.project = project
+        next.scripts = project.flatMap { inbox.projectScripts[$0] } ?? []
+        next.jumpTitles = (1...9).map { number in
+            guard let row = inbox.thread(inbox.jumpTarget(number)), !row.title.isEmpty else { return "Thread \(number)" }
+            return row.title
+        }
+        next.hasThread = store.conversation.thread != nil
+        next.onThread = store.shell.route == .thread
+        return next
+    }
+
+    private static func command(_ id: String, store: StudioStore) -> MenuCommand {
+        MenuCommand(enabled: store.canDispatch(id), shortcut: store.menuShortcut(id))
     }
 }
 
@@ -56,29 +112,34 @@ struct StudioCommands: Commands {
     @ObservedObject var refresh: CommandRefresh
 
     var body: some Commands {
+        let state = refresh.state
         CommandGroup(replacing: .newItem) {
-            CommandButton(store: store, title: "New Thread", command: "chat.new")
-            CommandButton(store: store, title: "New Thread in Current Project", command: "chat.newLocal")
-            CommandButton(store: store, title: "New Thread Here", command: "chat.newTab")
-            CommandButton(store: store, title: "New Thread Without a Project", command: "chat.newWithoutProject")
+            button("New Thread", "chat.new")
+            button("New Thread in Current Project", "chat.newLocal")
+            button("New Thread Here", "chat.newTab")
+            button("New Thread Without a Project", "chat.newWithoutProject")
             Button("New Thread in Project…") { store.shell.palette = .newThread }
-                .disabled(store.inbox.projects.isEmpty)
+                .disabled(!state.hasProjects)
             Divider()
             Button("Add Project…") { store.addProjectInteractively() }
             Button("Clone Repository…") { store.shell.cloneShown = true }
-            CommandButton(store: store, title: "Open in Editor", command: "editor.openFavorite")
-            CommandButton(store: store, title: "Close Panel Tab", command: "rightPanel.close")
-            CommandButton(store: store, title: "Close Thread", command: "thread.close")
+            button("Open in Editor", "editor.openFavorite")
+            button("Close Panel Tab", "rightPanel.close")
+            button("Close Thread", "thread.close")
             Menu("Terminal") {
-                CommandButton(store: store, title: "New Terminal", command: "terminal.new")
-                CommandButton(store: store, title: "Split Horizontally", command: "terminal.split")
-                CommandButton(store: store, title: "Split Vertically", command: "terminal.splitVertical")
-                CommandButton(store: store, title: "Close Terminal", command: "terminal.close")
+                button("New Terminal", "terminal.new")
+                button("Split Horizontally", "terminal.split")
+                button("Split Vertically", "terminal.splitVertical")
+                button("Close Terminal", "terminal.close")
             }
         }
+        CommandGroup(replacing: .saveItem) {
+            Button("Close Window") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: [.command, .shift])
+        }
         CommandGroup(replacing: .undoRedo) {
-            Button(undoTitle) { store.dispatch("thread.undo") }
-                .keyboardShortcut(store.menuShortcut("thread.undo") ?? KeyboardShortcut("z"))
+            Button(state.undoLabel.map { "Undo \($0)" } ?? "Undo") { store.dispatch("thread.undo") }
+                .keyboardShortcut(refresh.command("thread.undo").shortcut ?? KeyboardShortcut("z"))
             Button("Redo") { NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) }
                 .keyboardShortcut("z", modifiers: [.command, .shift])
         }
@@ -87,26 +148,26 @@ struct StudioCommands: Commands {
                 .keyboardShortcut("v", modifiers: [.command, .shift])
         }
         CommandGroup(replacing: .sidebar) {
-            CommandButton(store: store, title: store.shell.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", command: "sidebar.toggle")
-            CommandButton(store: store, title: store.panels.terminalOpen ? "Hide Terminal" : "Show Terminal", command: "terminal.toggle")
-            CommandButton(store: store, title: store.panels.rightPanelOpen ? "Hide Right Panel" : "Show Right Panel", command: "rightPanel.toggle")
-            CommandButton(store: store, title: "Toggle Diff", command: "diff.toggle")
-            CommandButton(store: store, title: "Previous Panel Tab", command: "rightPanel.previousTab")
-            CommandButton(store: store, title: "Next Panel Tab", command: "rightPanel.nextTab")
-            CommandButton(store: store, title: "Toggle Browser Preview", command: "preview.toggle")
+            button(state.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", "sidebar.toggle")
+            button(state.terminalOpen ? "Hide Terminal" : "Show Terminal", "terminal.toggle")
+            button(state.rightPanelOpen ? "Hide Right Panel" : "Show Right Panel", "rightPanel.toggle")
+            button("Toggle Diff", "diff.toggle")
+            button("Previous Panel Tab", "rightPanel.previousTab")
+            button("Next Panel Tab", "rightPanel.nextTab")
+            button("Toggle Browser Preview", "preview.toggle")
             Divider()
-            CommandButton(store: store, title: "Command Palette", command: "commandPalette.toggle")
-            CommandButton(store: store, title: "Go to File…", command: "filePicker.toggle")
-            CommandButton(store: store, title: "Search Project…", command: "projectSearch.toggle")
+            button("Command Palette", "commandPalette.toggle")
+            button("Go to File…", "filePicker.toggle")
+            button("Search Project…", "projectSearch.toggle")
             Divider()
-            focusMenu
+            focusMenu(state)
             Menu("Browser") {
-                CommandButton(store: store, title: "Reload Page", command: "preview.refresh")
-                CommandButton(store: store, title: "Focus Address Bar", command: "preview.focusUrl")
+                button("Reload Page", "preview.refresh")
+                button("Focus Address Bar", "preview.focusUrl")
                 Divider()
-                CommandButton(store: store, title: "Zoom In", command: "preview.zoomIn")
-                CommandButton(store: store, title: "Zoom Out", command: "preview.zoomOut")
-                CommandButton(store: store, title: "Actual Size", command: "preview.resetZoom")
+                button("Zoom In", "preview.zoomIn")
+                button("Zoom Out", "preview.zoomOut")
+                button("Actual Size", "preview.resetZoom")
             }
             Menu("Appearance") {
                 Picker("Appearance", selection: colorScheme) {
@@ -117,53 +178,53 @@ struct StudioCommands: Commands {
                 .pickerStyle(.inline)
                 .labelsHidden()
                 Divider()
-                CommandButton(store: store, title: "Cycle Appearance", command: "appearance.cycle")
-                CommandButton(store: store, title: "Choose Appearance…", command: "theme.select")
-                CommandButton(store: store, title: "Theme Editor", command: "themeEditor.toggle")
+                button("Cycle Appearance", "appearance.cycle")
+                button("Choose Appearance…", "theme.select")
+                button("Theme Editor", "themeEditor.toggle")
             }
-            .disabled(store.pages.settings == nil)
+            .disabled(!state.hasSettings)
             Divider()
-            CommandButton(store: store, title: "Usage", command: "usage.open")
+            button("Usage", "usage.open")
             Menu("Usage View") {
-                CommandButton(store: store, title: "Cost", command: "usage.cost")
-                CommandButton(store: store, title: "Tokens", command: "usage.tokens")
-                CommandButton(store: store, title: "Limits", command: "usage.limits")
+                button("Cost", "usage.cost")
+                button("Tokens", "usage.tokens")
+                button("Limits", "usage.limits")
                 Divider()
-                CommandButton(store: store, title: "Last Day", command: "usage.period.day")
-                CommandButton(store: store, title: "Last Week", command: "usage.period.week")
-                CommandButton(store: store, title: "Last Month", command: "usage.period.month")
-                CommandButton(store: store, title: "Last Quarter", command: "usage.period.quarter")
+                button("Last Day", "usage.period.day")
+                button("Last Week", "usage.period.week")
+                button("Last Month", "usage.period.month")
+                button("Last Quarter", "usage.period.quarter")
             }
             Button("Local") { store.show(.local) }
             Button("Pull Requests") { store.show(.pullRequests) }
             Button("Archived Threads") { store.show(.archive) }
             Divider()
-            CommandButton(store: store, title: "Back", command: "navigation.back")
-            CommandButton(store: store, title: "Forward", command: "navigation.forward")
+            button("Back", "navigation.back")
+            button("Forward", "navigation.forward")
             Divider()
         }
         CommandMenu("Thread") {
-            threadMenu
+            threadMenu(state)
         }
         CommandMenu("Composer") {
-            CommandButton(store: store, title: "Send Queued Message Now", command: "thread.steerQueuedMessage")
-            CommandButton(store: store, title: "Stash Prompt", command: "composer.stash")
+            button("Send Queued Message Now", "thread.steerQueuedMessage")
+            button("Stash Prompt", "composer.stash")
             Divider()
-            CommandButton(store: store, title: "Choose Model…", command: "modelPicker.toggle")
-            CommandButton(store: store, title: "Previous Provider", command: "modelPicker.previousProvider")
-            CommandButton(store: store, title: "Next Provider", command: "modelPicker.nextProvider")
+            button("Choose Model…", "modelPicker.toggle")
+            button("Previous Provider", "modelPicker.previousProvider")
+            button("Next Provider", "modelPicker.nextProvider")
             Menu("Choose Model") {
                 ForEach(1...9, id: \.self) { number in
-                    CommandButton(store: store, title: "Model \(number)", command: "modelPicker.jump.\(number)")
+                    button("Model \(number)", "modelPicker.jump.\(number)")
                 }
             }
             Divider()
-            CommandButton(store: store, title: "Effort", command: "composer.effort")
-            CommandButton(store: store, title: "Access Mode", command: "composer.mode")
-            CommandButton(store: store, title: "Workspace", command: "composer.workspace")
-            CommandButton(store: store, title: "Branch", command: "composer.branch")
-            CommandButton(store: store, title: "Previous Worktree", command: "composer.previousWorktree")
-            CommandButton(store: store, title: "Host", command: "composer.host")
+            button("Effort", "composer.effort")
+            button("Access Mode", "composer.mode")
+            button("Workspace", "composer.workspace")
+            button("Branch", "composer.branch")
+            button("Previous Worktree", "composer.previousWorktree")
+            button("Host", "composer.host")
         }
         CommandGroup(replacing: .help) {
             Button("Supported Hardware and Models") {
@@ -174,16 +235,17 @@ struct StudioCommands: Commands {
         }
     }
 
-    @ViewBuilder private var threadMenu: some View {
-        let row = store.focusedRow
+    @ViewBuilder
+    private func threadMenu(_ state: MenuState) -> some View {
+        let row = state.row
         let id = row?.id
-        CommandButton(store: store, title: row?.pinned == true ? "Unpin" : "Pin", command: "thread.pin")
-        CommandButton(store: store, title: row?.shelf == .settled ? "Un-settle" : "Settle", command: "thread.settle")
+        button(row?.pinned == true ? "Unpin" : "Pin", "thread.pin")
+        button(row?.shelf == .settled ? "Un-settle" : "Settle", "thread.settle")
         if row?.shelf == .snoozed {
             Button("Wake") { if let id { store.inbox.snooze([id], until: nil) } }
         } else {
             Menu("Snooze") {
-                ForEach(SnoozePreset.resolve(timeFormat: store.pages.settings?.timeFormat)) { choice in
+                ForEach(SnoozePreset.resolve(timeFormat: state.timeFormat)) { choice in
                     Button(choice.label) {
                         guard let id, let preset = SnoozePreset.resolve().first(where: { $0.id == choice.id }) else { return }
                         store.inbox.snooze([id], until: preset.millis)
@@ -207,67 +269,61 @@ struct StudioCommands: Commands {
         Button("Delete…") { if let id { store.requestDelete([id]) } }
             .disabled(row == nil)
         Divider()
-        CommandButton(store: store, title: "Previous Thread", command: "thread.previous")
-        CommandButton(store: store, title: "Next Thread", command: "thread.next")
-        CommandButton(store: store, title: "Next Recent Thread", command: "thread.recentNext")
-        CommandButton(store: store, title: "Previous Recent Thread", command: "thread.recentPrevious")
+        button("Previous Thread", "thread.previous")
+        button("Next Thread", "thread.next")
+        button("Next Recent Thread", "thread.recentNext")
+        button("Previous Recent Thread", "thread.recentPrevious")
         Menu("Go to Thread") {
             ForEach(1...9, id: \.self) { number in
-                CommandButton(store: store, title: jumpTitle(number), command: "thread.jump.\(number)")
+                button(state.jumpTitles.indices.contains(number - 1) ? state.jumpTitles[number - 1] : "Thread \(number)", "thread.jump.\(number)")
             }
         }
         Divider()
-        CommandButton(store: store, title: "Copy Reference", command: "thread.copyReference")
-        CommandButton(store: store, title: "Copy Message", command: "timeline.copyMessage")
-        CommandButton(store: store, title: "Copy Pull Request Number", command: "pullRequest.copyNumber")
+        button("Copy Reference", "thread.copyReference")
+        button("Copy Message", "timeline.copyMessage")
+        button("Copy Pull Request Number", "pullRequest.copyNumber")
         Divider()
+        let project = state.project
         Menu("Project Actions") {
-            let project = store.focusedProject
-            let scripts = project.flatMap { store.inbox.projectScripts[$0] } ?? []
-            ForEach(scripts, id: \.id) { script in
+            ForEach(state.scripts, id: \.id) { script in
                 Button(script.name) { if let project { store.runProjectScript(script, in: project) } }
                     .keyboardShortcut(CoreShortcut.parse(script.keybinding))
             }
-            if !scripts.isEmpty { Divider() }
+            if !state.scripts.isEmpty { Divider() }
             Button("Add Action…") { store.openProjectSettings(project) }
                 .disabled(project == nil)
         }
-        .disabled(store.focusedProject == nil)
-        Button("Project Settings…") { store.openProjectSettings(store.focusedProject) }
-            .disabled(store.focusedProject == nil)
+        .disabled(project == nil)
+        Button("Project Settings…") { store.openProjectSettings(project) }
+            .disabled(project == nil)
     }
 
-    @ViewBuilder private var focusMenu: some View {
+    private func focusMenu(_ state: MenuState) -> some View {
         Menu("Focus") {
-            CommandButton(store: store, title: "Next Region", command: "focus.next")
-            CommandButton(store: store, title: "Previous Region", command: "focus.previous")
-            CommandButton(store: store, title: "Cycle Regions", command: "focus.cycle")
-            CommandButton(store: store, title: "Cycle Regions Backward", command: "focus.cycleBack")
+            button("Next Region", "focus.next")
+            button("Previous Region", "focus.previous")
+            button("Cycle Regions", "focus.cycle")
+            button("Cycle Regions Backward", "focus.cycleBack")
             Divider()
             Button("Sidebar") { store.focus(.sidebar) }
             Button("Timeline") { store.focus(.timeline) }
-                .disabled(store.conversation.thread == nil || store.shell.route != .thread)
-            CommandButton(store: store, title: "Composer", command: "focus.composer")
+                .disabled(!state.hasThread || !state.onThread)
+            button("Composer", "focus.composer")
             Button("Right Panel") { store.focus(.rightPanel) }
-                .disabled(store.shell.route != .thread)
+                .disabled(!state.onThread)
             Button("Terminal") { store.focus(.terminal) }
-                .disabled(store.shell.route != .thread)
+                .disabled(!state.onThread)
             Divider()
             Button("Search Threads") { store.focusSidebarSearch() }
         }
     }
 
-    private var undoTitle: String {
-        store.inbox.undo.map { "Undo \($0.label)" } ?? "Undo"
-    }
-
     private var colorScheme: Binding<LocalStudioKit.ColorScheme> {
-        Binding { store.pages.settings?.colorScheme ?? .system } set: { store.setColorScheme($0) }
+        Binding { refresh.state.colorScheme } set: { store.setColorScheme($0) }
     }
 
-    private func jumpTitle(_ number: Int) -> String {
-        guard let row = store.inbox.thread(store.inbox.jumpTarget(number)) else { return "Thread \(number)" }
-        return row.title.isEmpty ? "Thread \(number)" : row.title
+    private func button(_ title: String, _ command: String) -> CommandButton {
+        CommandButton(store: store, title: title, command: command, state: refresh.command(command))
     }
 }
 
@@ -275,10 +331,11 @@ private struct CommandButton: View {
     let store: StudioStore
     let title: String
     let command: String
+    let state: MenuCommand
 
     var body: some View {
         Button(title) { store.dispatch(command) }
-            .keyboardShortcut(store.menuShortcut(command))
-            .disabled(!store.canDispatch(command))
+            .keyboardShortcut(state.shortcut)
+            .disabled(!state.enabled)
     }
 }

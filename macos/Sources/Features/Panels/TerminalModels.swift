@@ -99,6 +99,7 @@ final class TerminalSession: Identifiable {
     private(set) var status = TerminalStatus.starting
 
     @ObservationIgnored var request: String?
+    @ObservationIgnored var focusOnAttach = true
     @ObservationIgnored let grid = TerminalGrid()
     @ObservationIgnored private(set) var size = TerminalSize(cols: 100, rows: 24, cellWidth: 16, cellHeight: 32)
     @ObservationIgnored private var sink: ((TerminalDamage) -> Void)?

@@ -26,13 +26,41 @@ struct KeyboardFocusRing: ViewModifier {
     }
 }
 
+private final class ReportedFrame {
+    var frame: CGRect?
+}
+
+private struct FocusRegionFrame: ViewModifier {
+    let region: FocusRegion
+    let shell: ShellState
+    @State private var reported = ReportedFrame()
+
+    func body(content: Content) -> some View {
+        content
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                reported.frame = frame
+                shell.keys.frames[region] = frame
+            }
+            .onAppear {
+                if let frame = reported.frame {
+                    shell.keys.frames[region] = frame
+                }
+            }
+            .onDisappear {
+                if shell.keys.frames[region] == reported.frame {
+                    shell.keys.frames[region] = nil
+                }
+            }
+    }
+}
+
 extension View {
     func keyboardFocusRing(_ active: Bool, radius: CGFloat = Theme.Metrics.rowRadius, outset: CGFloat = 3) -> some View {
         modifier(KeyboardFocusRing(active: active, radius: radius, outset: outset))
     }
 
     func focusRegionFrame(_ region: FocusRegion, in shell: ShellState) -> some View {
-        onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { shell.keys.frames[region] = $0 }
+        modifier(FocusRegionFrame(region: region, shell: shell))
     }
 }
 
@@ -118,7 +146,7 @@ extension StudioStore {
     }
 
     func closeThread() {
-        guard shell.route == .thread, conversation.thread != nil else { return }
+        guard shell.route == .thread, conversation.selectedID != nil else { return }
         newThread(in: focusedProject ?? inbox.currentProject)
         focus(.composer)
     }

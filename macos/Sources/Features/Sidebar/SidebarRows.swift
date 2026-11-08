@@ -5,22 +5,41 @@ import SwiftUI
 struct StatusBadge: View {
     let row: ThreadRow
     let now: Date
+    let store: StudioStore
 
     var body: some View {
         if let glyph = Self.glyph(row.status) {
             HStack(spacing: 4) {
-                Image(systemName: glyph.symbol)
-                    .font(.system(size: 11, weight: .regular))
-                    .accessibilityHidden(true)
-                Text(label(glyph.title))
-                    .font(.system(size: 11.5))
-                    .monospacedDigit()
+                if row.status == .working {
+                    LogoMark()
+                        .frame(width: 12, height: 12)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: glyph.symbol)
+                        .font(.system(size: 11, weight: .regular))
+                        .accessibilityHidden(true)
+                }
+                if row.status == .working, row.statusSince != nil {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let text = label(glyph.title, now: context.date)
+                        Text(text)
+                            .font(.system(size: 11.5))
+                            .monospacedDigit()
+                            .onChange(of: text, initial: true) { _, text in
+                                store.shell.probe.badges[row.id] = BadgeProbe(text: text, at: context.date)
+                            }
+                    }
+                } else {
+                    Text(label(glyph.title, now: now))
+                        .font(.system(size: 11.5))
+                        .monospacedDigit()
+                }
             }
             .foregroundStyle(glyph.tint)
             .lineLimit(1)
             .fixedSize()
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label(glyph.title))
+            .accessibilityLabel(label(glyph.title, now: now))
         } else {
             Text(RelativeAge.text(millis: row.updatedAt, now: now))
                 .font(.system(size: 11.5))
@@ -30,8 +49,8 @@ struct StatusBadge: View {
         }
     }
 
-    private func label(_ title: String) -> String {
-        guard row.status == .working, let since = row.statusSince else { return title }
+    private func label(_ title: String, now: Date) -> String {
+        guard row.status == .working, let since = store.conversation.runStart(row.id, reported: row.statusSince) else { return title }
         return "\(title) \(RelativeAge.duration(since: since, now: now))"
     }
 
@@ -105,7 +124,7 @@ struct RowSnoozeMenu: View {
     }
 }
 
-struct InboxRowView: View {
+struct InboxRowView: View, Equatable {
     enum Variant {
         case card
         case slim
@@ -116,7 +135,35 @@ struct InboxRowView: View {
     let variant: Variant
     let now: Date
     let jump: Int?
+    private let highlighted: Bool
+    private let cursor: Bool
+    private let renaming: Bool
+    private let pending: Bool
+    private let project: Project?
+    private let fanOut: FanOutPosition?
     @State private var hovering = false
+
+    init(store: StudioStore, row: ThreadRow, variant: Variant, now: Date, jump: Int?) {
+        self.store = store
+        self.row = row
+        self.variant = variant
+        self.now = now
+        self.jump = jump
+        let inbox = store.inbox
+        highlighted = inbox.selection.contains(row.id)
+            || (inbox.selection.isEmpty && store.shell.route == .thread && store.conversation.selectedID == row.id)
+        cursor = store.shell.region == .sidebar && store.shell.sidebarCursor == row.id
+        renaming = inbox.renaming == row.id
+        pending = inbox.isPending(row.id)
+        project = inbox.project(row.project)
+        fanOut = inbox.fanOut[row.id]
+    }
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.row == rhs.row && lhs.variant == rhs.variant && lhs.now == rhs.now && lhs.jump == rhs.jump
+            && lhs.highlighted == rhs.highlighted && lhs.cursor == rhs.cursor && lhs.renaming == rhs.renaming
+            && lhs.pending == rhs.pending && lhs.project == rhs.project && lhs.fanOut == rhs.fanOut
+    }
 
     var body: some View {
         Group {
@@ -127,11 +174,11 @@ struct InboxRowView: View {
         }
         .contentShape(Rectangle())
         .rowSurface(selected: highlighted, hovering: hovering)
-        .keyboardFocusRing(store.shell.region == .sidebar && store.shell.sidebarCursor == row.id)
+        .keyboardFocusRing(cursor)
         .opacity(row.status == .working && !highlighted ? 0.85 : 1)
         .onHover { hovering = $0 }
         .onTapGesture { click() }
-        .contextMenu { MenuNodes(nodes: ThreadActions.menu(store, for: row.id)) }
+        .contextMenu { ThreadRowMenu(store: store, row: row, pending: pending) }
         .draggable(row.id) {
             Text(row.title.isEmpty ? "Untitled thread" : row.title)
                 .font(.system(size: 13, weight: .medium))
@@ -139,7 +186,7 @@ struct InboxRowView: View {
                 .frame(height: 28)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
-        .accessibilityElement(children: store.inbox.renaming == row.id ? .contain : .ignore)
+        .accessibilityElement(children: renaming ? .contain : .ignore)
         .accessibilityLabel(accessibilityText)
         .accessibilityAddTraits(highlighted ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction { store.open(row.id) }
@@ -149,15 +196,19 @@ struct InboxRowView: View {
         .help(tooltip)
     }
 
+    private var projectName: String {
+        project?.name ?? "No project"
+    }
+
     private var accessibilityText: String {
-        var parts = [row.title.isEmpty ? "Untitled thread" : row.title, store.inbox.projectName(row.project)]
+        var parts = [row.title.isEmpty ? "Untitled thread" : row.title, projectName]
         if let glyph = StatusBadge.glyph(row.status) { parts.append(glyph.title) }
         if row.pinned { parts.append("Pinned") }
         if row.unread { parts.append("Unread") }
         if row.shelf == .snoozed, let until = row.snoozedUntil { parts.append("Wakes in \(RelativeAge.countdown(millis: until, now: now))") }
         if let branch = row.branch { parts.append("Branch \(branch)") }
         if let pull = row.pullRequest { parts.append("Pull request \(pull.number), \(pull.state.lowercased())") }
-        if let position = store.inbox.fanOut[row.id] { parts.append("\(position.index) of \(position.count) models") }
+        if let fanOut { parts.append("\(fanOut.index) of \(fanOut.count) models") }
         return parts.joined(separator: ", ")
     }
 
@@ -165,7 +216,7 @@ struct InboxRowView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 ProjectTile(project: project, size: 14)
-                Text(store.inbox.projectName(row.project))
+                Text(projectName)
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
                     .lineLimit(1)
@@ -222,7 +273,7 @@ struct InboxRowView: View {
                     .monospacedDigit()
                     .foregroundStyle(Theme.secondaryText)
             } else {
-                StatusBadge(row: row, now: now)
+                StatusBadge(row: row, now: now, store: store)
             }
         }
         .padding(.horizontal, 10)
@@ -232,18 +283,20 @@ struct InboxRowView: View {
     @ViewBuilder private var trailing: some View {
         if let jump {
             JumpHint(number: jump)
-        } else if hovering {
+        } else if hovering, !pending {
             HStack(spacing: 2) {
                 RowSnoozeMenu(store: store, ids: store.inbox.targets(for: row.id))
                 RowActionButton(title: "Settle", symbol: "checkmark") { store.inbox.setSettled(store.inbox.targets(for: row.id), true) }
             }
         } else {
-            StatusBadge(row: row, now: now)
+            StatusBadge(row: row, now: now, store: store)
         }
     }
 
     @ViewBuilder private var slimAction: some View {
-        switch row.shelf {
+        switch pending ? nil : row.shelf {
+        case nil:
+            StatusBadge(row: row, now: now, store: store)
         case .snoozed:
             RowActionButton(title: "Wake Thread Now", symbol: "alarm") { store.inbox.snooze([row.id], until: nil) }
         case .settled:
@@ -265,7 +318,7 @@ struct InboxRowView: View {
 
     @ViewBuilder
     private func titleText(weight: Font.Weight) -> some View {
-        if store.inbox.renaming == row.id {
+        if renaming {
             InlineRenameField(title: row.title) { store.inbox.rename(row.id, to: $0) } cancel: {
                 store.inbox.renaming = nil
             }
@@ -288,7 +341,7 @@ struct InboxRowView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            if let position = store.inbox.fanOut[row.id] {
+            if let position = fanOut {
                 HStack(spacing: 2) {
                     Image(systemName: "square.stack")
                         .font(.system(size: 9.5))
@@ -319,19 +372,11 @@ struct InboxRowView: View {
     }
 
     private var hasMeta: Bool {
-        row.branch != nil || row.additions > 0 || row.deletions > 0 || row.provider != nil || row.pullRequest != nil || store.inbox.fanOut[row.id] != nil
-    }
-
-    private var project: Project? {
-        store.inbox.project(row.project)
-    }
-
-    private var highlighted: Bool {
-        store.inbox.selection.contains(row.id) || (store.inbox.selection.isEmpty && store.shell.route == .thread && store.focusedThread == row.id)
+        row.branch != nil || row.additions > 0 || row.deletions > 0 || row.provider != nil || row.pullRequest != nil || fanOut != nil
     }
 
     private var tooltip: String {
-        var lines = [row.title, store.inbox.projectName(row.project)]
+        var lines = [row.title, projectName]
         if let branch = row.branch { lines.append(branch) }
         if let model = row.model { lines.append([row.provider, model].compactMap(\.self).joined(separator: " · ")) }
         if let note = row.note { lines.append(note) }
@@ -341,7 +386,7 @@ struct InboxRowView: View {
     private func click() {
         store.shell.sidebarCursor = row.id
         let flags = NSEvent.modifierFlags
-        if NSApp.currentEvent?.clickCount == 2, flags.isDisjoint(with: [.command, .shift]) {
+        if NSApp.currentEvent?.clickCount == 2, flags.isDisjoint(with: [.command, .shift]), !pending {
             store.inbox.renaming = row.id
             return
         }
@@ -354,6 +399,25 @@ struct InboxRowView: View {
             store.inbox.selectionAnchor = row.id
             store.open(row.id)
         }
+    }
+}
+
+private struct ThreadRowMenu: View {
+    let store: StudioStore
+    let row: ThreadRow
+    let pending: Bool
+
+    var body: some View {
+        MenuNodes(nodes: nodes)
+    }
+
+    private var nodes: [MenuNode] {
+        guard pending else { return ThreadActions.menu(store, for: row.id) }
+        guard row.status == .failed else { return [] }
+        return [
+            .action("Retry", symbol: "arrow.clockwise") { store.conversation.retryPending(row.id) },
+            .action("Edit Message", symbol: "pencil") { store.conversation.editPending(row.id) },
+        ]
     }
 }
 

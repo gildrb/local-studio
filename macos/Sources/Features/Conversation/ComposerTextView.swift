@@ -63,9 +63,14 @@ struct ComposerTextView: NSViewRepresentable {
         textView.vim.onMode = { [weak coordinator] mode in coordinator?.parent.onVimMode(mode) }
         scrollView.documentView = textView
         context.coordinator.textView = textView
+        context.coordinator.draft = draft
         context.coordinator.focusToken = focusToken
+        textView.focusOnWindow = true
         DispatchQueue.main.async {
-            textView.window?.makeFirstResponder(textView)
+            if let window = textView.window {
+                textView.focusOnWindow = false
+                window.makeFirstResponder(textView)
+            }
             context.coordinator.measure()
             context.coordinator.reportCaret()
             coordinator.parent.onVimMode(textView.vim.mode)
@@ -91,6 +96,13 @@ struct ComposerTextView: NSViewRepresentable {
         if textView.font?.pointSize != fontSize {
             textView.font = .systemFont(ofSize: fontSize)
         }
+        if context.coordinator.draft !== draft {
+            context.coordinator.draft = draft
+            textView.undoManager?.removeAllActions(withTarget: textView)
+            if let storage = textView.textStorage {
+                textView.undoManager?.removeAllActions(withTarget: storage)
+            }
+        }
         if textView.string != draft.text {
             context.coordinator.updating = true
             textView.string = draft.text
@@ -112,6 +124,7 @@ struct ComposerTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerTextView
         weak var textView: ComposerNSTextView?
+        weak var draft: ComposerDraft?
         var focusToken = 0
         var updating = false
 
@@ -179,6 +192,7 @@ final class ComposerNSTextView: NSTextView {
     var onFiles: (([URL]) -> Void)?
     var onKey: ((ComposerKey, Int) -> Bool)?
     var markdownShortcuts = false
+    var focusOnWindow = false
     private(set) lazy var vim = ComposerVim()
     var vimEnabled = false {
         didSet {
@@ -186,6 +200,13 @@ final class ComposerNSTextView: NSTextView {
                 vim.reset()
             }
         }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard focusOnWindow, let window else { return }
+        focusOnWindow = false
+        window.makeFirstResponder(self)
     }
 
     override func keyDown(with event: NSEvent) {

@@ -63,11 +63,18 @@ private struct StageRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: symbol)
-                .font(.system(size: 11, weight: .light))
-                .foregroundStyle(stage.state == .failed ? Color.red : Theme.secondaryText)
-                .frame(width: 14)
-                .accessibilityHidden(true)
+            Group {
+                if stage.state == .running {
+                    LogoMark()
+                        .frame(width: 12, height: 12)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 11, weight: .light))
+                        .foregroundStyle(stage.state == .failed ? Color.red : Theme.secondaryText)
+                }
+            }
+            .frame(width: 14)
+            .accessibilityHidden(true)
             Text(stage.name)
                 .font(.system(size: 12.5))
                 .foregroundStyle(stage.state == .pending || stage.state == .skipped ? Theme.secondaryText : Color.primary)

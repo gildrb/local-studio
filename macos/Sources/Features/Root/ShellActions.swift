@@ -16,11 +16,11 @@ extension StudioStore {
     }
 
     func shortcut(_ command: String) -> KeyboardShortcut? {
-        CoreShortcut.parse(pages.keybindings.first { $0.command == command }?.shortcut)
+        CoreShortcut.parse(binding(command)?.shortcut)
     }
 
     func shortcutText(_ command: String) -> String? {
-        CoreShortcut.display(pages.keybindings.first { $0.command == command }?.shortcut)
+        CoreShortcut.display(binding(command)?.shortcut)
     }
 
     func open(_ thread: String) {
@@ -96,7 +96,7 @@ extension StudioStore {
     }
 
     func stepThread(_ offset: Int) {
-        guard let target = inbox.neighbor(of: conversation.thread, offset: offset) else { return }
+        guard let target = inbox.neighbor(of: conversation.selectedID, offset: offset) else { return }
         open(target)
     }
 

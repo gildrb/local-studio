@@ -11,7 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var monitors: [Any] = []
     private var commandHold: DispatchWorkItem?
     private var panelSmoke: PanelSmoke?
+    private var stress: StressHarness?
     private var providersSmoke: ProvidersSmoke?
+    private var keys: KeysHarness?
 
     override init() {
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
@@ -27,6 +29,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(Snapshots.run(into: URL(fileURLWithPath: directory, isDirectory: true), matching: filter))
         }
         SyntaxHighlighter.shared.warm()
+        let stressFlag = arguments.firstIndex(of: "+stress")
+        let keysFlag = arguments.contains("+keys")
+        if stressFlag != nil || keysFlag {
+            StressSeed.prepareProcess()
+        }
         configureNotifier()
         installKeyMonitors()
         do {
@@ -57,15 +64,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             smoke.start()
             panelSmoke = smoke
         }
+        if let flag = stressFlag {
+            let seconds = arguments.indices.contains(flag + 1) ? TimeInterval(arguments[flag + 1]) : nil
+            let seed = arguments.indices.contains(flag + 2) ? UInt64(arguments[flag + 2]) : nil
+            let harness = StressHarness(store: store, duration: seconds ?? 60, seed: seed ?? 1)
+            harness.start()
+            stress = harness
+        }
         if arguments.contains("+smoke-providers") {
             let smoke = ProvidersSmoke(store: store)
             smoke.start()
             providersSmoke = smoke
         }
+        if keysFlag {
+            let harness = KeysHarness(store: store)
+            harness.start()
+            keys = harness
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -87,7 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var automated: Bool {
-        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil
+        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil || stress != nil || keys != nil
     }
 
     private static func quitShortcutPressed() -> Bool {
@@ -130,9 +149,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return event
         }
         let keys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            self?.cancelCommandHold()
-            return self?.route(event) == true ? nil : event
+            self?.keyDown(event) == true ? nil : event
         }
+        KeyDriver.keyMonitor = { [weak self] event in self?.keyDown(event) == true }
+        KeyDriver.flagsMonitor = { [weak self] event in self?.flagsChanged(event.modifierFlags) }
         let clicks = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             if let window = event.window {
                 self?.store.noteClick(at: event.locationInWindow, in: window)
@@ -142,10 +162,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitors = [flags, keys, clicks].compactMap(\.self)
     }
 
-    private func route(_ event: NSEvent) -> Bool {
-        guard let window = event.window, window === store.mainWindow, window.attachedSheet == nil,
-              store.shell.palette == nil, let input = NavInput(event) else { return false }
-        return store.routeKey(input, responder: window.firstResponder)
+    private func keyDown(_ event: NSEvent) -> Bool {
+        cancelCommandHold()
+        guard let window = event.window, window === store.mainWindow, window.attachedSheet == nil else { return false }
+        if store.shell.palette == nil, let input = NavInput(event), store.routeKey(input, responder: window.firstResponder) {
+            return true
+        }
+        return store.routeChord(event, responder: window.firstResponder)
     }
 
     private func flagsChanged(_ flags: NSEvent.ModifierFlags) {

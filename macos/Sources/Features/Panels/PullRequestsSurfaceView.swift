@@ -24,9 +24,9 @@ struct PullRequestsSurfaceView: View {
             }
             switch model.phase {
             case .idle:
-                PanelMessage(symbol: "clock", title: "Loading pull requests…")
+                PanelMessage.loading("Loading pull requests…")
             case .loading where model.pulls.isEmpty:
-                PanelMessage(symbol: "clock", title: "Loading pull requests…")
+                PanelMessage.loading("Loading pull requests…")
             case .failed(let message) where model.pulls.isEmpty:
                 PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t load pull requests.", detail: message, actionTitle: "Try Again") { model.load() }
             default:
@@ -178,7 +178,7 @@ struct PullRequestDetailView: View {
     @ViewBuilder private var content: some View {
         switch model.phase {
         case .idle, .loading:
-            PanelMessage(symbol: "clock", title: "Loading pull request…")
+            PanelMessage.loading("Loading pull request…")
         case .failed(let message):
             PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t load this pull request.", detail: message, actionTitle: "Try Again") { model.load() }
         case .loaded:

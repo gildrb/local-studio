@@ -25,7 +25,7 @@ struct FilesSurfaceView: View {
             if let failure = model.failure {
                 PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t list files.", detail: failure, actionTitle: "Try Again") { model.refresh() }
             } else if model.rootLoading {
-                PanelMessage(symbol: "clock", title: "Loading files…")
+                PanelMessage.loading("Loading files…")
             } else if model.rows.isEmpty {
                 PanelMessage(symbol: "folder", title: "This folder is empty.")
             } else {
@@ -143,7 +143,7 @@ struct FilePreviewView: View {
     @ViewBuilder private var content: some View {
         switch model.phase {
         case .idle, .loading:
-            PanelMessage(symbol: "clock", title: "Loading \((model.relative as NSString).lastPathComponent)…")
+            PanelMessage.loading("Loading \((model.relative as NSString).lastPathComponent)…")
         case .failed(let message):
             PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t open this file.", detail: message, actionTitle: "Try Again") { model.load() }
         case .loaded:

@@ -8,9 +8,8 @@ struct ThreadView: View {
 
     var body: some View {
         Group {
-            if let thread = store.conversation.thread {
+            if store.conversation.showsThread {
                 ConversationColumn(store: store)
-                    .id(thread)
             } else {
                 DraftHero(store: store)
             }
@@ -62,14 +61,6 @@ private struct DraftHero: View {
             }
             .padding(.bottom, 26)
             VStack(spacing: 6) {
-                if let pending = store.conversation.pendingDraft, let setup = store.conversation.worktreeSetup[pending] {
-                    WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
-                        store.conversation.cancelWorktreeSetup()
-                    } workLocally: {
-                        store.conversation.skipWorktreeSetup()
-                    }
-                    .padding(.bottom, 8)
-                }
                 ComposerView(store: store)
                     .focusRegionFrame(.composer, in: store.shell)
                 ThreadContextStrip(store: store)
@@ -137,26 +128,58 @@ struct ProjectMenu: View {
 
 private struct ConversationColumn: View {
     let store: StudioStore
+    @State private var built: [String] = []
 
     var body: some View {
         let settings = store.pages.settings
         let width = settings?.chatWidth.maxWidth ?? ChatWidth.normal.maxWidth
-        TimelineScroll(store: store, width: width)
-            .environment(\.responseStreaming, settings?.responseStreaming ?? .paragraph)
-            .environment(\.timeFormat, settings?.timeFormat ?? .locale)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 8) {
-                    ApprovalCard(store: store)
-                    ComposerView(store: store)
-                        .focusRegionFrame(.composer, in: store.shell)
-                    ThreadContextStrip(store: store)
-                        .padding(.top, -4)
-                }
-                .padding(.horizontal, 16)
-                .frame(maxWidth: width)
-                .padding(.horizontal, 4)
-                .padding(.bottom, 14)
+        let selected = store.conversation.selectedID
+        ZStack {
+            ForEach(store.conversation.timelines.filter { $0 == selected || built.contains($0) }, id: \.self) { thread in
+                TimelineSlot(store: store, width: width, thread: thread, current: thread == selected)
             }
+        }
+        .onChange(of: selected, initial: true) { _, selected in
+            let live = store.conversation.timelines
+            var next = built.filter(live.contains)
+            if let selected, !next.contains(selected) {
+                next.append(selected)
+            }
+            if next != built {
+                built = next
+            }
+        }
+        .environment(\.responseStreaming, settings?.responseStreaming ?? .paragraph)
+        .environment(\.timeFormat, settings?.timeFormat ?? .locale)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 8) {
+                if let pending = store.conversation.pending {
+                    if let setup = store.conversation.worktreeSetup[pending.draft], pending.failure == nil {
+                        WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
+                            store.conversation.cancelWorktreeSetup()
+                        } workLocally: {
+                            store.conversation.skipWorktreeSetup()
+                        }
+                    }
+                    if let failure = pending.failure {
+                        StartFailureCard(message: failure) {
+                            store.conversation.editPending(pending.draft)
+                        } retry: {
+                            store.conversation.retryPending(pending.draft)
+                        }
+                    }
+                }
+                ApprovalCard(store: store)
+                ComposerView(store: store)
+                    .focusRegionFrame(.composer, in: store.shell)
+                ThreadContextStrip(store: store)
+                    .padding(.top, -4)
+            }
+            .padding(.horizontal, 16)
+            .frame(maxWidth: width)
+            .padding(.horizontal, 4)
+            .padding(.bottom, 14)
+        }
     }
 }
 
@@ -164,18 +187,52 @@ private struct LoadingPlaceholder: View {
     let conversation: ConversationStore
 
     var body: some View {
-        if conversation.rows.isEmpty, conversation.info == nil {
-            Text("Loading thread…")
-                .font(.system(size: 12.5))
-                .foregroundStyle(Theme.secondaryText)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 40)
+        if conversation.showsLoading {
+            VStack(spacing: 10) {
+                LogoMark(style: .coin)
+                    .frame(width: 28, height: 28)
+                    .accessibilityHidden(true)
+                Text("Loading thread…")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(Theme.secondaryText)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 40)
         }
+    }
+}
+
+private final class SlotSize {
+    var size: CGSize?
+}
+
+private struct TimelineSlot: View {
+    let store: StudioStore
+    let width: CGFloat
+    let thread: String
+    let current: Bool
+    @State private var measured = SlotSize()
+
+    private static let parkedOffset: CGFloat = 100_000
+
+    var body: some View {
+        let pinned = current ? nil : measured.size
+        TimelineScroll(store: store, width: width, thread: thread, current: current)
+            .frame(width: pinned?.width, height: pinned?.height)
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { [measured, current] size in
+                if current {
+                    measured.size = size
+                }
+            }
+            .offset(x: current ? 0 : Self.parkedOffset)
+            .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
+            .zIndex(current ? 1 : 0)
     }
 }
 
 private final class ScrollTracker {
     var distance: CGFloat = 0
+    var top: UInt64?
     var phase: ScrollPhase = .idle
 
     var userDriven: Bool {
@@ -190,7 +247,10 @@ private final class ScrollTracker {
 private struct TimelineScroll: View {
     let store: StudioStore
     let width: CGFloat
-    @State private var position = ScrollPosition(edge: .bottom)
+    private let thread: String
+    private let current: Bool
+    @State private var restoredTop: UInt64?
+    @State private var position: ScrollPosition
     @State private var tracker = ScrollTracker()
     @State private var awayFromEnd = false
     @State private var currentAnchor: UInt64?
@@ -198,26 +258,26 @@ private struct TimelineScroll: View {
 
     private static let followSlack: CGFloat = 40
 
+    init(store: StudioStore, width: CGFloat, thread: String, current: Bool) {
+        self.store = store
+        self.width = width
+        self.thread = thread
+        self.current = current
+        let restored = store.conversation.restoredScroll
+        let top = restored.followsEnd ? nil : restored.top
+        _restoredTop = State(initialValue: top)
+        _position = State(initialValue: top.map { ScrollPosition(id: $0, anchor: .top) } ?? ScrollPosition(edge: .bottom))
+    }
+
     var body: some View {
         let conversation = store.conversation
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 22) {
-                LoadingPlaceholder(conversation: conversation)
-                ForEach(conversation.rows) { row in
-                    TimelineRowView(row: row, store: store)
-                        .keyboardFocusRing(store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
-                }
-                TimelineFooter(store: store)
-            }
-            .scrollTargetLayout()
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
-            .padding(.bottom, 20)
-            .frame(maxWidth: width)
-            .frame(maxWidth: .infinity)
+            TimelineStack(store: store, thread: thread, current: current, width: width)
+                .equatable()
         }
         .scrollPosition($position)
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(restoredTop == nil ? .bottom : nil, for: .initialOffset)
+        .defaultScrollAnchor(current && conversation.followsEnd ? .bottom : nil, for: .sizeChanges)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .onScrollPhaseChange { _, phase in
             let wasUserDriven = tracker.userDriven
@@ -227,9 +287,14 @@ private struct TimelineScroll: View {
             }
         }
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.contentOffset.y - geometry.containerSize.height, 0)
-        } action: { _, distance in
+            let distance = max(geometry.contentSize.height + geometry.contentInsets.bottom - geometry.visibleRect.maxY, 0)
             tracker.distance = distance
+            return distance
+        } action: { _, _ in
+            guard current, store.conversation.selectedID == thread else { return }
+            let distance = tracker.distance
+            let previous = store.shell.probe.scroll
+            store.shell.probe.scroll = ScrollProbe(thread: thread, distance: distance, top: previous?.thread == thread ? previous?.top : nil)
             if tracker.userDriven {
                 follow(distance < Self.followSlack)
             }
@@ -239,22 +304,51 @@ private struct TimelineScroll: View {
             }
         }
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentSize.height
+            geometry.contentSize.height + geometry.contentInsets.top + geometry.contentInsets.bottom - geometry.containerSize.height
         } action: { _, _ in
-            if conversation.followsEnd, !tracker.userDriven {
+            if current, conversation.followsEnd, !tracker.userDriven {
                 position.scrollTo(edge: .bottom)
             }
         }
-        .onChange(of: conversation.endRequest) {
+        .onChange(of: current ? ColumnLayout(store: store) : nil) { _, _ in
+            if current, conversation.followsEnd, !tracker.userDriven {
+                position.scrollTo(edge: .bottom)
+            }
+        }
+        .onChange(of: Gated(live: current, value: current ? conversation.endRequest : nil)) { old, new in
+            guard old.live, new.live else { return }
             position.scrollTo(edge: .bottom)
         }
-        .onChange(of: store.shell.timelineCursor) { _, cursor in
-            guard let cursor, store.shell.region == .timeline else { return }
-            follow(cursor == conversation.rows.last?.id)
-            position.scrollTo(id: cursor)
+        .onChange(of: Gated(live: current, value: current ? store.shell.timelineCursor : nil)) { old, new in
+            guard old.live, new.live, let cursor = new.value, store.shell.region == .timeline else { return }
+            let last = cursor == conversation.rows.last?.id
+            follow(last)
+            if last {
+                position.scrollTo(edge: .bottom)
+            } else {
+                position.scrollTo(id: cursor)
+            }
         }
         .onScrollTargetVisibilityChange(idType: UInt64.self, threshold: 0.3) { ids in
             updateCurrentAnchor(visible: ids)
+        }
+        .onChange(of: current ? timelineProbe : nil, initial: true) { _, probe in
+            guard let probe else { return }
+            store.shell.probe.timeline = probe
+        }
+        .onChange(of: current) { _, current in
+            guard current else { return }
+            let follows = conversation.followsEnd
+            if follows {
+                position.scrollTo(edge: .bottom)
+            }
+            store.shell.probe.scroll = ScrollProbe(thread: thread, distance: follows ? 0 : tracker.distance, top: tracker.top)
+        }
+        .onDisappear {
+            if store.shell.probe.timeline?.thread == thread {
+                store.shell.probe.timeline = nil
+                store.shell.probe.scroll = nil
+            }
         }
         .onScrollGeometryChange(for: Bool.self) { geometry in
             geometry.containerSize.width >= width + 80
@@ -262,27 +356,51 @@ private struct TimelineScroll: View {
             roomForMinimap = room
         }
         .overlay(alignment: .bottom) {
-            if awayFromEnd, !conversation.followsEnd {
+            if current, awayFromEnd, !conversation.followsEnd {
                 ScrollToEndPill { conversation.scrollToEnd() }
                     .padding(.bottom, 12)
             }
         }
         .overlay(alignment: .trailing) {
-            if roomForMinimap {
+            if current, roomForMinimap {
                 TimelineMinimap(anchors: conversation.anchors, current: currentAnchor) { anchor in
                     follow(false)
                     currentAnchor = anchor
                     position.scrollTo(id: anchor, anchor: .top)
                 }
+                .equatable()
                 .padding(.trailing, 8)
             }
         }
+        .opacity(current ? 1 : 0)
+        .accessibilityHidden(!current)
+    }
+
+    private var timelineProbe: TimelineProbe {
+        let conversation = store.conversation
+        let firstUser = conversation.rows.lazy.compactMap { row -> String? in
+            guard case .entry(let entry, _) = row, case .user(let text, _, _, _) = entry.item.kind else { return nil }
+            return text
+        }.first
+        return TimelineProbe(
+            thread: conversation.thread, pending: conversation.focusedPending, rows: conversation.rows.count, firstUser: firstUser,
+            placeholder: conversation.showsLoading
+        )
     }
 
     private func updateCurrentAnchor(visible ids: [UInt64]) {
+        guard current, store.conversation.selectedID == thread else { return }
+        let order = Dictionary(store.conversation.rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        guard let top = ids.filter({ order[$0] != nil }).min(by: { order[$0, default: .max] < order[$1, default: .max] }) else { return }
+        tracker.top = top
+        store.conversation.scrollTop = top
+        if let scroll = store.shell.probe.scroll, scroll.thread == thread {
+            store.shell.probe.scroll?.top = top
+        } else {
+            store.shell.probe.scroll = ScrollProbe(thread: thread, distance: -1, top: top)
+        }
         let anchors = store.conversation.anchors
         guard !anchors.isEmpty else { return }
-        let order = Dictionary(store.conversation.rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
         guard let top = ids.compactMap({ order[$0] }).min() else { return }
         let next = anchors.last { $0.order <= top }?.id ?? anchors.first?.id
         if next != currentAnchor {
@@ -291,18 +409,82 @@ private struct TimelineScroll: View {
     }
 
     private func follow(_ value: Bool) {
-        if store.conversation.followsEnd != value {
+        if current, store.conversation.selectedID == thread, store.conversation.followsEnd != value {
             store.conversation.followsEnd = value
         }
     }
 }
 
-private struct TimelineMinimap: View {
+private struct Gated<Value: Equatable>: Equatable {
+    let live: Bool
+    let value: Value?
+}
+
+private struct ColumnLayout: Equatable {
+    let terminalOpen: Bool
+    let terminalHeight: CGFloat
+    let rightPanelOpen: Bool
+    let rightPanelWidth: CGFloat
+    let rightPanelMaximized: Bool
+    let sidebarVisible: Bool
+    let sidebarWidth: CGFloat
+
+    @MainActor
+    init(store: StudioStore) {
+        let panels = store.panels
+        terminalOpen = panels.terminalOpen
+        terminalHeight = panels.terminalHeight
+        rightPanelOpen = panels.rightPanelOpen
+        rightPanelWidth = panels.rightPanelWidth
+        rightPanelMaximized = panels.rightPanelMaximized
+        sidebarVisible = store.shell.sidebarVisible
+        sidebarWidth = store.shell.sidebarWidth
+    }
+}
+
+private struct TimelineStack: View, Equatable {
+    let store: StudioStore
+    let thread: String
+    let current: Bool
+    let width: CGFloat
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.thread == rhs.thread && lhs.current == rhs.current && lhs.width == rhs.width
+    }
+
+    var body: some View {
+        let conversation = store.conversation
+        LazyVStack(alignment: .leading, spacing: 22) {
+            if current {
+                LoadingPlaceholder(conversation: conversation)
+            }
+            ForEach(current ? conversation.rows : conversation.cachedRows(thread)) { row in
+                TimelineRowView(row: row, store: store)
+                    .equatable()
+                    .keyboardFocusRing(current && store.shell.region == .timeline && store.shell.timelineCursor == row.id, radius: 6, outset: 9)
+            }
+            TimelineFooter(store: store, live: current)
+        }
+        .scrollTargetLayout()
+        .environment(\.timelineLive, current)
+        .padding(.horizontal, 20)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .frame(maxWidth: width)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct TimelineMinimap: View, Equatable {
     let anchors: [TimelineAnchor]
     let current: UInt64?
     let jump: (UInt64) -> Void
 
     private static let maxTicks = 36
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.anchors == rhs.anchors && lhs.current == rhs.current
+    }
 
     var body: some View {
         if anchors.count >= 2 {
@@ -377,17 +559,30 @@ private struct MinimapStep: View {
 
 private struct TimelineFooter: View {
     let store: StudioStore
+    let live: Bool
 
     var body: some View {
         let conversation = store.conversation
         VStack(alignment: .leading, spacing: 14) {
-            if let info = conversation.info, info.busy {
-                WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty)
-            }
-            ForEach(conversation.queued, id: \.id) { message in
-                QueuedBubble(message: message, store: store)
+            if live {
+                if let info = conversation.info, info.busy {
+                    WorkingRow(info: info, waitingForApproval: !conversation.approvals.isEmpty)
+                }
+                ForEach(conversation.queued, id: \.id) { message in
+                    QueuedBubble(message: message, store: store)
+                }
             }
         }
+        .onChange(of: live ? workingProbe : nil, initial: true) { _, probe in
+            guard let probe else { return }
+            store.shell.probe.working = probe
+        }
+    }
+
+    private var workingProbe: WorkingProbe {
+        let conversation = store.conversation
+        guard let info = conversation.info, info.busy else { return WorkingProbe(thread: conversation.thread, shown: false, started: nil) }
+        return WorkingProbe(thread: conversation.thread, shown: true, started: info.runStartedAt)
     }
 }
 

@@ -18,6 +18,30 @@ enum LocalPendingKey: Hashable {
     case share(String, UInt16)
 }
 
+struct KeybindingIndex {
+    private var byCommand: [String: Keybinding] = [:]
+    private var byChord: [String: [Keybinding]] = [:]
+
+    init(_ bindings: [Keybinding] = []) {
+        for binding in bindings {
+            if byCommand[binding.command] == nil {
+                byCommand[binding.command] = binding
+            }
+            if let chord = binding.shortcut {
+                byChord[chord, default: []].append(binding)
+            }
+        }
+    }
+
+    func binding(_ command: String) -> Keybinding? {
+        byCommand[command]
+    }
+
+    func sharing(_ chord: String) -> [Keybinding] {
+        byChord[chord] ?? []
+    }
+}
+
 @MainActor
 @Observable
 final class PagesStore {
@@ -41,6 +65,7 @@ final class PagesStore {
     private(set) var providerActionError: String?
     private(set) var settings: Settings?
     private(set) var keybindings: [Keybinding] = []
+    private(set) var keybindingIndex = KeybindingIndex()
     private(set) var pullsProject: String?
     private(set) var pullsRequest: String?
     private(set) var pullsError: String?
@@ -187,6 +212,7 @@ final class PagesStore {
 
     func setKeybindings(_ bindings: [Keybinding]) {
         keybindings = bindings
+        keybindingIndex = KeybindingIndex(bindings)
         SnapShotService.shared.update(settings: settings, keybindings: bindings)
     }
 

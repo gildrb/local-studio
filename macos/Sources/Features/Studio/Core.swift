@@ -12,7 +12,7 @@ final class MainWaker: Waker {
     func wake() {
         let action = self.action
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { action() }
+            action()
         }
     }
 }

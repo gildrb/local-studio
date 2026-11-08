@@ -87,7 +87,7 @@ struct UsagePage: View {
         } else if let error = pages.usageError {
             PageEmptyState(symbol: "exclamationmark.triangle", title: "Couldn’t load usage", message: error)
         } else {
-            PageEmptyState(symbol: "chart.bar", title: "Loading usage…")
+            PageEmptyState.loading("Loading usage…")
         }
     }
 

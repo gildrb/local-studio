@@ -79,6 +79,11 @@ struct ComposerView: View {
         .task(id: project) {
             conversation.draftProject = project
         }
+        .onChange(of: conversation.thread) {
+            trigger = nil
+            recall = nil
+            highlighted = 0
+        }
         .task(id: trigger) {
             guard let trigger, case .mention = trigger.kind, let project else { return }
             try? await Task.sleep(for: .milliseconds(120))
@@ -89,8 +94,8 @@ struct ComposerView: View {
     }
 
     private var project: String? {
-        if store.conversation.thread != nil {
-            return store.conversation.info?.project
+        if let thread = store.conversation.thread {
+            return store.conversation.info?.project ?? store.inbox.thread(thread)?.project
         }
         return store.inbox.currentProject
     }

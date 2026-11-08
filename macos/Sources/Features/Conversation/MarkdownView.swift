@@ -40,7 +40,7 @@ private struct MarkdownBlockView: View {
         case .heading(let level, let content):
             Text(content)
                 .font(.system(size: headingSize(level), weight: .semibold))
-                .textSelection(.enabled)
+                .selectableText()
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, level <= 2 ? 8 : 4)
         case .code(let language, let code):
@@ -61,7 +61,7 @@ private struct MarkdownBlockView: View {
                     .frame(minWidth: 14, alignment: .trailing)
             }
             Text(content)
-                .textSelection(.enabled)
+                .selectableText()
                 .fixedSize(horizontal: false, vertical: true)
                 .lineSpacing(3)
         }
@@ -91,7 +91,7 @@ private struct MarkdownTableView: View {
                         ForEach(rows[index].indices, id: \.self) { column in
                             Text(rows[index][column])
                                 .font(.system(size: size - 0.5, weight: index == 0 ? .semibold : .regular))
-                                .textSelection(.enabled)
+                                .selectableText()
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
                                 .frame(maxWidth: 320, alignment: .leading)
@@ -132,7 +132,7 @@ struct CodeBlockView: View {
                 Text(rendered(key))
                     .font(.system(size: 12, design: .monospaced))
                     .lineSpacing(2.5)
-                    .textSelection(.enabled)
+                    .selectableText()
                     .fixedSize()
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)

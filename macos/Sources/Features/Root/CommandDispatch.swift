@@ -6,35 +6,44 @@ extension StudioStore {
     private static let focusClauses = ["terminalFocus", "previewFocus", "modelPickerOpen", "usagePageOpen", "timelineFocus"]
 
     func binding(_ command: String) -> Keybinding? {
-        pages.keybindings.first { $0.command == command }
+        pages.keybindingIndex.binding(command)
     }
 
     func dispatch(_ command: String) {
         if let chord = binding(command)?.shortcut {
-            for other in pages.keybindings where other.command != command && other.shortcut == chord && clauseHolds(other) && commands.canPerform(other.command) {
+            for other in pages.keybindingIndex.sharing(chord) where other.command != command && clauseHolds(other) && commands.canPerform(other.command) {
                 commands.perform(other.command)
+                shell.probe.ran(other.command)
                 return
             }
         }
-        if commands.perform(command) { return }
-        builtin(command)?()
+        if commands.perform(command) {
+            shell.probe.ran(command)
+            return
+        }
+        guard let action = builtin(command) else {
+            shell.probe.ran(nil)
+            return
+        }
+        action()
+        shell.probe.ran(command)
     }
 
     func canDispatch(_ command: String) -> Bool {
         if builtin(command) != nil || commands.isRegistered(command) { return true }
         guard let chord = binding(command)?.shortcut else { return false }
-        return pages.keybindings.contains { $0.command != command && $0.shortcut == chord && commands.isRegistered($0.command) }
+        return pages.keybindingIndex.sharing(chord).contains { $0.command != command && commands.isRegistered($0.command) }
     }
 
     func menuShortcut(_ command: String) -> KeyboardShortcut? {
         guard let binding = binding(command), let chord = binding.shortcut else { return nil }
         if Self.isFocusScoped(binding) {
-            let collides = pages.keybindings.contains { $0.command != command && $0.shortcut == chord && !Self.isFocusScoped($0) }
+            let collides = pages.keybindingIndex.sharing(chord).contains { $0.command != command && !Self.isFocusScoped($0) }
             if collides { return nil }
             if binding.when?.contains("usagePageOpen") == true, shell.route != .usage { return nil }
             if binding.when?.contains("timelineFocus") == true, shell.region != .timeline || shell.route != .thread { return nil }
         } else {
-            let peers = pages.keybindings.filter { $0.shortcut == chord && !Self.isFocusScoped($0) }
+            let peers = pages.keybindingIndex.sharing(chord).filter { !Self.isFocusScoped($0) }
             if peers.count > 1 {
                 let owner = peers.first { builtin($0.command) != nil || commands.canPerform($0.command) } ?? peers[0]
                 if owner.command != command { return nil }
@@ -70,6 +79,7 @@ extension StudioStore {
         case "terminal.toggle": return { self.panels.toggleTerminal() }
         case "rightPanel.toggle": return { self.panels.toggleRightPanel() }
         case "rightPanel.close":
+            if let window = NSApp.keyWindow, window !== mainWindow { return { window.performClose(nil) } }
             guard panels.rightPanelOpen else { return nil }
             return { self.panels.closeActiveSurface() }
         case "diff.toggle": return { self.panels.toggleDiff() }
@@ -86,7 +96,9 @@ extension StudioStore {
         case "chat.newWithoutProject": return { self.newThread(in: nil) }
         case "chat.newTab": return { self.newThreadTab() }
         case "thread.close":
-            guard shell.route == .thread, conversation.thread != nil, !panels.rightPanelOpen else { return nil }
+            if let window = NSApp.keyWindow, window !== mainWindow { return { window.performClose(nil) } }
+            guard !panels.rightPanelOpen else { return nil }
+            guard shell.route == .thread, conversation.selectedID != nil else { return { self.mainWindow?.performClose(nil) } }
             return { self.closeThread() }
         case "thread.recentNext": return { self.cycleRecent(1) }
         case "thread.recentPrevious": return { self.cycleRecent(-1) }

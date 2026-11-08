@@ -54,31 +54,134 @@ final class ConversationStore {
     }
 
     private(set) var worktreeSetup: [String: (stages: [SetupStage], done: Bool, error: String?)] = [:]
-    private(set) var pendingDraft: String?
+    private(set) var pendings: [PendingStart] = []
+    private(set) var focusedPending: String?
+    @ObservationIgnored var pendingsChanged: (() -> Void)?
+    @ObservationIgnored private(set) var aliases: [String: String] = [:]
+
+    var pending: PendingStart? {
+        focusedPending.flatMap(pendingStart)
+    }
+
+    var pendingDraft: String? {
+        focusedPending
+    }
+
+    var showsThread: Bool {
+        thread != nil || focusedPending != nil
+    }
+
+    var selectedID: String? {
+        thread ?? focusedPending
+    }
+
+    func pendingStart(_ draft: String) -> PendingStart? {
+        pendings.first { $0.draft == draft }
+    }
+
+    func resolve(_ id: String) -> String {
+        guard pendingStart(id) == nil else { return id }
+        return aliases.first { $0.value == id }?.key ?? id
+    }
 
     func setWorktreeSetup(thread: String, stages: [SetupStage], done: Bool, error: String?) {
         worktreeSetup[thread] = (stages, done, error)
     }
 
     func cancelWorktreeSetup() {
-        guard let pendingDraft else { return }
-        core.run { $0.cancelWorktreeSetup(thread: pendingDraft) }
-        self.pendingDraft = nil
-        if let (project, prompt) = pendingPrompt {
-            let draft = composer(project: project)
-            if draft.isEmpty {
-                draft.text = prompt.text
-                draft.files = prompt.files
-                draft.contexts = prompt.contexts
-                focusRequest += 1
-            }
-        }
-        pendingPrompt = nil
+        guard let pending else { return }
+        core.run { $0.cancelWorktreeSetup(thread: pending.draft) }
+        editPending(pending.draft)
     }
 
     func skipWorktreeSetup() {
-        guard let pendingDraft else { return }
-        core.run { $0.skipWorktreeSetup(thread: pendingDraft) }
+        guard let pending else { return }
+        core.run { $0.skipWorktreeSetup(thread: pending.draft) }
+    }
+
+    func showPending(_ draft: String) {
+        guard let start = pendingStart(draft), focusedPending != draft || thread != nil else { return }
+        park()
+        thread = nil
+        entries = start.entries
+        rebuildRows()
+        info = start.info
+        approvals = []
+        queued = start.queued
+        expandedFolds = []
+        followsEnd = true
+        scrollTop = nil
+        focusedPending = draft
+        keepTimeline(draft)
+    }
+
+    func startFailed(draft: String, message: String) {
+        guard let index = pendings.firstIndex(where: { $0.draft == draft }), pendings[index].thread == nil else { return }
+        pendings[index].failure = message
+        pendings[index].info.busy = false
+        if focusedPending == draft {
+            info = pendings[index].info
+        }
+        pendingsChanged?()
+    }
+
+    func retryPending(_ draft: String) {
+        guard let index = pendings.firstIndex(where: { $0.draft == draft }), pendings[index].failure != nil else { return }
+        pendings[index].failure = nil
+        pendings[index].info.busy = true
+        pendings[index].info.runStartedAt = Int64(Date.now.timeIntervalSince1970 * 1000)
+        let start = pendings[index]
+        if focusedPending == draft {
+            info = start.info
+        }
+        pendingsChanged?()
+        launch(start)
+    }
+
+    func editPending(_ draft: String) {
+        guard let start = pendingStart(draft), start.thread == nil else { return }
+        pendings.removeAll { $0.draft == draft }
+        let composer = composer(key: Self.draftKey(start.project))
+        if composer.isEmpty {
+            composer.text = start.prompt.text
+            composer.files = start.prompt.files
+            composer.contexts = start.prompt.contexts
+        }
+        if focusedPending == draft {
+            focusedPending = nil
+            entries = []
+            rows = []
+            anchors = []
+            info = nil
+            queued = []
+            focusRequest += 1
+        }
+        pendingsChanged?()
+    }
+
+    func settlePendings(listed: (String) -> Bool) {
+        let settled = pendings.filter { start in start.thread.map(listed) ?? false }
+        guard !settled.isEmpty else { return }
+        for start in settled {
+            if let thread = start.thread {
+                aliases[thread] = start.draft
+            }
+        }
+        pendings.removeAll { start in start.thread.map(listed) ?? false }
+        pendingsChanged?()
+    }
+
+    func pendingRows(now: Date = .now) -> [ThreadRow] {
+        pendings.map { start in
+            let at = Int64(start.at.timeIntervalSince1970 * 1000)
+            return ThreadRow(
+                id: start.draft, project: start.project, title: start.info.title, shelf: .active,
+                status: start.failure == nil ? .working : .failed, statusSince: at, updatedAt: at, snoozedUntil: nil,
+                pinned: false, unread: false, branch: nil, worktree: nil, provider: start.info.model?.provider,
+                model: start.info.model?.id, additions: 0, deletions: 0, note: start.failure, archived: false,
+                autoSettle: true, liveAgents: 0, fanOut: nil, pullRequest: nil
+            )
+        }
     }
 
     private(set) var skills: [SkillEntry] = []
@@ -89,7 +192,6 @@ final class ConversationStore {
     @ObservationIgnored private(set) var skillsRequest: String?
     @ObservationIgnored private var skillsProject: String??
     @ObservationIgnored private var pendingServiceTier: [String: String] = [:]
-    @ObservationIgnored private var pendingPrompt: (project: String?, prompt: StashedPrompt)?
 
     func setSkills(request: String, skills: [SkillEntry]) {
         guard request == skillsRequest else { return }
@@ -154,47 +256,168 @@ final class ConversationStore {
     }
 
     @ObservationIgnored private var infoCache: [String: ThreadInfo] = [:]
+    @ObservationIgnored private var transcripts: [String: CachedTranscript] = [:]
+    @ObservationIgnored private var recency: [String] = []
+    @ObservationIgnored private var timelineUse: [String] = []
+    @ObservationIgnored private var awaitingReset = false
+    @ObservationIgnored private var seeded: Set<String> = []
+    @ObservationIgnored var scrollTop: UInt64?
+    private(set) var timelines: [String] = []
+    private(set) var loading = false
 
-    func focus(_ thread: String?) {
-        guard thread != self.thread else { return }
+    var showsLoading: Bool {
+        rows.isEmpty && (info == nil || (loading && thread != nil))
+    }
+
+    static let cachedThreads = 12
+    static let liveTimelines = 10
+
+    func focus(_ thread: String?, row: ThreadRow? = nil) {
+        guard thread != self.thread || focusedPending != nil else { return }
+        park()
+        focusedPending = nil
         self.thread = thread
-        info = thread.flatMap { infoCache[$0] }
-        entries = []
-        rows = []
-        anchors = []
-        approvals = []
-        queued = []
-        expandedFolds = []
-        followsEnd = true
+        let cached = thread.flatMap { transcripts[$0] }
+        info = thread.flatMap { infoCache[$0] }.map { Self.reconciled($0, row: row) }
+        entries = cached?.entries ?? []
+        rows = cached?.rows ?? []
+        if anchors != cached?.anchors ?? [] {
+            anchors = cached?.anchors ?? []
+        }
+        approvals = cached?.approvals ?? []
+        queued = cached?.queued ?? []
+        expandedFolds = cached?.expandedFolds ?? []
+        followsEnd = cached?.scroll.followsEnd ?? true
+        scrollTop = cached?.scroll.top
+        awaitingReset = cached != nil
+        let loading = thread != nil && cached == nil
+        if self.loading != loading {
+            self.loading = loading
+        }
+        keepTimeline(thread)
+    }
+
+    func cachedRows(_ thread: String) -> [TimelineRow] {
+        transcripts[thread]?.rows ?? []
+    }
+
+    private func keepTimeline(_ id: String?) {
+        guard let id else { return }
+        timelineUse.removeAll { $0 == id }
+        timelineUse.insert(id, at: 0)
+        timelineUse = Array(timelineUse.prefix(Self.liveTimelines))
+        var next = timelines.filter(timelineUse.contains)
+        if !next.contains(id) {
+            next.append(id)
+        }
+        if next != timelines {
+            timelines = next
+        }
+    }
+
+    var restoredScroll: ThreadScroll {
+        ThreadScroll(followsEnd: followsEnd, top: scrollTop)
+    }
+
+    private func park() {
+        guard let thread, !entries.isEmpty else { return }
+        transcripts[thread] = CachedTranscript(
+            entries: entries, rows: rows, anchors: anchors, expandedFolds: expandedFolds, approvals: approvals, queued: queued,
+            scroll: ThreadScroll(followsEnd: followsEnd, top: scrollTop)
+        )
+        recency.removeAll { $0 == thread }
+        recency.insert(thread, at: 0)
+        while recency.count > Self.cachedThreads {
+            transcripts[recency.removeLast()] = nil
+        }
+    }
+
+    private static func reconciled(_ info: ThreadInfo, row: ThreadRow?) -> ThreadInfo {
+        guard let row else { return info }
+        var info = info
+        info.busy = row.status == .working || row.status == .approval
+        if !row.title.isEmpty {
+            info.title = row.title
+        }
+        return info
     }
 
     func threadStarted(draft: String, thread: String) -> Bool {
         if let tier = pendingServiceTier.removeValue(forKey: draft) {
             core.run { $0.setServiceTier(thread: thread, tier: tier) }
         }
-        guard draft == pendingDraft else { return false }
-        pendingDraft = nil
-        pendingPrompt = nil
-        return true
+        requests.settle(draft)
+        guard let index = pendings.firstIndex(where: { $0.draft == draft }) else { return false }
+        pendings[index].thread = thread
+        pendings[index].failure = nil
+        let start = pendings[index]
+        pendings[index].queued = []
+        var info = start.info
+        info.thread = thread
+        info.busy = true
+        infoCache[thread] = info
+        seeded.insert(thread)
+        transcripts[thread] = CachedTranscript(
+            entries: start.entries, rows: TimelineLayout.rows(for: start.entries, expanded: []), anchors: [], expandedFolds: [],
+            approvals: [], queued: start.queued, scroll: ThreadScroll()
+        )
+        recency.removeAll { $0 == thread }
+        recency.insert(thread, at: 0)
+        if let composer = drafts.removeValue(forKey: draft), drafts[thread] == nil {
+            drafts[thread] = composer
+        }
+        for message in start.queued {
+            let prompt = PromptDraft(text: message.text, images: [], files: [])
+            core.run { $0.send(thread: thread, prompt: prompt, delivery: .queue) }
+        }
+        pendingsChanged?()
+        return focusedPending == draft
     }
 
     func setInfo(thread: String, info: ThreadInfo) {
+        let info = Self.continued(info, previous: infoCache[thread])
         infoCache[thread] = info
-        guard thread == self.thread else { return }
+        guard thread == self.thread, self.info != info else { return }
         self.info = info
+    }
+
+    private static let startSkew: Int64 = 2_000
+
+    private static func continued(_ info: ThreadInfo, previous: ThreadInfo?) -> ThreadInfo {
+        guard info.busy, let previous, previous.busy, let earlier = previous.runStartedAt, let start = info.runStartedAt,
+              start > earlier, start - earlier < startSkew else { return info }
+        var info = info
+        info.runStartedAt = earlier
+        return info
+    }
+
+    func runStart(_ thread: String, reported: Int64?) -> Int64? {
+        guard let reported else { return nil }
+        let shown = infoCache[thread] ?? pendingStart(thread)?.info
+        guard let shown, shown.busy, let start = shown.runStartedAt, start <= reported, reported - start < Self.startSkew else { return reported }
+        return start
     }
 
     func apply(thread: String, op: TranscriptOp) -> String? {
         guard thread == self.thread else { return nil }
+        if loading {
+            loading = false
+        }
         switch op {
         case .reset(let items):
-            entries = items.map(TimelineEntry.init)
-            rebuildRows()
+            awaitingReset = false
+            if items.isEmpty, seeded.contains(thread) { return nil }
+            seeded.remove(thread)
+            reconcile(items)
         case .insert(let index, let item):
+            guard !awaitingReset else { return nil }
+            dropSeed(thread)
             guard let position = Int(exactly: index), position <= entries.count else { return outOfSync }
             entries.insert(TimelineEntry(item: item), at: position)
             rebuildRows()
         case .update(let index, let item):
+            guard !awaitingReset else { return nil }
+            dropSeed(thread)
             guard let position = Int(exactly: index), position < entries.count else { return outOfSync }
             let entry = entries[position]
             let restructures = entry.id != item.id || entry.item.turn != item.turn || entry.item.kind.shape != item.kind.shape
@@ -208,13 +431,33 @@ final class ConversationStore {
         return nil
     }
 
+    private func dropSeed(_ thread: String) {
+        guard seeded.remove(thread) != nil else { return }
+        entries = []
+    }
+
+    private func reconcile(_ items: [Item]) {
+        let existing = Dictionary(entries.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let next = items.map { item -> TimelineEntry in
+            guard let entry = existing[item.id] else { return TimelineEntry(item: item) }
+            if entry.item != item {
+                entry.item = item
+            }
+            return entry
+        }
+        if !next.elementsEqual(entries, by: ===) {
+            entries = next
+        }
+        rebuildRows()
+    }
+
     func setApprovals(thread: String, approvals: [Approval]) {
-        guard thread == self.thread else { return }
+        guard thread == self.thread, self.approvals != approvals else { return }
         self.approvals = approvals
     }
 
     func setQueue(thread: String, queued: [QueuedMessage]) {
-        guard thread == self.thread else { return }
+        guard thread == self.thread, self.queued != queued else { return }
         self.queued = queued
     }
 
@@ -283,7 +526,11 @@ final class ConversationStore {
     }
 
     func composer(project: String?) -> ComposerDraft {
-        composer(key: thread ?? "project:\(project ?? "")")
+        composer(key: thread ?? focusedPending ?? Self.draftKey(project))
+    }
+
+    private static func draftKey(_ project: String?) -> String {
+        "project:\(project ?? "")"
     }
 
     func promptHistory() -> [String] {
@@ -515,13 +762,17 @@ final class ConversationStore {
             sentPrompts.append(typed)
         }
         let snapshot = StashedPrompt(text: draft.text, files: draft.files, contexts: draft.contexts)
+        let images = draft.images
         draft.clear()
         followsEnd = true
         endRequest += 1
         guard let thread else {
+            if let focusedPending, let index = pendings.firstIndex(where: { $0.draft == focusedPending }) {
+                pendings[index].queued.append(QueuedMessage(id: UUID().uuidString, text: text, steering: false, sending: true))
+                queued = pendings[index].queued
+                return
+            }
             let id = UUID().uuidString
-            pendingDraft = id
-            pendingPrompt = (project, snapshot)
             let model = currentModel(settings: settings)
             let options = ThreadSettings(
                 provider: model?.provider,
@@ -530,24 +781,74 @@ final class ConversationStore {
                 access: access(settings: settings),
                 worktree: newThread.worktreeChoice(settings: settings, defaultBranch: defaultBranch)
             )
+            let fanOut = newThread.fanOutModels(available: models)
             if let tier = serviceTier(settings: settings) {
                 pendingServiceTier[id] = tier
-            }
-            let fanOut = newThread.fanOutModels(available: models)
-            newThread.threadStarted()
-            if fanOut.count >= 2 {
-                for index in 1..<fanOut.count {
-                    if let tier = pendingServiceTier[id] {
-                        pendingServiceTier["\(id)#\(index)"] = tier
-                    }
+                for index in fanOut.indices.dropFirst() {
+                    pendingServiceTier["\(id)#\(index)"] = tier
                 }
-                core.run { $0.startThreads(draft: id, project: project, prompt: prompt, settings: options, models: fanOut) }
-            } else {
-                core.run { $0.startThread(draft: id, project: project, prompt: prompt, settings: options) }
             }
+            let info = pendingInfo(id, project: project, title: typed.isEmpty ? text : typed, settings: settings)
+            let start = PendingStart(
+                draft: id, project: project, prompt: snapshot, request: prompt, options: options, fanOut: fanOut,
+                entries: [Self.pendingEntry(text: text, images: images)], info: info
+            )
+            begin(start)
+            newThread.threadStarted()
+            launch(start)
             return
         }
         core.run { $0.send(thread: thread, prompt: prompt, delivery: busy ? delivery : .default) }
+    }
+
+    private static let pendingItem = UInt64.max
+
+    private static func pendingEntry(text: String, images: [ComposerImage]) -> TimelineEntry {
+        let thumbnails = images.map { image in
+            let size = image.thumbnail?.size ?? .zero
+            return ImageThumbnail(mimeType: image.attachment.mimeType, data: image.attachment.data, width: UInt32(size.width), height: UInt32(size.height))
+        }
+        let kind = ItemKind.user(text: text, images: UInt32(images.count), entry: nil, thumbnails: thumbnails)
+        return TimelineEntry(item: Item(id: pendingItem, turn: 1, createdAt: Int64(Date.now.timeIntervalSince1970 * 1000), kind: kind))
+    }
+
+    private func pendingInfo(_ draft: String, project: String?, title: String, settings: Settings?) -> ThreadInfo {
+        let model = currentModel(settings: settings)
+        let line = title.split(whereSeparator: \.isNewline).first.map(String.init) ?? title
+        return ThreadInfo(
+            thread: draft, project: project, title: String(line.prefix(80)), cwd: "",
+            model: model.map { ModelRef(provider: $0.provider, id: $0.id, name: $0.name, reasoning: $0.reasoning) },
+            thinkingLevel: thinkingLevel(settings: settings) ?? "", thinkingLevels: thinkingLevels(settings: settings),
+            access: access(settings: settings), busy: true, runStartedAt: Int64(Date.now.timeIntervalSince1970 * 1000),
+            compacting: false, retryAttempt: 0, queued: 0, context: nil, branch: nil, worktree: nil,
+            serviceTier: serviceTier(settings: settings), serviceTiers: serviceTiers(settings: settings), goal: nil
+        )
+    }
+
+    private func begin(_ start: PendingStart) {
+        park()
+        pendings.insert(start, at: 0)
+        thread = nil
+        entries = start.entries
+        rebuildRows()
+        info = start.info
+        approvals = []
+        queued = []
+        expandedFolds = []
+        followsEnd = true
+        scrollTop = nil
+        focusedPending = start.draft
+        keepTimeline(start.draft)
+        pendingsChanged?()
+    }
+
+    private func launch(_ start: PendingStart) {
+        let (id, project, prompt, options, fanOut) = (start.draft, start.project, start.request, start.options, start.fanOut)
+        if fanOut.count >= 2 {
+            core.run { $0.startThreads(draft: id, project: project, prompt: prompt, settings: options, models: fanOut) }
+        } else {
+            core.run { $0.startThread(draft: id, project: project, prompt: prompt, settings: options) }
+        }
     }
 
     private func composer(key: String) -> ComposerDraft {
@@ -560,7 +861,10 @@ final class ConversationStore {
     }
 
     private func rebuildRows() {
-        rows = TimelineLayout.rows(for: entries, expanded: expandedFolds)
+        let layout = TimelineLayout.rows(for: entries, expanded: expandedFolds)
+        if !layout.elementsEqual(rows, by: { $0.same(as: $1) }) {
+            rows = layout
+        }
         let next = rows.enumerated().compactMap { index, row -> TimelineAnchor? in
             guard case .entry(let entry, _) = row, case .user(let text, _, _, _) = entry.item.kind else { return nil }
             let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
@@ -580,6 +884,36 @@ struct TimelineAnchor: Identifiable, Equatable {
     let id: UInt64
     let order: Int
     let preview: String
+}
+
+struct ThreadScroll: Equatable {
+    var followsEnd = true
+    var top: UInt64?
+}
+
+struct PendingStart {
+    let draft: String
+    let project: String?
+    let prompt: StashedPrompt
+    let request: PromptDraft
+    let options: ThreadSettings
+    let fanOut: [ModelKey]
+    let entries: [TimelineEntry]
+    var info: ThreadInfo
+    var queued: [QueuedMessage] = []
+    var thread: String?
+    var failure: String?
+    let at = Date.now
+}
+
+private struct CachedTranscript {
+    let entries: [TimelineEntry]
+    let rows: [TimelineRow]
+    let anchors: [TimelineAnchor]
+    let expandedFolds: Set<UInt64>
+    let approvals: [Approval]
+    let queued: [QueuedMessage]
+    let scroll: ThreadScroll
 }
 
 @MainActor
@@ -604,6 +938,15 @@ enum TimelineRow: Identifiable {
         case .entry(let entry, _): entry.id
         case .tools(let entries): entries.first?.id ?? 0
         case .fold(let entry, _): entry.id
+        }
+    }
+
+    func same(as other: TimelineRow) -> Bool {
+        switch (self, other) {
+        case let (.entry(lhs, lhsHides), .entry(rhs, rhsHides)): lhs === rhs && lhsHides == rhsHides
+        case let (.tools(lhs), .tools(rhs)): lhs.elementsEqual(rhs, by: ===)
+        case let (.fold(lhs, lhsExpanded), .fold(rhs, rhsExpanded)): lhs === rhs && lhsExpanded == rhsExpanded
+        default: false
         }
     }
 }

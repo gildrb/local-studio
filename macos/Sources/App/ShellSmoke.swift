@@ -16,7 +16,7 @@ final class ShellSmoke {
     private var index = 0
     private var acted = false
     private var subscription: AnyCancellable?
-    private var poll: Timer?
+    private var poll: Task<Void, Never>?
     private var project = ""
     private var thread = ""
     private let title = "Shell smoke renamed"
@@ -35,8 +35,11 @@ final class ShellSmoke {
 
     func start() {
         subscription = store.didTick.sink { [weak self] in self?.advance() }
-        poll = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.advance() }
+        poll = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                self?.advance()
+            }
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 180) { [weak self] in
             guard let self, index < steps.count else { return }
@@ -216,7 +219,7 @@ final class ShellSmoke {
     private func finish(passed: Bool, _ detail: String) {
         guard subscription != nil else { return }
         subscription = nil
-        poll?.invalidate()
+        poll?.cancel()
         print(passed ? "PASS macOS shell smoke: \(detail)" : "FAIL macOS shell smoke: \(detail)")
         if passed {
             NSApp.terminate(nil)
@@ -230,6 +233,9 @@ final class ShellSmoke {
 extension ShellSmoke {
     private func keyboardSteps() -> [Step] {
         [
+            Step(name: "main window", act: { smoke in
+                Task { _ = try? await presentMainWindow(smoke.store) }
+            }, done: { $0.store.mainWindow?.isVisible == true }),
             Step(name: "⌘T opens a draft in the current project", act: { $0.store.dispatch("chat.newTab") }, done: { smoke in
                 smoke.store.focusedThread == nil && smoke.store.shell.route == .thread && smoke.store.inbox.currentProject == smoke.project
                     && smoke.store.currentRegion == .composer && smoke.menuItem("New Thread Here")?.keyEquivalent == "t"
@@ -248,10 +254,10 @@ extension ShellSmoke {
                 smoke.store.dispatch("thread.recentNext")
                 smoke.store.endRecentCycle()
             }, done: { $0.store.focusedThread == $0.second && $0.store.shell.recent.prefix(2) == [$0.second, $0.thread] }),
-            Step(name: "⌘W closes the thread view", act: { smoke in
+            Step(name: "Close Thread owns ⌘W once the right panel is closed", act: { smoke in
                 if smoke.store.panels.rightPanelOpen { smoke.store.panels.toggleRightPanel() }
-                smoke.store.dispatch(smoke.menuItem("Close Thread")?.keyEquivalent == "w" ? "thread.close" : "missing")
-            }, done: { smoke in
+            }, done: { $0.menuItem("Close Thread")?.keyEquivalent == "w" }),
+            Step(name: "⌘W closes the thread view", act: { $0.store.dispatch("thread.close") }, done: { smoke in
                 smoke.store.focusedThread == nil && smoke.store.inbox.thread(smoke.second) != nil && smoke.store.shell.canGoBack
             }),
             Step(name: "⌘[ goes back to the closed thread", act: { $0.store.dispatch("navigation.back") }, done: { $0.store.focusedThread == $0.second && !$0.store.conversation.rows.isEmpty }),

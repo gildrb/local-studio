@@ -34,6 +34,9 @@ struct ThreadHeaderBar: View {
         .frame(height: Theme.Metrics.titlebarHeight)
         .background(TitlebarDragArea())
         .background(Theme.canvas)
+        .onChange(of: probe, initial: true) { _, probe in
+            store.shell.probe.header = probe
+        }
         .sheet(item: sheetBinding(\.commitProject)) { item in
             CommitSheet(store: store, project: item.id)
         }
@@ -117,6 +120,10 @@ struct ThreadHeaderBar: View {
                 .accessibilityAction { showThreadMenu(thread) }
                 .accessibilityAction(named: "Rename") { store.shell.headerRenaming = true }
             }
+        } else if let pending = store.conversation.pending {
+            Text(pending.info.title.isEmpty ? "Untitled thread" : pending.info.title)
+                .fontWeight(.medium)
+                .lineLimit(1)
         } else {
             Text("New thread")
                 .fontWeight(.medium)
@@ -141,6 +148,13 @@ struct ThreadHeaderBar: View {
     private var titleText: String {
         let title = store.conversation.info?.title ?? store.focusedRow?.title ?? ""
         return title.isEmpty ? "Untitled thread" : title
+    }
+
+    private var probe: HeaderProbe? {
+        guard store.shell.route == .thread else { return nil }
+        let pending = store.conversation.pending
+        let title = store.focusedThread != nil ? titleText : pending.map { $0.info.title.isEmpty ? "Untitled thread" : $0.info.title } ?? "New thread"
+        return HeaderProbe(thread: store.focusedThread, pending: pending?.draft, title: title, project: projectName)
     }
 
     private var gitProject: String? {
