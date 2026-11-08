@@ -291,7 +291,7 @@ private struct TimelineScroll: View {
             tracker.distance = distance
             return distance
         } action: { _, _ in
-            guard current else { return }
+            guard current, store.conversation.selectedID == thread else { return }
             let distance = tracker.distance
             let previous = store.shell.probe.scroll
             store.shell.probe.scroll = ScrollProbe(thread: thread, distance: distance, top: previous?.thread == thread ? previous?.top : nil)
@@ -310,14 +310,24 @@ private struct TimelineScroll: View {
                 position.scrollTo(edge: .bottom)
             }
         }
+        .onChange(of: current ? ColumnLayout(store: store) : nil) { _, _ in
+            if current, conversation.followsEnd, !tracker.userDriven {
+                position.scrollTo(edge: .bottom)
+            }
+        }
         .onChange(of: Gated(live: current, value: current ? conversation.endRequest : nil)) { old, new in
             guard old.live, new.live else { return }
             position.scrollTo(edge: .bottom)
         }
         .onChange(of: Gated(live: current, value: current ? store.shell.timelineCursor : nil)) { old, new in
             guard old.live, new.live, let cursor = new.value, store.shell.region == .timeline else { return }
-            follow(cursor == conversation.rows.last?.id)
-            position.scrollTo(id: cursor)
+            let last = cursor == conversation.rows.last?.id
+            follow(last)
+            if last {
+                position.scrollTo(edge: .bottom)
+            } else {
+                position.scrollTo(id: cursor)
+            }
         }
         .onScrollTargetVisibilityChange(idType: UInt64.self, threshold: 0.3) { ids in
             updateCurrentAnchor(visible: ids)
@@ -379,9 +389,9 @@ private struct TimelineScroll: View {
     }
 
     private func updateCurrentAnchor(visible ids: [UInt64]) {
-        guard current else { return }
+        guard current, store.conversation.selectedID == thread else { return }
         let order = Dictionary(store.conversation.rows.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let top = ids.min { (order[$0] ?? .max) < (order[$1] ?? .max) }
+        guard let top = ids.filter({ order[$0] != nil }).min(by: { order[$0, default: .max] < order[$1, default: .max] }) else { return }
         tracker.top = top
         store.conversation.scrollTop = top
         if let scroll = store.shell.probe.scroll, scroll.thread == thread {
@@ -399,7 +409,7 @@ private struct TimelineScroll: View {
     }
 
     private func follow(_ value: Bool) {
-        if current, store.conversation.followsEnd != value {
+        if current, store.conversation.selectedID == thread, store.conversation.followsEnd != value {
             store.conversation.followsEnd = value
         }
     }
@@ -408,6 +418,28 @@ private struct TimelineScroll: View {
 private struct Gated<Value: Equatable>: Equatable {
     let live: Bool
     let value: Value?
+}
+
+private struct ColumnLayout: Equatable {
+    let terminalOpen: Bool
+    let terminalHeight: CGFloat
+    let rightPanelOpen: Bool
+    let rightPanelWidth: CGFloat
+    let rightPanelMaximized: Bool
+    let sidebarVisible: Bool
+    let sidebarWidth: CGFloat
+
+    @MainActor
+    init(store: StudioStore) {
+        let panels = store.panels
+        terminalOpen = panels.terminalOpen
+        terminalHeight = panels.terminalHeight
+        rightPanelOpen = panels.rightPanelOpen
+        rightPanelWidth = panels.rightPanelWidth
+        rightPanelMaximized = panels.rightPanelMaximized
+        sidebarVisible = store.shell.sidebarVisible
+        sidebarWidth = store.shell.sidebarWidth
+    }
 }
 
 private struct TimelineStack: View, Equatable {
