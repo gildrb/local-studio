@@ -353,6 +353,7 @@ struct PickerChipButton<Panel: View>: View {
     let help: String
     let label: String
     let panel: @MainActor (@escaping () -> Void) -> Panel
+    private let external: Binding<Bool>?
     @State private var presented = false
     @State private var hovering = false
 
@@ -361,28 +362,34 @@ struct PickerChipButton<Panel: View>: View {
         symbol: String? = nil,
         help: String,
         label: String,
+        presented: Binding<Bool>? = nil,
         @ViewBuilder panel: @escaping @MainActor (@escaping () -> Void) -> Panel
     ) {
         self.title = title
         self.symbol = symbol
         self.help = help
         self.label = label
+        external = presented
         self.panel = panel
+    }
+
+    private var shown: Binding<Bool> {
+        external ?? $presented
     }
 
     var body: some View {
         Button {
-            presented.toggle()
+            shown.wrappedValue.toggle()
         } label: {
-            ComposerChip(title: title, symbol: symbol, hovering: hovering || presented)
+            ComposerChip(title: title, symbol: symbol, hovering: hovering || shown.wrappedValue)
         }
         .buttonStyle(.plain)
         .fixedSize()
         .onHover { hovering = $0 }
         .help(help)
         .accessibilityLabel(label)
-        .popover(isPresented: $presented, arrowEdge: .bottom) {
-            panel { presented = false }
+        .popover(isPresented: shown, arrowEdge: .bottom) {
+            panel { shown.wrappedValue = false }
         }
     }
 }

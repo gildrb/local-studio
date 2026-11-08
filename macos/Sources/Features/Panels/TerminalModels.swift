@@ -106,6 +106,7 @@ final class TerminalSession: Identifiable {
     @ObservationIgnored private var sinkOwner: ObjectIdentifier?
     @ObservationIgnored private var pendingInput = Data()
     @ObservationIgnored private var sizeDirty = false
+    @ObservationIgnored private(set) var appliedFrames = 0
     @ObservationIgnored private weak var workspace: WorkspaceStore?
 
     init(project: String, ordinal: Int, workspace: WorkspaceStore) {
@@ -142,6 +143,7 @@ final class TerminalSession: Identifiable {
     }
 
     func apply(_ frame: TerminalFrame) {
+        appliedFrames += 1
         let damage = grid.apply(frame)
         if let title = frame.title, !title.isEmpty, title != self.title {
             self.title = title

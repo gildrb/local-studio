@@ -26,7 +26,7 @@ final class UserSender {
 
     init(store: StudioStore) {
         self.store = store
-        turnLimit = StressSeed.realModel ? 150 : 45
+        turnLimit = 150
         store.shell.probe.drawn = []
     }
 
@@ -81,7 +81,7 @@ final class UserSender {
         if try await !wait(2, { Screen.composer(in: window)?.string.isEmpty == true }) {
             record("composer kept text", "after Return the composer still shows “\(Screen.composer(in: window)?.string ?? "")”")
         }
-        if try await !wait(StressSeed.realModel ? 10 : 5, { Screen.bubbleShown(text, in: window, probe: store.shell.probe) }) {
+        if try await !wait(10, { Screen.bubbleShown(text, in: window, probe: store.shell.probe) }) {
             record("bubble missing", "after sending “\(text)” no user message with that text is on screen in the timeline (\(Screen.describeBubble(text, in: window, probe: store.shell.probe)))")
         } else {
             let latency = Date.now.timeIntervalSince(turns[index].sentAt)
@@ -151,12 +151,12 @@ final class UserSender {
         let pendings = store.conversation.pendings
         for index in turns.indices where !turns[index].done && turns[index].thread == nil {
             let text = turns[index].text
-            if let start = pendings.first(where: { $0.info.title == text || $0.draft == turns[index].draft }) {
+            if let start = pendings.first(where: { Self.sameTitle($0.info.title, text) || $0.draft == turns[index].draft }) {
                 turns[index].draft = start.draft
                 turns[index].thread = start.thread
             } else if let thread = store.conversation.thread, probe?.thread == thread, probe?.lastUser == text {
                 turns[index].thread = thread
-            } else if let row = store.inbox.threads.first(where: { row in row.title == text && !pendings.contains { $0.draft == row.id } }) {
+            } else if let row = store.inbox.threads.first(where: { row in Self.sameTitle(row.title, text) && !pendings.contains { $0.draft == row.id } }) {
                 turns[index].thread = row.id
             }
         }
@@ -191,6 +191,14 @@ final class UserSender {
         guard !bubbles.isEmpty else { return "none" }
         let p95 = bubbles[min(bubbles.count - 1, bubbles.count * 95 / 100)]
         return "p50 \(Int(bubbles[bubbles.count / 2] * 1000)) ms p95 \(Int(p95 * 1000)) ms max \(Int((bubbles.last ?? 0) * 1000)) ms"
+    }
+
+    nonisolated static func sameTitle(_ title: String, _ text: String) -> Bool {
+        guard !title.isEmpty else { return false }
+        if title == text { return true }
+        let line = text.split(separator: "\n", omittingEmptySubsequences: false).first.map(String.init) ?? text
+        if title == String(line.prefix(80)) { return true }
+        return title.hasSuffix("…") && text.hasPrefix(String(title.dropLast()))
     }
 
     static func seconds(_ text: String) -> Int? {

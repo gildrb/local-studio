@@ -301,10 +301,18 @@ final class ConversationStore {
         if anchors != cached?.anchors ?? [] {
             anchors = cached?.anchors ?? []
         }
-        approvals = cached?.approvals ?? []
-        queued = cached?.queued ?? []
-        expandedFolds = cached?.expandedFolds ?? []
-        followsEnd = cached?.scroll.followsEnd ?? true
+        if approvals != cached?.approvals ?? [] {
+            approvals = cached?.approvals ?? []
+        }
+        if queued != cached?.queued ?? [] {
+            queued = cached?.queued ?? []
+        }
+        if expandedFolds != cached?.expandedFolds ?? [] {
+            expandedFolds = cached?.expandedFolds ?? []
+        }
+        if followsEnd != cached?.scroll.followsEnd ?? true {
+            followsEnd = cached?.scroll.followsEnd ?? true
+        }
         scrollTop = cached?.scroll.top
         awaitingReset = cached != nil
         let loading = thread != nil && cached == nil
@@ -317,6 +325,10 @@ final class ConversationStore {
 
     func cachedRows(_ thread: String) -> [TimelineRow] {
         transcripts[thread]?.rows ?? []
+    }
+
+    func cachedAnchors(_ thread: String) -> [TimelineAnchor] {
+        transcripts[thread]?.anchors ?? []
     }
 
     private func keepTimeline(_ id: String?) {
@@ -1165,6 +1177,7 @@ final class NewThreadOptions {
     var serviceTier: String?
     var multiModel = false
     var fanOut: [ModelKey] = []
+    var branchPickerOpen = false
 
     func usesWorktree(_ settings: Settings?) -> Bool {
         worktree ?? (settings?.newThreadWorkspace == .worktree)
@@ -1213,6 +1226,7 @@ final class NewThreadOptions {
         branch = ""
         multiModel = false
         fanOut = []
+        branchPickerOpen = false
     }
 
     static func generatedBranch() -> String {

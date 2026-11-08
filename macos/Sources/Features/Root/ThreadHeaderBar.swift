@@ -18,7 +18,7 @@ struct ThreadHeaderBar: View {
                     ProjectScriptsControl(store: store, project: project)
                         .id(project)
                 }
-                OpenInEditorButton(path: store.workspacePath(for: store.focusedRow))
+                OpenInEditorButton(store: store, enabled: store.workspacePath(for: store.focusedRow) != nil)
                 if let project = gitProject {
                     GitActionsButton(store: store, project: project)
                         .task(id: project) {
@@ -146,7 +146,8 @@ struct ThreadHeaderBar: View {
     }
 
     private var titleText: String {
-        let title = store.conversation.info?.title ?? store.focusedRow?.title ?? ""
+        let row = store.focusedRow?.title ?? ""
+        let title = row.isEmpty ? store.conversation.info?.title ?? "" : row
         return title.isEmpty ? "Untitled thread" : title
     }
 

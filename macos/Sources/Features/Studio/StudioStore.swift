@@ -21,6 +21,7 @@ final class StudioStore {
     @ObservationIgnored private(set) var appliedUpdates = 0
     @ObservationIgnored private let launch: DaemonLaunch?
     @ObservationIgnored private let controllerMain: String?
+    @ObservationIgnored private var pump: UpdatePump?
 
     init(launch: DaemonLaunch?, controllerMain: String? = nil) {
         self.launch = launch
@@ -32,16 +33,30 @@ final class StudioStore {
         workspace.panels.bind(conversation: conversation, inbox: inbox, pages: pages)
         conversation.pendingsChanged = { [weak self] in self?.syncPendings() }
         conversation.onSendFailure = { [weak self] in self?.post(.error, $0) }
-        conversation.threadChanged = { [weak self] in self?.panels.focus($0) }
+        conversation.threadChanged = { [weak self] thread in
+            guard let self else { return }
+            panels.focus(thread)
+            if shell.headerRenaming {
+                shell.headerRenaming = false
+            }
+        }
     }
 
     func start() throws {
         let config = StudioConfig(socketPath: nil, sessionDir: nil, dataDir: nil, launch: launch, controllerMain: controllerMain)
-        let waker = MainWaker { [weak self] in self?.tick() }
-        core.studio = try Studio(config: config, waker: waker)
+        let pump = UpdatePump { [weak self] studio, updates in
+            guard let self, self.core.studio === studio else { return }
+            self.receive(updates)
+        }
+        let studio = try Studio(config: config, waker: pump)
+        core.studio = studio
+        pump.attach(studio)
+        self.pump = pump
     }
 
     func stop() {
+        pump?.attach(nil)
+        pump = nil
         core.studio?.shutdown()
         core.studio = nil
         requests.reset()
@@ -83,11 +98,6 @@ final class StudioStore {
             apply(update)
         }
         didTick.send()
-    }
-
-    private func tick() {
-        guard let studio = core.studio else { return }
-        receive(studio.tick())
     }
 
     private func apply(_ update: Update) {

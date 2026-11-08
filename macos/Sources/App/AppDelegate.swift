@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stress: StressHarness?
     private var providersSmoke: ProvidersSmoke?
     private var keys: KeysHarness?
+    private var logoLoad: LogoLoad?
 
     override init() {
         UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
@@ -32,7 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SyntaxHighlighter.shared.warm()
         let stressFlag = arguments.firstIndex(of: "+stress")
         let keysFlag = arguments.contains("+keys")
-        if stressFlag != nil || keysFlag {
+        let logoFlag = arguments.contains("+logo-load")
+        if stressFlag != nil || keysFlag || logoFlag {
             StressSeed.prepareProcess()
         }
         configureNotifier()
@@ -84,6 +86,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let harness = KeysHarness(store: store)
             harness.start()
             keys = harness
+        }
+        if logoFlag {
+            let harness = LogoLoad(store: store)
+            harness.start()
+            logoLoad = harness
         }
         DispatchQueue.main.async { [weak self] in
             self?.presentMainWindowIfMissing()

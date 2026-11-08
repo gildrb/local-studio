@@ -16,12 +16,18 @@ struct ComposerControls: View {
         HStack(spacing: 2) {
             HStack(spacing: 2) {
                 ComposerIconButton(title: "Attach files", symbol: "paperclip", action: attach)
-                ModelPickerButton(store: store)
-                ThinkingMenu(store: store)
-                ServiceTierMenu(store: store)
-                AccessMenu(store: store)
-                StashMenu(store: store, project: project)
-                GoalChip(store: store)
+                ModelPickerButton(store: store, title: modelTitle, presented: conversation.modelPickerPresented)
+                    .equatable()
+                ThinkingMenu(store: store, levels: conversation.thinkingLevels(settings: settings), current: conversation.thinkingLevel(settings: settings))
+                    .equatable()
+                ServiceTierMenu(store: store, tiers: conversation.serviceTiers(settings: settings), current: conversation.serviceTier(settings: settings))
+                    .equatable()
+                AccessMenu(store: store, current: conversation.access(settings: settings))
+                    .equatable()
+                StashMenu(store: store, project: project, prompts: conversation.stash.list(conversation.stashKey(project: project)), canStash: !draft.isEmpty)
+                    .equatable()
+                GoalChip(goal: conversation.info?.goal)
+                    .equatable()
             }
             .opacity(compact ? 0 : 1)
             .allowsHitTesting(!compact)
@@ -49,6 +55,15 @@ struct ComposerControls: View {
             )
         }
         .frame(height: 30)
+    }
+
+    private var modelTitle: String {
+        let conversation = store.conversation
+        let fanOut = conversation.newThread.fanOutModels(available: conversation.models)
+        if conversation.thread == nil, fanOut.count >= 2 {
+            return "\(fanOut.count) models"
+        }
+        return conversation.currentModel(settings: store.pages.settings)?.name ?? "Model"
     }
 
     private func sendTitle(busy: Bool, steers: Bool) -> String {
@@ -145,33 +160,30 @@ private struct RoundActionButton: View {
     }
 }
 
-private struct ModelPickerButton: View {
+private struct ModelPickerButton: View, Equatable {
     let store: StudioStore
+    let title: String
+    let presented: Bool
     @State private var hovering = false
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.title == rhs.title && lhs.presented == rhs.presented
+    }
 
     var body: some View {
         let conversation = store.conversation
         Button {
             conversation.modelPickerPresented.toggle()
         } label: {
-            ComposerChip(title: title, hovering: hovering || conversation.modelPickerPresented)
+            ComposerChip(title: title, hovering: hovering || presented)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Model")
         .accessibilityLabel("Model: \(title)")
-        .popover(isPresented: Bindable(conversation).modelPickerPresented, arrowEdge: .bottom) {
+        .popover(isPresented: Binding { presented } set: { conversation.modelPickerPresented = $0 }, arrowEdge: .bottom) {
             ModelPickerPanel(store: store) { conversation.modelPickerPresented = false }
         }
-    }
-
-    private var title: String {
-        let conversation = store.conversation
-        let fanOut = conversation.newThread.fanOutModels(available: conversation.models)
-        if conversation.thread == nil, fanOut.count >= 2 {
-            return "\(fanOut.count) models"
-        }
-        return conversation.currentModel(settings: store.pages.settings)?.name ?? "Model"
     }
 }
 
@@ -186,6 +198,7 @@ struct ModelPickerPanel: View {
     let dismiss: () -> Void
     @State private var query = ""
     @State private var showsHidden: Bool
+    @State private var focusedProvider: String?
 
     init(store: StudioStore, revealHidden: Bool = false, dismiss: @escaping () -> Void) {
         self.store = store
@@ -200,6 +213,7 @@ struct ModelPickerPanel: View {
         let sections = sections(configured)
         let current = conversation.currentModel(settings: store.pages.settings)
         let jumps = jumpOrder(sections)
+        let providers = sections.map(\.id).filter { $0 != "favorites" && $0 != "hidden" }
         VStack(spacing: 0) {
             if configured.count > 8 {
                 HStack(spacing: 6) {
@@ -223,40 +237,47 @@ struct ModelPickerPanel: View {
                     .padding(20)
                     .frame(maxWidth: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(sections) { section in
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(section.title)
-                                    .font(.system(size: 11.5, weight: .medium))
-                                    .foregroundStyle(Theme.secondaryText)
-                                    .padding(.horizontal, 10)
-                                    .padding(.top, section.id == sections.first?.id ? 4 : 10)
-                                    .padding(.bottom, 3)
-                                    .accessibilityAddTraits(.isHeader)
-                                ForEach(section.models, id: \.key) { model in
-                                    let firstAppearance = section.id == "favorites" || !conversation.isFavorite(model)
-                                    ModelRow(
-                                        model: model,
-                                        selected: multi ? options.isFanOut(model) : current?.provider == model.provider && current?.id == model.id,
-                                        favorite: conversation.isFavorite(model),
-                                        hidden: conversation.isHidden(model),
-                                        jump: firstAppearance ? jumps.firstIndex { $0.key == model.key }.flatMap { $0 < 9 ? $0 + 1 : nil } : nil
-                                    ) {
-                                        choose(model, current: current)
-                                    } toggleFavorite: {
-                                        conversation.setFavorite(model, !conversation.isFavorite(model))
-                                    } toggleHidden: {
-                                        conversation.setHidden(model, !conversation.isHidden(model))
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections) { section in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(section.title)
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundStyle(section.id == focusedProvider ? Color.primary : Theme.secondaryText)
+                                        .padding(.horizontal, 10)
+                                        .padding(.top, section.id == sections.first?.id ? 4 : 10)
+                                        .padding(.bottom, 3)
+                                        .accessibilityAddTraits(.isHeader)
+                                    ForEach(section.models, id: \.key) { model in
+                                        let firstAppearance = section.id == "favorites" || !conversation.isFavorite(model)
+                                        ModelRow(
+                                            model: model,
+                                            selected: multi ? options.isFanOut(model) : current?.provider == model.provider && current?.id == model.id,
+                                            favorite: conversation.isFavorite(model),
+                                            hidden: conversation.isHidden(model),
+                                            jump: firstAppearance ? jumps.firstIndex { $0.key == model.key }.flatMap { $0 < 9 ? $0 + 1 : nil } : nil
+                                        ) {
+                                            choose(model, current: current)
+                                        } toggleFavorite: {
+                                            conversation.setFavorite(model, !conversation.isFavorite(model))
+                                        } toggleHidden: {
+                                            conversation.setHidden(model, !conversation.isHidden(model))
+                                        }
                                     }
                                 }
+                                .id(section.id)
                             }
                         }
+                        .padding(6)
                     }
-                    .padding(6)
+                    .frame(maxHeight: 380)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onChange(of: focusedProvider) { _, provider in
+                        guard let provider else { return }
+                        proxy.scrollTo(provider, anchor: .top)
+                    }
                 }
-                .frame(maxHeight: 380)
-                .fixedSize(horizontal: false, vertical: true)
             }
             if hiddenCount > 0 || showsHidden {
                 Rectangle().fill(Theme.hairline).frame(height: 1)
@@ -293,6 +314,12 @@ struct ModelPickerPanel: View {
         .modifier(ModelPickerJumpCommands(store: store, models: jumps) { model in
             choose(model, current: current)
         })
+        .studioCommand("modelPicker.previousProvider", in: store, enabled: providers.count > 1) {
+            step(-1, providers: providers, current: current)
+        }
+        .studioCommand("modelPicker.nextProvider", in: store, enabled: providers.count > 1) {
+            step(1, providers: providers, current: current)
+        }
         .task {
             if conversation.models.isEmpty {
                 conversation.loadModels()
@@ -313,6 +340,11 @@ struct ModelPickerPanel: View {
         if on, options.fanOut.isEmpty, let current {
             options.toggleFanOut(current)
         }
+    }
+
+    private func step(_ delta: Int, providers: [String], current: ModelOption?) {
+        let index = (focusedProvider ?? current?.provider).flatMap(providers.firstIndex(of:)) ?? (delta > 0 ? -1 : providers.count)
+        focusedProvider = providers[(index + delta + providers.count) % providers.count]
     }
 
     private func choose(_ model: ModelOption, current: ModelOption?) {
@@ -501,15 +533,19 @@ private struct ModelRow: View {
     }
 }
 
-struct ThinkingMenu: View {
+struct ThinkingMenu: View, Equatable {
     let store: StudioStore
+    let levels: [String]
+    let current: String?
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.levels == rhs.levels && lhs.current == rhs.current
+    }
 
     var body: some View {
-        let conversation = store.conversation
-        let settings = store.pages.settings
-        let levels = conversation.thinkingLevels(settings: settings)
         if let fallback = levels.first {
-            let current = conversation.thinkingLevel(settings: settings) ?? fallback
+            let current = current ?? fallback
+            let conversation = store.conversation
             PickerChipButton(
                 title: Self.title(current),
                 help: "Thinking level",
@@ -536,15 +572,18 @@ struct ThinkingMenu: View {
     }
 }
 
-struct ServiceTierMenu: View {
+struct ServiceTierMenu: View, Equatable {
     let store: StudioStore
+    let tiers: [String]
+    let current: String?
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.tiers == rhs.tiers && lhs.current == rhs.current
+    }
 
     var body: some View {
-        let conversation = store.conversation
-        let settings = store.pages.settings
-        let tiers = conversation.serviceTiers(settings: settings)
         if !tiers.isEmpty {
-            let current = conversation.serviceTier(settings: settings)
+            let conversation = store.conversation
             PickerChipButton(
                 title: current.map(Self.title) ?? "Standard",
                 symbol: current == nil ? nil : "bolt",
@@ -574,13 +613,17 @@ struct ServiceTierMenu: View {
     }
 }
 
-private struct GoalChip: View {
-    let store: StudioStore
+private struct GoalChip: View, Equatable {
+    let goal: Goal?
     @State private var presented = false
     @State private var hovering = false
 
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.goal == rhs.goal
+    }
+
     var body: some View {
-        if let goal = store.conversation.info?.goal {
+        if let goal {
             Button {
                 presented.toggle()
             } label: {
@@ -650,12 +693,16 @@ private struct GoalPopover: View {
     }
 }
 
-struct AccessMenu: View {
+struct AccessMenu: View, Equatable {
     let store: StudioStore
+    let current: AccessMode
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.current == rhs.current
+    }
 
     var body: some View {
         let conversation = store.conversation
-        let current = conversation.access(settings: store.pages.settings)
         PickerChipButton(
             title: current.title,
             symbol: current.symbol,
@@ -867,7 +914,8 @@ struct BaseBranchButton: View {
         let base = options.base ?? defaultBase
         let rows = Self.rows(branches, selected: base) { options.base = $0 }
         let empty = store.conversation.branchRequest.flatMap { store.workspace.branches[$0] } == nil ? "Loading branches…" : "No matching branches."
-        PickerChipButton(title: "from " + base, help: "Base branch", label: "Base branch: \(base)") { dismiss in
+        let presented = Binding { options.branchPickerOpen } set: { options.branchPickerOpen = $0 }
+        PickerChipButton(title: "from " + base, help: "Base branch", label: "Base branch: \(base)", presented: presented) { dismiss in
             PickerPanel(rows: rows, query: $query, prompt: "Search branches", emptyText: empty, width: 300, maxHeight: 300, dismiss: dismiss)
                 .task(id: query) {
                     try? await Task.sleep(for: .milliseconds(query.isEmpty ? 0 : 150))

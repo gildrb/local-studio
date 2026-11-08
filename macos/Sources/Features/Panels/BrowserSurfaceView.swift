@@ -16,6 +16,7 @@ final class BrowserModel: NSObject, WKNavigationDelegate {
     private(set) var focusRequest = 0
 
     @ObservationIgnored let webView: WKWebView
+    @ObservationIgnored private var titleObservation: NSKeyValueObservation?
 
     override init() {
         let configuration = WKWebViewConfiguration()
@@ -25,6 +26,14 @@ final class BrowserModel: NSObject, WKNavigationDelegate {
         webView.navigationDelegate = self
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+        titleObservation = webView.observe(\.title) { [weak self] webView, _ in
+            MainActor.assumeIsolated {
+                let title = webView.title ?? ""
+                if let self, self.title != title {
+                    self.title = title
+                }
+            }
+        }
     }
 
     var tabTitle: String {

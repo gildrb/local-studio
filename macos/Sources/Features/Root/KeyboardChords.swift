@@ -11,7 +11,9 @@ extension StudioStore {
         if responder is NSText || responder is TerminalSurfaceView, flags.isEmpty, !function {
             return false
         }
-        guard let command = chordCommand(spec, responder: responder) else { return false }
+        guard let command = chordCommand(spec, responder: responder) ?? ShortcutFormat.recordShifted(event).flatMap({ chordCommand($0, responder: responder) }) else {
+            return false
+        }
         dispatch(command)
         return true
     }

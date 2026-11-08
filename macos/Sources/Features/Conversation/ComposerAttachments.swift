@@ -103,15 +103,19 @@ private struct RemoveBadge: View {
     }
 }
 
-struct StashMenu: View {
+struct StashMenu: View, Equatable {
     let store: StudioStore
     let project: String?
+    let prompts: [StashedPrompt]
+    let canStash: Bool
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.project == rhs.project && lhs.prompts == rhs.prompts && lhs.canStash == rhs.canStash
+    }
 
     var body: some View {
-        let conversation = store.conversation
-        let key = conversation.stashKey(project: project)
-        let prompts = conversation.stash.list(key)
         if !prompts.isEmpty {
+            let conversation = store.conversation
             let label = prompts.count == 1 ? "1 stashed prompt" : "\(prompts.count) stashed prompts"
             PickerChipButton(
                 title: "\(prompts.count)",
@@ -121,10 +125,10 @@ struct StashMenu: View {
                 width: 300,
                 rows: Self.rows(
                     prompts: prompts,
-                    canStash: !conversation.composer(project: project).isEmpty,
+                    canStash: canStash,
                     restore: { conversation.restoreStash($0, project: project) },
                     stash: { _ = conversation.stashPrompt(project: project) },
-                    clear: { conversation.stash.clear(project: key) }
+                    clear: { conversation.stash.clear(project: conversation.stashKey(project: project)) }
                 )
             )
         }

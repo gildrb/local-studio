@@ -166,7 +166,7 @@ struct ComposerTextView: NSViewRepresentable {
             let caret = textView.selectedRange().location
             switch selector {
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
-                let flags = NSApp.currentEvent?.modifierFlags ?? []
+                let flags = (textView as? ComposerNSTextView)?.keyFlags ?? NSApp.currentEvent?.modifierFlags ?? []
                 let key = ComposerKey.enter(shift: flags.contains(.shift), command: flags.contains(.command), option: flags.contains(.option))
                 if !parent.onKey(key, caret) {
                     textView.insertNewlineIgnoringFieldEditor(nil)
@@ -193,6 +193,7 @@ final class ComposerNSTextView: NSTextView {
     var onKey: ((ComposerKey, Int) -> Bool)?
     var markdownShortcuts = false
     var focusOnWindow = false
+    private(set) var keyFlags: NSEvent.ModifierFlags?
     private(set) lazy var vim = ComposerVim()
     var vimEnabled = false {
         didSet {
@@ -221,7 +222,9 @@ final class ComposerNSTextView: NSTextView {
                 return
             }
         }
+        keyFlags = event.modifierFlags
         super.keyDown(with: event)
+        keyFlags = nil
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {

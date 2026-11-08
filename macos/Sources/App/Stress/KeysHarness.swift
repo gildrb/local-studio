@@ -70,10 +70,11 @@ final class KeysHarness {
                 result: live ? "live, not invoked (\(reason))" : "DEAD: resolves to \(resolved ?? "nothing") (\(reason))", passed: live
             )
         case .run(let context), .disabled(let context):
-            let before = store.shell.probe.dispatched.count
+            let before = store.shell.probe.dispatches
             KeyDriver.press(chord, in: window)
             try await Task.sleep(for: .milliseconds(120))
-            let ran = store.shell.probe.dispatched.dropFirst(before).compactMap(\.self)
+            let probe = store.shell.probe
+            let ran = probe.dispatched.suffix(min(probe.dispatches - before, probe.dispatched.count)).compactMap(\.self)
             if ran.contains(binding.command) {
                 outcome = Outcome(command: binding.command, chord: display, when: when, result: "ran (\(context))", passed: true)
             } else if case .disabled = plan, resolved == nil || resolved != binding.command {
@@ -93,6 +94,7 @@ final class KeysHarness {
     private func reset(_ window: NSWindow) async throws {
         store.shell.palette = nil
         store.conversation.modelPickerPresented = false
+        store.conversation.newThread.branchPickerOpen = false
         if store.panels.rightPanelOpen {
             store.panels.closeAll()
             if store.panels.rightPanelOpen { store.panels.toggleRightPanel() }
@@ -165,14 +167,20 @@ final class KeysHarness {
             return .disabled("the thread has no queued message")
         case "composer.stash":
             store.conversation.composer(project: project).text = "stash this prompt"
+            try await until("Stash Prompt enabled", 2) { store.commands.canPerform("composer.stash") }
             return .run("composer has text")
         case "composer.effort":
             let levels = store.conversation.thinkingLevels(settings: store.pages.settings)
             return levels.count > 1 ? .run("thread open") : .disabled("the model has \(levels.count) thinking level(s)")
-        case "composer.workspace", "composer.branch", "composer.previousWorktree", "composer.host":
+        case "composer.workspace", "composer.branch":
             store.newThread(in: project)
             try await Task.sleep(for: .milliseconds(120))
             return .run("draft in a git project")
+        case "composer.previousWorktree":
+            store.newThread(in: project)
+            try await Task.sleep(for: .milliseconds(120))
+            let worktrees = store.inbox.threads.filter { $0.project == project && $0.worktree != nil }.count
+            return worktrees > 0 ? .run("draft in a git project with \(worktrees) worktree thread(s)") : .disabled("no thread in the project has a worktree")
         case let jump where jump.hasPrefix("thread.jump."):
             let number = Int(jump.dropFirst("thread.jump.".count)) ?? 0
             return number <= store.inbox.visibleOrder.count ? .run("sidebar has \(store.inbox.visibleOrder.count) threads") : .disabled("fewer than \(number) threads")

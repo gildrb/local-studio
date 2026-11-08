@@ -861,9 +861,9 @@ struct WorkingRow: View {
                     .accessibilityHidden(true)
             }
             if let started = info.runStartedAt, !waitingForApproval, !info.compacting, info.retryAttempt == 0 {
-                TimelineView(.periodic(from: .now, by: 1)) { context in
+                TimelineView(.aligned(every: 1)) { context in
                     let text = "Working for \(elapsed(since: started, now: context.date))"
-                    Text(text)
+                    TickingText(text)
                         .monospacedDigit()
                         .onChange(of: text, initial: true) { _, text in
                             probe?.drew(info.thread, .workingRow, text)

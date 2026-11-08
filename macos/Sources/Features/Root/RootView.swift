@@ -79,9 +79,6 @@ struct RootView: View {
         .sheet(isPresented: Bindable(shell).cloneShown) {
             CloneRepositorySheet(store: store)
         }
-        .onChange(of: store.conversation.thread) {
-            shell.headerRenaming = false
-        }
         .themeRoot()
         .onAppear { PageCommands.install(store) }
         .transaction { $0.disablesAnimations = true }
@@ -107,11 +104,10 @@ struct RootView: View {
                     .overlay { PreviewMiniPlayerView(store: store) }
                     .frame(maxWidth: .infinity)
                 }
-                RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? WindowChrome.collapsedInset : 0)
-                    .frame(width: panels.rightPanelOpen ? nil : 0, alignment: .leading)
-                    .clipped()
-                    .accessibilityHidden(!panels.rightPanelOpen)
-                    .focusRegionFrame(.rightPanel, in: shell)
+                if panels.rightPanelOpen {
+                    RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? WindowChrome.collapsedInset : 0)
+                        .focusRegionFrame(.rightPanel, in: shell)
+                }
             }
         } else {
             PageSeam(store: store, route: shell.route, leadingInset: leading - 16)

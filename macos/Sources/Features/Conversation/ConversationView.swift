@@ -7,10 +7,9 @@ struct ThreadView: View {
     let leadingInset: CGFloat
 
     var body: some View {
-        Group {
-            if store.conversation.showsThread {
-                ConversationColumn(store: store)
-            } else {
+        ZStack {
+            ConversationColumn(store: store)
+            if !store.conversation.showsThread {
                 DraftHero(store: store)
             }
         }
@@ -159,42 +158,45 @@ private struct ConversationColumn: View {
             }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
-                if let pending = store.conversation.pending {
-                    if let setup = store.conversation.worktreeSetup[pending.draft], pending.failure == nil {
-                        WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
-                            store.conversation.cancelWorktreeSetup()
-                        } workLocally: {
-                            store.conversation.skipWorktreeSetup()
+            if store.conversation.showsThread {
+                VStack(spacing: 8) {
+                    if let pending = store.conversation.pending {
+                        if let setup = store.conversation.worktreeSetup[pending.draft], pending.failure == nil {
+                            WorktreeSetupCard(stages: setup.stages, done: setup.done, error: setup.error) {
+                                store.conversation.cancelWorktreeSetup()
+                            } workLocally: {
+                                store.conversation.skipWorktreeSetup()
+                            }
+                        }
+                        if let failure = pending.failure {
+                            StartFailureCard(message: failure) {
+                                store.conversation.editPending(pending.draft)
+                            } retry: {
+                                store.conversation.retryPending(pending.draft)
+                            }
                         }
                     }
-                    if let failure = pending.failure {
-                        StartFailureCard(message: failure) {
-                            store.conversation.editPending(pending.draft)
-                        } retry: {
-                            store.conversation.retryPending(pending.draft)
-                        }
-                    }
+                    ApprovalCard(store: store)
+                    ComposerView(store: store)
+                        .focusRegionFrame(.composer, in: store.shell)
+                    ThreadContextStrip(store: store)
+                        .padding(.top, -4)
                 }
-                ApprovalCard(store: store)
-                ComposerView(store: store)
-                    .focusRegionFrame(.composer, in: store.shell)
-                ThreadContextStrip(store: store)
-                    .padding(.top, -4)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: width)
+                .padding(.horizontal, 4)
+                .padding(.bottom, 14)
             }
-            .padding(.horizontal, 16)
-            .frame(maxWidth: width)
-            .padding(.horizontal, 4)
-            .padding(.bottom, 14)
         }
     }
 }
 
 private struct LoadingPlaceholder: View {
     let conversation: ConversationStore
+    let live: Bool
 
     var body: some View {
-        if conversation.showsLoading {
+        if live, conversation.showsLoading {
             VStack(spacing: 10) {
                 LogoMark(style: .coin)
                     .frame(width: 28, height: 28)
@@ -369,8 +371,8 @@ private struct TimelineScroll: View {
             }
         }
         .overlay(alignment: .trailing) {
-            if current, roomForMinimap {
-                TimelineMinimap(anchors: conversation.anchors, current: currentAnchor) { anchor in
+            if roomForMinimap {
+                TimelineMinimap(anchors: current ? conversation.anchors : conversation.cachedAnchors(thread), current: currentAnchor) { anchor in
                     follow(false)
                     currentAnchor = anchor
                     position.scrollTo(id: anchor, anchor: .top)
@@ -379,7 +381,6 @@ private struct TimelineScroll: View {
                 .padding(.trailing, 8)
             }
         }
-        .opacity(current ? 1 : 0)
         .accessibilityHidden(!current)
     }
 
@@ -475,9 +476,7 @@ private struct TimelineStack: View, Equatable {
         let conversation = store.conversation
         VStack(alignment: .leading, spacing: 22) {
             LazyVStack(alignment: .leading, spacing: 22) {
-                if current {
-                    LoadingPlaceholder(conversation: conversation)
-                }
+                LoadingPlaceholder(conversation: conversation, live: current)
                 ForEach(current ? conversation.rows : conversation.cachedRows(thread)) { row in
                     TimelineRowView(row: row, store: store)
                         .equatable()
@@ -485,10 +484,8 @@ private struct TimelineStack: View, Equatable {
                 }
             }
             .scrollTargetLayout()
-            if current {
-                ForEach(conversation.sendingMessages) { message in
-                    OutgoingBubble(message: message, store: store)
-                }
+            ForEach(current ? conversation.sendingMessages : []) { message in
+                OutgoingBubble(message: message, store: store)
             }
             TimelineFooter(store: store, live: current)
         }

@@ -224,7 +224,6 @@ struct StudioCommands: Commands {
             button("Workspace", "composer.workspace")
             button("Branch", "composer.branch")
             button("Previous Worktree", "composer.previousWorktree")
-            button("Host", "composer.host")
         }
         CommandGroup(replacing: .help) {
             Button("Supported Hardware and Models") {

@@ -70,6 +70,7 @@ final class StressHarness: NSObject {
     }
 
     private static let pendingDeadline: TimeInterval = 10
+    private static let floodCount = 4
 
     private let store: StudioStore
     private let duration: TimeInterval
@@ -85,6 +86,7 @@ final class StressHarness: NSObject {
     private var scrolled: Set<String> = []
     private var lastTop: [String: UInt64] = [:]
     private var expectedTop: [String: UInt64] = [:]
+    private var followedEnd: Set<String> = []
     private var restoreFrames = 0
     private var streaks: [String: Int] = [:]
     private var workStarts: [String: Int64] = [:]
@@ -107,12 +109,17 @@ final class StressHarness: NSObject {
     private var rowsRevision = -1
     private var pendingSignature: [String] = []
     private var edited: Set<String> = []
-    private var spammed: Set<ObjectIdentifier> = []
+    private var floods: [ObjectIdentifier: (session: TerminalSession, base: Int)] = [:]
     private var startTicks = 0
     private var startUpdates = 0
     private var lastTicks = 0
     private var lastTickAt: TimeInterval = 0
-    private var spamTickGap: TimeInterval = 0
+    private var lastCheckAt: TimeInterval = 0
+    private var coreGap: TimeInterval = 0
+    private var longestCoreGap: TimeInterval = 0
+    private var longestTickGap: TimeInterval = 0
+    private var maxFlowing = 0
+    private var coreGapNote = ""
     private var clickMonitor: Any?
     private var timelineClicks = 0
     private lazy var sender = UserSender(store: store)
@@ -348,9 +355,16 @@ final class StressHarness: NSObject {
     }
 
     private func spamTerminals() {
-        let sessions = store.panels.decks.values.flatMap { $0.groups.flatMap(\.sessions) }
-        for session in sessions where !spammed.contains(ObjectIdentifier(session)) {
-            spammed.insert(ObjectIdentifier(session))
+        let alive = { (session: TerminalSession) in session.status == .starting || session.status == .running }
+        let live = { [self] in floods.values.filter { alive($0.session) }.count }
+        var sessions = store.panels.decks.values.flatMap { $0.groups.flatMap(\.sessions) }.filter { alive($0) && floods[ObjectIdentifier($0)] == nil }
+        if store.panels.terminalOpen, let project = store.panels.project {
+            while live() + sessions.count < Self.floodCount, let session = store.panels.deck(for: project).newTerminal() {
+                sessions.append(session)
+            }
+        }
+        for session in sessions where live() < Self.floodCount {
+            floods[ObjectIdentifier(session)] = (session, session.appliedFrames)
             session.write(Data("while :; do seq -f 'stress line %g of a terminal flooding the core with frames' 1 200; sleep 0.01; done\r".utf8))
         }
     }
@@ -441,7 +455,7 @@ final class StressHarness: NSObject {
             text = "doomed \(self.failing)"
             store.conversation.newThread.existingWorktree = "/nonexistent/local-studio-stress-\(self.failing)"
         } else {
-            text = StressSeed.realModel ? StressSeed.realPrompt(StressSeed.seedSends + created + followUps) : "hello \(created + 1)"
+            text = StressSeed.realPrompt(StressSeed.seedSends + created + followUps)
             created += 1
         }
         guard let index = try await sender.send(text, in: window, to: nil, failing: failing) else {
@@ -455,7 +469,7 @@ final class StressHarness: NSObject {
     }
 
     private var promptBudgetLeft: Bool {
-        !StressSeed.realModel || StressSeed.seedSends + created + followUps < 20
+        StressSeed.seedSends + created + followUps < StressSeed.realSendLimit
     }
 
     private func followUp(in window: NSWindow) async throws {
@@ -468,7 +482,7 @@ final class StressHarness: NSObject {
                 return record("⌘L", "⌘L did not focus the composer of \(thread) (responder \(Screen.responder(in: window)), last commands \(store.shell.probe.dispatched.suffix(3).map { $0 ?? "nil" }))")
             }
         }
-        let text = StressSeed.realModel ? StressSeed.realPrompt(StressSeed.seedSends + created + followUps) : "follow-up \(followUps + 1)"
+        let text = StressSeed.realPrompt(StressSeed.seedSends + created + followUps)
         followUps += 1
         _ = try await sender.send(text, in: window, to: thread)
         try await Task.sleep(for: .milliseconds(random.int(40)))
@@ -520,17 +534,27 @@ final class StressHarness: NSObject {
 
     private func checkCoreTicks() {
         let now = monitor.elapsed()
-        guard store.ticks == lastTicks else {
+        let since = lastCheckAt > 0 ? now - lastCheckAt : 0
+        lastCheckAt = now
+        let flowing = floods.values.filter { $0.session.status == .running && $0.session.appliedFrames - $0.base >= 20 }.count
+        maxFlowing = max(maxFlowing, flowing)
+        if flowing > 0, lastTickAt > 0 {
+            longestTickGap = max(longestTickGap, now - lastTickAt)
+        }
+        guard flowing > 0, store.ticks == lastTicks else {
             lastTicks = store.ticks
             lastTickAt = now
+            coreGap = 0
             return
         }
-        guard !spammed.isEmpty, lastTickAt > 0 else { return }
-        let gap = now - lastTickAt
-        spamTickGap = max(spamTickGap, gap)
-        if gap > 1 {
-            record("core stalled", "no core update applied for \(Int(gap * 1000)) ms while terminals were flooding, after \(monitor.context)")
-            lastTickAt = now
+        coreGap += min(since, 2 * monitor.interval)
+        if coreGap > longestCoreGap {
+            longestCoreGap = coreGap
+            coreGapNote = String(format: "at %.2f s with %d flooding after ", now, flowing) + monitor.context
+        }
+        if coreGap > 1 {
+            record("core stalled", "no core update for \(Int(coreGap * 1000)) ms while \(flowing) terminals were flooding, after \(monitor.context)")
+            coreGap = 0
         }
     }
 
@@ -538,13 +562,16 @@ final class StressHarness: NSObject {
         sender.check()
         guard monitor.recording else { return }
         checkCoreTicks()
+        if !floods.isEmpty {
+            spamTerminals()
+        }
         trackSends()
         checkPendings()
         checkRows()
         let thread = store.conversation.thread
         if thread != previousThread {
             if let previousThread, let top = lastTop[previousThread] {
-                expectedTop[previousThread] = top
+                expectedTop[previousThread] = followedEnd.contains(previousThread) ? nil : top
             }
             previousThread = thread
             restoreFrames = 0
@@ -703,7 +730,12 @@ final class StressHarness: NSObject {
 
     private func checkScroll(_ scroll: ScrollProbe, thread: String) {
         if let top = scroll.top {
-            lastTop[thread] = top
+            lastTop[thread] = top == UInt64.max ? nil : top
+        }
+        if store.conversation.followsEnd {
+            followedEnd.insert(thread)
+        } else {
+            followedEnd.remove(thread)
         }
         guard scrolled.contains(thread) else {
             if scroll.distance > 2 {
@@ -716,7 +748,7 @@ final class StressHarness: NSObject {
         if scroll.top == expected {
             expectedTop[thread] = nil
         } else if restoreFrames > 3 {
-            record("scroll not restored", "\(thread) top row \(scroll.top.map(String.init) ?? "?"), expected \(expected)")
+            record("scroll not restored", "\(thread) top row \(scroll.top.map(String.init) ?? "?"), expected \(expected), \(Int(scroll.distance)) pt above the end (follows end \(store.conversation.followsEnd)), after \(monitor.context)")
             expectedTop[thread] = nil
         }
     }
@@ -741,7 +773,7 @@ final class StressHarness: NSObject {
         let ms = { (value: TimeInterval) in String(format: "%.1f ms", value * 1000) }
         let p99 = monitor.percentile(0.99)
         print("stress \(Int(duration)) s, \(monitor.frames.count) frames at \(ms(interval)) refresh")
-        print("model: " + (StressSeed.realModel ? "anthropic/claude-haiku-5-5 thinking low, \(StressSeed.seedSends + created) real prompts" : "faux"))
+        print("model: anthropic/claude-haiku-5-5 thinking low, \(StressSeed.seedSends + created + followUps) real prompts")
         print("frame time p50 \(ms(monitor.percentile(0.5))) p95 \(ms(monitor.percentile(0.95))) p99 \(ms(p99)) max \(ms(monitor.frames.max() ?? 0))")
         let worst = monitor.hitches.max { $0.duration < $1.duration }
         print("hitches (>1.5× refresh): \(monitor.hitches.count)" + (worst.map { ", worst \(ms($0.duration)) at \(String(format: "%.2f", $0.at)) s after \($0.context)" } ?? ""))
@@ -749,7 +781,7 @@ final class StressHarness: NSObject {
         for stall in monitor.stalls.prefix(20) {
             print("  stall \(ms(stall.duration)) at \(String(format: "%.2f", stall.at)) s after \(stall.context)")
         }
-        print("core: \(store.ticks - startTicks) ticks applied \(store.appliedUpdates - startUpdates) updates; \(spammed.count) terminals flooding, longest gap between ticks while flooding \(ms(spamTickGap))")
+        print("core: \(store.ticks - startTicks) ticks applied \(store.appliedUpdates - startUpdates) updates; up to \(maxFlowing) terminals flooding, longest core gap \(ms(longestCoreGap)) \(coreGapNote), longest gap between ticks \(ms(longestTickGap))")
         let latencies = switchLatencies.sorted()
         if !latencies.isEmpty {
             let median = latencies[latencies.count / 2]
@@ -795,7 +827,7 @@ final class StressHarness: NSObject {
 
 private extension InboxSections {
     func contains(title: String) -> Bool {
-        [pinned, active, working, snoozed, settled].contains { rows in rows.contains { $0.title == title } }
+        [pinned, active, working, snoozed, settled].contains { rows in rows.contains { UserSender.sameTitle($0.title, title) } }
     }
 }
 
