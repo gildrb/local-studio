@@ -13,12 +13,15 @@ struct ComposerControls: View {
     var body: some View {
         let conversation = store.conversation
         let settings = store.pages.settings
+        let title = modelTitle
+        let levels = conversation.thinkingLevels(settings: settings)
+        let level = conversation.thinkingLevel(settings: settings)
         HStack(spacing: 2) {
             HStack(spacing: 2) {
                 ComposerIconButton(title: "Attach files", symbol: "paperclip", action: attach)
-                ModelPickerButton(store: store, title: modelTitle, presented: conversation.modelPickerPresented)
+                ModelPickerButton(store: store, title: title, presented: conversation.modelPickerPresented)
                     .equatable()
-                ThinkingMenu(store: store, levels: conversation.thinkingLevels(settings: settings), current: conversation.thinkingLevel(settings: settings))
+                ThinkingMenu(store: store, levels: levels, current: level)
                     .equatable()
                 ServiceTierMenu(store: store, tiers: conversation.serviceTiers(settings: settings), current: conversation.serviceTier(settings: settings))
                     .equatable()
@@ -55,6 +58,9 @@ struct ComposerControls: View {
             )
         }
         .frame(height: 30)
+        .onChange(of: ComposerProbe(model: title, thinking: levels.first.map { ThinkingMenu.title(level ?? $0) }), initial: true) { _, probe in
+            store.shell.probe.composer = probe
+        }
     }
 
     private var modelTitle: String {

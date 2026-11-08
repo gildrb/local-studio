@@ -29,6 +29,11 @@ struct WorkingProbe: Equatable {
     var started: Int64?
 }
 
+struct ComposerProbe: Equatable {
+    var model: String
+    var thinking: String?
+}
+
 struct BadgeProbe {
     var text: String
     var at: Date
@@ -52,6 +57,7 @@ final class RenderProbe {
     var timeline: TimelineProbe?
     var scroll: ScrollProbe?
     var working: WorkingProbe?
+    var composer: ComposerProbe?
     var badges: [String: BadgeProbe] = [:]
     var drawn: [DrawnElapsed]?
     private(set) var bubbles: [String: [UUID: CGRect]] = [:]
