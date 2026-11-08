@@ -176,7 +176,8 @@ final class PanelSmoke {
         guard let model = panels.activeBrowser else { return finish(passed: false, "no browser surface after preview.toggle") }
         model.webView.loadHTMLString("<html><head><script>document.title = 'smoke-' + Math.random()</script></head><body>smoke</body></html>", baseURL: nil)
         guard await poll(5, { !model.loading && model.title.hasPrefix("smoke-") && model.webView.window != nil }) else {
-            return finish(passed: false, "the browser surface did not load its page in the window (title “\(model.title)”)")
+            let state = "title “\(model.title)”, web title “\(model.webView.title ?? "nil")”, url \(model.webView.url?.absoluteString ?? "nil"), loading \(model.loading)/\(model.webView.isLoading), in window \(model.webView.window != nil), failure \(model.failure ?? "none")"
+            return finish(passed: false, "the browser surface did not load its page in the window (\(state))")
         }
         let title = model.title
         panels.toggleRightPanel()
