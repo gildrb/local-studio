@@ -16,12 +16,18 @@ struct ComposerControls: View {
         HStack(spacing: 2) {
             HStack(spacing: 2) {
                 ComposerIconButton(title: "Attach files", symbol: "paperclip", action: attach)
-                ModelPickerButton(store: store)
-                ThinkingMenu(store: store)
-                ServiceTierMenu(store: store)
-                AccessMenu(store: store)
-                StashMenu(store: store, project: project)
-                GoalChip(store: store)
+                ModelPickerButton(store: store, title: modelTitle, presented: conversation.modelPickerPresented)
+                    .equatable()
+                ThinkingMenu(store: store, levels: conversation.thinkingLevels(settings: settings), current: conversation.thinkingLevel(settings: settings))
+                    .equatable()
+                ServiceTierMenu(store: store, tiers: conversation.serviceTiers(settings: settings), current: conversation.serviceTier(settings: settings))
+                    .equatable()
+                AccessMenu(store: store, current: conversation.access(settings: settings))
+                    .equatable()
+                StashMenu(store: store, project: project, prompts: conversation.stash.list(conversation.stashKey(project: project)), canStash: !draft.isEmpty)
+                    .equatable()
+                GoalChip(goal: conversation.info?.goal)
+                    .equatable()
             }
             .opacity(compact ? 0 : 1)
             .allowsHitTesting(!compact)
@@ -49,6 +55,15 @@ struct ComposerControls: View {
             )
         }
         .frame(height: 30)
+    }
+
+    private var modelTitle: String {
+        let conversation = store.conversation
+        let fanOut = conversation.newThread.fanOutModels(available: conversation.models)
+        if conversation.thread == nil, fanOut.count >= 2 {
+            return "\(fanOut.count) models"
+        }
+        return conversation.currentModel(settings: store.pages.settings)?.name ?? "Model"
     }
 
     private func sendTitle(busy: Bool, steers: Bool) -> String {
@@ -145,33 +160,30 @@ private struct RoundActionButton: View {
     }
 }
 
-private struct ModelPickerButton: View {
+private struct ModelPickerButton: View, Equatable {
     let store: StudioStore
+    let title: String
+    let presented: Bool
     @State private var hovering = false
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.title == rhs.title && lhs.presented == rhs.presented
+    }
 
     var body: some View {
         let conversation = store.conversation
         Button {
             conversation.modelPickerPresented.toggle()
         } label: {
-            ComposerChip(title: title, hovering: hovering || conversation.modelPickerPresented)
+            ComposerChip(title: title, hovering: hovering || presented)
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help("Model")
         .accessibilityLabel("Model: \(title)")
-        .popover(isPresented: Bindable(conversation).modelPickerPresented, arrowEdge: .bottom) {
+        .popover(isPresented: Binding { presented } set: { conversation.modelPickerPresented = $0 }, arrowEdge: .bottom) {
             ModelPickerPanel(store: store) { conversation.modelPickerPresented = false }
         }
-    }
-
-    private var title: String {
-        let conversation = store.conversation
-        let fanOut = conversation.newThread.fanOutModels(available: conversation.models)
-        if conversation.thread == nil, fanOut.count >= 2 {
-            return "\(fanOut.count) models"
-        }
-        return conversation.currentModel(settings: store.pages.settings)?.name ?? "Model"
     }
 }
 
@@ -501,15 +513,19 @@ private struct ModelRow: View {
     }
 }
 
-struct ThinkingMenu: View {
+struct ThinkingMenu: View, Equatable {
     let store: StudioStore
+    let levels: [String]
+    let current: String?
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.levels == rhs.levels && lhs.current == rhs.current
+    }
 
     var body: some View {
-        let conversation = store.conversation
-        let settings = store.pages.settings
-        let levels = conversation.thinkingLevels(settings: settings)
         if let fallback = levels.first {
-            let current = conversation.thinkingLevel(settings: settings) ?? fallback
+            let current = current ?? fallback
+            let conversation = store.conversation
             PickerChipButton(
                 title: Self.title(current),
                 help: "Thinking level",
@@ -536,15 +552,18 @@ struct ThinkingMenu: View {
     }
 }
 
-struct ServiceTierMenu: View {
+struct ServiceTierMenu: View, Equatable {
     let store: StudioStore
+    let tiers: [String]
+    let current: String?
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.tiers == rhs.tiers && lhs.current == rhs.current
+    }
 
     var body: some View {
-        let conversation = store.conversation
-        let settings = store.pages.settings
-        let tiers = conversation.serviceTiers(settings: settings)
         if !tiers.isEmpty {
-            let current = conversation.serviceTier(settings: settings)
+            let conversation = store.conversation
             PickerChipButton(
                 title: current.map(Self.title) ?? "Standard",
                 symbol: current == nil ? nil : "bolt",
@@ -574,13 +593,17 @@ struct ServiceTierMenu: View {
     }
 }
 
-private struct GoalChip: View {
-    let store: StudioStore
+private struct GoalChip: View, Equatable {
+    let goal: Goal?
     @State private var presented = false
     @State private var hovering = false
 
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.goal == rhs.goal
+    }
+
     var body: some View {
-        if let goal = store.conversation.info?.goal {
+        if let goal {
             Button {
                 presented.toggle()
             } label: {
@@ -650,12 +673,16 @@ private struct GoalPopover: View {
     }
 }
 
-struct AccessMenu: View {
+struct AccessMenu: View, Equatable {
     let store: StudioStore
+    let current: AccessMode
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.current == rhs.current
+    }
 
     var body: some View {
         let conversation = store.conversation
-        let current = conversation.access(settings: store.pages.settings)
         PickerChipButton(
             title: current.title,
             symbol: current.symbol,
