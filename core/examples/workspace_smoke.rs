@@ -1399,6 +1399,7 @@ fn second_run(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
             })
         })
     })?;
+    harness.pump_until("restarted core connected", |view| matches!(view.connection, Some(Connection::Ready)))?;
     let request = harness.request();
     harness.studio.load_usage(request.clone(), UsagePeriod::Day);
     harness.answer("usage report for the whole run", &request)?;
