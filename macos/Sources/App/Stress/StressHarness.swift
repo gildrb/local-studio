@@ -27,6 +27,7 @@ final class StressHarness: NSObject {
         case forward = "⌘]"
         case step = "⌘⇧[ / ⌘⇧]"
         case newThread = "⌘T+type+send"
+        case followUp = "follow-up send"
         case failedStart = "send → failed start"
         case pendingAction = "Retry/Edit"
         case close = "⌘W"
@@ -50,6 +51,7 @@ final class StressHarness: NSObject {
             case .forward: 3
             case .step: 4
             case .newThread: 4
+            case .followUp: 3
             case .failedStart: 1
             case .pendingAction: 2
             case .close: 3
@@ -91,6 +93,7 @@ final class StressHarness: NSObject {
     private var switchLatencies: [TimeInterval] = []
     private var previousThread: String?
     private var created = 0
+    private var followUps = 0
     private var failing = 0
     private var finished = false
     private var expectClose = false
@@ -291,8 +294,10 @@ final class StressHarness: NSObject {
         case .step:
             press(random.int(2) == 0 ? "cmd+shift+[" : "cmd+shift+]", window)
         case .newThread:
-            guard created < 8 else { return jump(window) }
+            guard created < 8, promptBudgetLeft else { return jump(window) }
             try await newThread(in: window, failing: false)
+        case .followUp:
+            try await followUp(in: window)
         case .failedStart:
             guard failing < 3 else { return jump(window) }
             try await newThread(in: window, failing: true)
@@ -436,7 +441,7 @@ final class StressHarness: NSObject {
             text = "doomed \(self.failing)"
             store.conversation.newThread.existingWorktree = "/nonexistent/local-studio-stress-\(self.failing)"
         } else {
-            text = StressSeed.realModel ? StressSeed.realPrompt(StressSeed.seedSends + created) : "hello \(created + 1)"
+            text = StressSeed.realModel ? StressSeed.realPrompt(StressSeed.seedSends + created + followUps) : "hello \(created + 1)"
             created += 1
         }
         guard let index = try await sender.send(text, in: window, to: nil, failing: failing) else {
@@ -445,6 +450,27 @@ final class StressHarness: NSObject {
         }
         let sentAt = monitor.elapsed() - Date.now.timeIntervalSince(sender.turns[index].sentAt)
         sends.append(Send(text: text, project: project, at: sentAt, failing: failing))
+        try await Task.sleep(for: .milliseconds(random.int(40)))
+        jump(window)
+    }
+
+    private var promptBudgetLeft: Bool {
+        !StressSeed.realModel || StressSeed.seedSends + created + followUps < 20
+    }
+
+    private func followUp(in window: NSWindow) async throws {
+        let conversation = store.conversation
+        guard followUps < 8, promptBudgetLeft, store.shell.route == .thread, store.currentRegion != .terminal, let thread = conversation.thread,
+              conversation.info?.thread == thread, conversation.info?.busy == false, conversation.queued.isEmpty else { return jump(window) }
+        if !Screen.composerFocused(in: window) {
+            press("cmd+l", window)
+            guard try await waitFor(1, { Screen.composerFocused(in: window) }) else {
+                return record("⌘L", "⌘L did not focus the composer of \(thread) (responder \(Screen.responder(in: window)), last commands \(store.shell.probe.dispatched.suffix(3).map { $0 ?? "nil" }))")
+            }
+        }
+        let text = StressSeed.realModel ? StressSeed.realPrompt(StressSeed.seedSends + created + followUps) : "follow-up \(followUps + 1)"
+        followUps += 1
+        _ = try await sender.send(text, in: window, to: thread)
         try await Task.sleep(for: .milliseconds(random.int(40)))
         jump(window)
     }
