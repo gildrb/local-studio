@@ -631,7 +631,7 @@ fn curate(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
         view.composer.iter().any(|(thread, text)| thread == &first && text == "run the smoke command")
             && view.items(&first).is_empty()
     })?;
-    studio.send(first.clone(), prompt("after the rewind"), Delivery::Queue);
+    studio.send("send-rewind".to_string(), first.clone(), prompt("after the rewind"), Delivery::Queue);
     harness.pump_until("rewound thread answered again", |view| {
         answer_text(view.items(&first)).contains("Second answer") && idle(view, &first)
     })?;
@@ -656,7 +656,7 @@ fn round_four(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
         view.thread("draft-always").is_some_and(|id| view.done_by_thread.get(&id) == Some(&1))
     })?;
     let always = harness.view.thread("draft-always").context("no always-allow thread")?;
-    studio.send(always.clone(), prompt("write again without asking"), Delivery::Queue);
+    studio.send("send-always".to_string(), always.clone(), prompt("write again without asking"), Delivery::Queue);
     harness.pump_until("second write finished", |view| view.done_by_thread.get(&always) == Some(&2))?;
     if harness.view.approvals_by_thread.get(&always) != Some(&1) {
         bail!("always-allow asked again: {:?}", harness.view.approvals_by_thread.get(&always));
@@ -702,7 +702,7 @@ fn round_four_resources(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> 
             .all(|(name, kind)| commands.iter().any(|command| command.name == *name && command.kind == *kind))
         })
     })?;
-    studio.send(first.clone(), prompt("/skill:smoke-skill please"), Delivery::Queue);
+    studio.send("send-skill".to_string(), first.clone(), prompt("/skill:smoke-skill please"), Delivery::Queue);
     harness.pump_until("skill command expanded before sending", |view| {
         user_texts(view, &first).iter().any(|text| {
             text.contains("<skill name=\"smoke-skill\"")
@@ -711,7 +711,7 @@ fn round_four_resources(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> 
         }) && answer_text(view.items(&first)).contains("Skill answer")
             && idle(view, &first)
     })?;
-    studio.send(first.clone(), prompt("/smoke-template hello"), Delivery::Queue);
+    studio.send("send-template".to_string(), first.clone(), prompt("/smoke-template hello"), Delivery::Queue);
     harness.pump_until("prompt template expanded with its argument", |view| {
         user_texts(view, &first).iter().any(|text| text == "Template says hello")
             && answer_text(view.items(&first)).contains("Template answer")
@@ -721,6 +721,7 @@ fn round_four_resources(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> 
     image::RgbaImage::from_pixel(640, 320, image::Rgba([40, 90, 200, 255]))
         .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
     studio.send(
+        "send-image".to_string(),
         first.clone(),
         PromptDraft {
             text: "look at this".to_string(),
@@ -767,11 +768,11 @@ fn round_four_settings(harness: &mut Harness, ids: &Ids) -> anyhow::Result<()> {
         })
     })?;
     harness.view.partial_text = false;
-    studio.send(first.clone(), prompt("answer slowly"), Delivery::Queue);
+    studio.send("send-slow".to_string(), first.clone(), prompt("answer slowly"), Delivery::Queue);
     harness.pump_until("slow run started", |view| {
         view.row(&first).is_some_and(|row| row.status == ThreadStatus::Working)
     })?;
-    studio.send(first.clone(), prompt("steer this"), Delivery::Default);
+    studio.send("send-steer".to_string(), first.clone(), prompt("steer this"), Delivery::Default);
     harness.pump_until("default delivery followed the steer setting", |view| view.steered.contains(&first))?;
     harness.pump_until("steered run finished", |view| {
         answer_text(view.items(&first)).contains("After steer") && idle(view, &first)
