@@ -151,6 +151,13 @@ private struct ConversationColumn: View {
         }
         .environment(\.responseStreaming, settings?.responseStreaming ?? .paragraph)
         .environment(\.timeFormat, settings?.timeFormat ?? .locale)
+        .mask {
+            VStack(spacing: 0) {
+                Color.black
+                LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                    .frame(height: 20)
+            }
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 8) {
                 if let pending = store.conversation.pending {

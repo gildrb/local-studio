@@ -17,6 +17,7 @@ struct ComposerView: View {
         let source = ComposerSuggestionSource(store: store)
         let suggestions = trigger.map { source.items(for: $0) } ?? []
         let resting = isResting(draft)
+        let textHeight = resting ? lineHeight : min(max(height, lineHeight), 220)
         VStack(alignment: .leading, spacing: 0) {
             if let trigger, !resting {
                 SuggestionList(
@@ -44,7 +45,7 @@ struct ComposerView: View {
                 onFiles: { urls in draft.attach(urls: urls, project: project) },
                 onVimMode: { editMode = $0 }
             )
-            .frame(height: resting ? lineHeight : min(max(height, lineHeight), 220))
+            .frame(height: textHeight)
             .overlay(alignment: .topLeading) {
                 if draft.text.isEmpty {
                     Text(placeholder)
@@ -54,28 +55,33 @@ struct ComposerView: View {
                         .allowsHitTesting(false)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, resting ? 11 : 14)
-            .padding(.bottom, resting ? 11 : 6)
-            if !resting {
-                HStack(spacing: 2) {
-                    if vimEnabled {
-                        VimModeLabel(mode: editMode)
-                    }
-                    ComposerControls(
-                        store: store,
-                        draft: draft,
-                        project: project,
-                        canSend: canSend(draft)
-                    ) { submit(alternate: false) }
+            .padding(.leading, 16)
+            .padding(.trailing, resting ? 48 : 16)
+            .padding(.top, resting ? Self.restingInset : Self.textTop)
+            .padding(.bottom, resting ? Self.restingInset : Self.controlsBand)
+        }
+        .overlay(alignment: .bottom) {
+            HStack(spacing: 2) {
+                if vimEnabled {
+                    VimModeLabel(mode: editMode)
+                        .opacity(resting ? 0 : 1)
                 }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 8)
+                ComposerControls(
+                    store: store,
+                    draft: draft,
+                    project: project,
+                    canSend: canSend(draft),
+                    compact: resting
+                ) { submit(alternate: false) }
             }
+            .padding(.horizontal, 8)
+            .padding(.bottom, resting ? (Self.restingInset * 2 + lineHeight - 30) / 2 : 8)
         }
         .background(Theme.card, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(Theme.input))
         .onHover { hovering = $0 }
+        .animation(Self.motion, value: resting)
+        .frame(height: resting ? Self.textTop + min(max(height, lineHeight), 220) + Self.controlsBand : nil, alignment: .bottom)
         .task(id: project) {
             conversation.draftProject = project
         }
@@ -110,6 +116,14 @@ struct ComposerView: View {
 
     private var lineHeight: CGFloat {
         ceil(NSFont.systemFont(ofSize: promptSize).boundingRectForFont.height)
+    }
+
+    private static let textTop: CGFloat = 14
+    private static let controlsBand: CGFloat = 44
+    private static let restingInset: CGFloat = 11
+
+    private static var motion: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .smooth(duration: 0.22)
     }
 
     private var placeholder: String {
