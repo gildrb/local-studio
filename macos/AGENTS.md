@@ -12,6 +12,7 @@
 - Verify end to end in an isolated environment (see root `AGENTS.md`):
   - `LocalStudio +smoke`, `+smoke-shell`, `+smoke-conversation`, `+smoke-panels [png]`: each drives the real core and daemon and exits non-zero on failure.
   - `LocalStudio +snapshot <dir> [name-filter]`: renders every `SnapshotCatalog` entry offscreen in dark and light from `Update` fixtures. Look at the PNGs.
+  - `LOCAL_STUDIO_SNAPSHOT_LIVE=1` adds `pages-local-live` (the first reachable Local controller) and the `pages-usage-live*` entries: they start the core against the daemon on `$EUKHE_DAEMON_SOCKET`, load the real usage report from its saved sessions and render the Usage page (30 days tokens and cost, 24 hours, 7 days, gildrb). Point the daemon's agent dir at a scratch copy of the sessions.
 - Structure: `App/` (scenes, commands, smokes), `Design/` (Theme tokens, shared controls), `Features/<Area>/`, `Generated/` (build output, ignored). `StudioStore` routes every core `Update` to one feature store.
 - UI rules: native controls (grouped `Form`, `Picker(.menu)`, `Menu`, `Toggle`); `Theme` tokens only (dashboards palette); simple light-weight SF Symbols; no animation on repeatable actions and no looping animations; window chrome never moves.
 - Builds stay warning-free under strict concurrency checking.
