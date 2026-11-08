@@ -250,7 +250,11 @@ private struct PanelLauncherView: View {
             panels.openSurface(action.kind)
             return .handled
         }
-        .onAppear { focused = true }
+        .onChange(of: panels.rightPanelOpen, initial: true) { _, open in
+            if open {
+                focused = true
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Open a surface")
     }

@@ -15,7 +15,6 @@ struct RootView: View {
                 .frame(width: shell.sidebarWidth)
                 .frame(width: shell.sidebarVisible ? shell.sidebarWidth : 0, alignment: .trailing)
                 .clipped()
-                .allowsHitTesting(shell.sidebarVisible)
                 .accessibilityHidden(!shell.sidebarVisible)
                 .background(Theme.sidebar)
                 .focusRegionFrame(.sidebar, in: shell)
@@ -109,10 +108,11 @@ struct RootView: View {
                     .overlay { PreviewMiniPlayerView(store: store) }
                     .frame(maxWidth: .infinity)
                 }
-                if panels.rightPanelOpen {
-                    RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? WindowChrome.collapsedInset : 0)
-                        .focusRegionFrame(.rightPanel, in: shell)
-                }
+                RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? WindowChrome.collapsedInset : 0)
+                    .frame(width: panels.rightPanelOpen ? nil : 0, alignment: .leading)
+                    .clipped()
+                    .accessibilityHidden(!panels.rightPanelOpen)
+                    .focusRegionFrame(.rightPanel, in: shell)
             }
         } else {
             PageSeam(store: store, route: shell.route, leadingInset: leading - 16)
