@@ -1177,6 +1177,7 @@ final class NewThreadOptions {
     var serviceTier: String?
     var multiModel = false
     var fanOut: [ModelKey] = []
+    var branchPickerOpen = false
 
     func usesWorktree(_ settings: Settings?) -> Bool {
         worktree ?? (settings?.newThreadWorkspace == .worktree)
@@ -1225,6 +1226,7 @@ final class NewThreadOptions {
         branch = ""
         multiModel = false
         fanOut = []
+        branchPickerOpen = false
     }
 
     static func generatedBranch() -> String {

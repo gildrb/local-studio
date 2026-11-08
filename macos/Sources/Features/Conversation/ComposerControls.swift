@@ -198,6 +198,7 @@ struct ModelPickerPanel: View {
     let dismiss: () -> Void
     @State private var query = ""
     @State private var showsHidden: Bool
+    @State private var focusedProvider: String?
 
     init(store: StudioStore, revealHidden: Bool = false, dismiss: @escaping () -> Void) {
         self.store = store
@@ -212,6 +213,7 @@ struct ModelPickerPanel: View {
         let sections = sections(configured)
         let current = conversation.currentModel(settings: store.pages.settings)
         let jumps = jumpOrder(sections)
+        let providers = sections.map(\.id).filter { $0 != "favorites" && $0 != "hidden" }
         VStack(spacing: 0) {
             if configured.count > 8 {
                 HStack(spacing: 6) {
@@ -235,40 +237,47 @@ struct ModelPickerPanel: View {
                     .padding(20)
                     .frame(maxWidth: .infinity)
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(sections) { section in
-                            VStack(alignment: .leading, spacing: 0) {
-                                Text(section.title)
-                                    .font(.system(size: 11.5, weight: .medium))
-                                    .foregroundStyle(Theme.secondaryText)
-                                    .padding(.horizontal, 10)
-                                    .padding(.top, section.id == sections.first?.id ? 4 : 10)
-                                    .padding(.bottom, 3)
-                                    .accessibilityAddTraits(.isHeader)
-                                ForEach(section.models, id: \.key) { model in
-                                    let firstAppearance = section.id == "favorites" || !conversation.isFavorite(model)
-                                    ModelRow(
-                                        model: model,
-                                        selected: multi ? options.isFanOut(model) : current?.provider == model.provider && current?.id == model.id,
-                                        favorite: conversation.isFavorite(model),
-                                        hidden: conversation.isHidden(model),
-                                        jump: firstAppearance ? jumps.firstIndex { $0.key == model.key }.flatMap { $0 < 9 ? $0 + 1 : nil } : nil
-                                    ) {
-                                        choose(model, current: current)
-                                    } toggleFavorite: {
-                                        conversation.setFavorite(model, !conversation.isFavorite(model))
-                                    } toggleHidden: {
-                                        conversation.setHidden(model, !conversation.isHidden(model))
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections) { section in
+                                VStack(alignment: .leading, spacing: 0) {
+                                    Text(section.title)
+                                        .font(.system(size: 11.5, weight: .medium))
+                                        .foregroundStyle(section.id == focusedProvider ? Color.primary : Theme.secondaryText)
+                                        .padding(.horizontal, 10)
+                                        .padding(.top, section.id == sections.first?.id ? 4 : 10)
+                                        .padding(.bottom, 3)
+                                        .accessibilityAddTraits(.isHeader)
+                                    ForEach(section.models, id: \.key) { model in
+                                        let firstAppearance = section.id == "favorites" || !conversation.isFavorite(model)
+                                        ModelRow(
+                                            model: model,
+                                            selected: multi ? options.isFanOut(model) : current?.provider == model.provider && current?.id == model.id,
+                                            favorite: conversation.isFavorite(model),
+                                            hidden: conversation.isHidden(model),
+                                            jump: firstAppearance ? jumps.firstIndex { $0.key == model.key }.flatMap { $0 < 9 ? $0 + 1 : nil } : nil
+                                        ) {
+                                            choose(model, current: current)
+                                        } toggleFavorite: {
+                                            conversation.setFavorite(model, !conversation.isFavorite(model))
+                                        } toggleHidden: {
+                                            conversation.setHidden(model, !conversation.isHidden(model))
+                                        }
                                     }
                                 }
+                                .id(section.id)
                             }
                         }
+                        .padding(6)
                     }
-                    .padding(6)
+                    .frame(maxHeight: 380)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .onChange(of: focusedProvider) { _, provider in
+                        guard let provider else { return }
+                        proxy.scrollTo(provider, anchor: .top)
+                    }
                 }
-                .frame(maxHeight: 380)
-                .fixedSize(horizontal: false, vertical: true)
             }
             if hiddenCount > 0 || showsHidden {
                 Rectangle().fill(Theme.hairline).frame(height: 1)
@@ -305,6 +314,12 @@ struct ModelPickerPanel: View {
         .modifier(ModelPickerJumpCommands(store: store, models: jumps) { model in
             choose(model, current: current)
         })
+        .studioCommand("modelPicker.previousProvider", in: store, enabled: providers.count > 1) {
+            step(-1, providers: providers, current: current)
+        }
+        .studioCommand("modelPicker.nextProvider", in: store, enabled: providers.count > 1) {
+            step(1, providers: providers, current: current)
+        }
         .task {
             if conversation.models.isEmpty {
                 conversation.loadModels()
@@ -325,6 +340,11 @@ struct ModelPickerPanel: View {
         if on, options.fanOut.isEmpty, let current {
             options.toggleFanOut(current)
         }
+    }
+
+    private func step(_ delta: Int, providers: [String], current: ModelOption?) {
+        let index = (focusedProvider ?? current?.provider).flatMap(providers.firstIndex(of:)) ?? (delta > 0 ? -1 : providers.count)
+        focusedProvider = providers[(index + delta + providers.count) % providers.count]
     }
 
     private func choose(_ model: ModelOption, current: ModelOption?) {
@@ -894,7 +914,8 @@ struct BaseBranchButton: View {
         let base = options.base ?? defaultBase
         let rows = Self.rows(branches, selected: base) { options.base = $0 }
         let empty = store.conversation.branchRequest.flatMap { store.workspace.branches[$0] } == nil ? "Loading branches…" : "No matching branches."
-        PickerChipButton(title: "from " + base, help: "Base branch", label: "Base branch: \(base)") { dismiss in
+        let presented = Binding { options.branchPickerOpen } set: { options.branchPickerOpen = $0 }
+        PickerChipButton(title: "from " + base, help: "Base branch", label: "Base branch: \(base)", presented: presented) { dismiss in
             PickerPanel(rows: rows, query: $query, prompt: "Search branches", emptyText: empty, width: 300, maxHeight: 300, dismiss: dismiss)
                 .task(id: query) {
                     try? await Task.sleep(for: .milliseconds(query.isEmpty ? 0 : 150))

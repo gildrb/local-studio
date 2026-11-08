@@ -11,6 +11,8 @@ struct ComposerCommands: ViewModifier {
         let settings = store.pages.settings
         let levels = conversation.thinkingLevels(settings: settings)
         let draftWorkspace = conversation.thread == nil && store.inbox.project(store.inbox.currentProject)?.isGit == true
+        let options = conversation.newThread
+        let previous = draftWorkspace ? previousWorktree : nil
         content
             .studioCommand("composer.stash", in: store, enabled: !draftEmpty) {
                 conversation.stashPrompt(project: project)
@@ -32,8 +34,24 @@ struct ComposerCommands: ViewModifier {
                 conversation.setAccess(all[(index + 1) % all.count])
             }
             .studioCommand("composer.workspace", in: store, enabled: draftWorkspace) {
-                conversation.newThread.chooseWorkspace(worktree: !conversation.newThread.usesWorktree(settings))
+                options.chooseWorkspace(worktree: !options.usesWorktree(settings))
             }
+            .studioCommand("composer.branch", in: store, enabled: draftWorkspace && options.existingWorktree == nil && options.fanOutModels(available: conversation.models).count < 2) {
+                if !options.usesWorktree(settings) {
+                    options.chooseWorkspace(worktree: true)
+                }
+                options.branchPickerOpen = true
+            }
+            .studioCommand("composer.previousWorktree", in: store, enabled: previous != nil) {
+                guard let previous else { return }
+                options.existingWorktree = previous.worktree
+                options.existingBranch = previous.branch
+            }
+    }
+
+    private var previousWorktree: ThreadRow? {
+        let project = store.inbox.currentProject
+        return store.inbox.threads.filter { $0.project == project && $0.worktree != nil }.max { $0.updatedAt < $1.updatedAt }
     }
 }
 
