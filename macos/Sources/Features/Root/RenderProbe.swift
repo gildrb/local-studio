@@ -27,12 +27,18 @@ struct WorkingProbe: Equatable {
     var started: Int64?
 }
 
+struct BadgeProbe {
+    var text: String
+    var at: Date
+}
+
 @MainActor
 final class RenderProbe {
     var header: HeaderProbe?
     var timeline: TimelineProbe?
     var scroll: ScrollProbe?
     var working: WorkingProbe?
+    var badges: [String: BadgeProbe] = [:]
     private(set) var dispatched: [String?] = []
 
     func ran(_ command: String?) {

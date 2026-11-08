@@ -391,6 +391,13 @@ final class ConversationStore {
         return info
     }
 
+    func runStart(_ thread: String, reported: Int64?) -> Int64? {
+        guard let reported else { return nil }
+        let shown = infoCache[thread] ?? pendingStart(thread)?.info
+        guard let shown, shown.busy, let start = shown.runStartedAt, start <= reported, reported - start < Self.startSkew else { return reported }
+        return start
+    }
+
     func apply(thread: String, op: TranscriptOp) -> String? {
         guard thread == self.thread else { return nil }
         if loading {

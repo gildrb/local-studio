@@ -5,6 +5,7 @@ import SwiftUI
 struct StatusBadge: View {
     let row: ThreadRow
     let now: Date
+    let store: StudioStore
 
     var body: some View {
         if let glyph = Self.glyph(row.status) {
@@ -18,15 +19,27 @@ struct StatusBadge: View {
                         .font(.system(size: 11, weight: .regular))
                         .accessibilityHidden(true)
                 }
-                Text(label(glyph.title))
-                    .font(.system(size: 11.5))
-                    .monospacedDigit()
+                if row.status == .working, row.statusSince != nil {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let text = label(glyph.title, now: context.date)
+                        Text(text)
+                            .font(.system(size: 11.5))
+                            .monospacedDigit()
+                            .onChange(of: text, initial: true) { _, text in
+                                store.shell.probe.badges[row.id] = BadgeProbe(text: text, at: context.date)
+                            }
+                    }
+                } else {
+                    Text(label(glyph.title, now: now))
+                        .font(.system(size: 11.5))
+                        .monospacedDigit()
+                }
             }
             .foregroundStyle(glyph.tint)
             .lineLimit(1)
             .fixedSize()
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(label(glyph.title))
+            .accessibilityLabel(label(glyph.title, now: now))
         } else {
             Text(RelativeAge.text(millis: row.updatedAt, now: now))
                 .font(.system(size: 11.5))
@@ -36,8 +49,8 @@ struct StatusBadge: View {
         }
     }
 
-    private func label(_ title: String) -> String {
-        guard row.status == .working, let since = row.statusSince else { return title }
+    private func label(_ title: String, now: Date) -> String {
+        guard row.status == .working, let since = store.conversation.runStart(row.id, reported: row.statusSince) else { return title }
         return "\(title) \(RelativeAge.duration(since: since, now: now))"
     }
 
@@ -260,7 +273,7 @@ struct InboxRowView: View, Equatable {
                     .monospacedDigit()
                     .foregroundStyle(Theme.secondaryText)
             } else {
-                StatusBadge(row: row, now: now)
+                StatusBadge(row: row, now: now, store: store)
             }
         }
         .padding(.horizontal, 10)
@@ -276,14 +289,14 @@ struct InboxRowView: View, Equatable {
                 RowActionButton(title: "Settle", symbol: "checkmark") { store.inbox.setSettled(store.inbox.targets(for: row.id), true) }
             }
         } else {
-            StatusBadge(row: row, now: now)
+            StatusBadge(row: row, now: now, store: store)
         }
     }
 
     @ViewBuilder private var slimAction: some View {
         switch pending ? nil : row.shelf {
         case nil:
-            StatusBadge(row: row, now: now)
+            StatusBadge(row: row, now: now, store: store)
         case .snoozed:
             RowActionButton(title: "Wake Thread Now", symbol: "alarm") { store.inbox.snooze([row.id], until: nil) }
         case .settled:

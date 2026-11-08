@@ -556,6 +556,22 @@ final class StressHarness: NSObject {
             record("working reset", "\(thread) working row restarted its elapsed time \(started - previous) ms later mid-turn, after \(monitor.context)")
         }
         workStarts[thread] = started
+        checkBadge(thread: thread, started: started)
+    }
+
+    private func checkBadge(thread: String, started: Int64) {
+        guard let badge = store.shell.probe.badges[thread] else { return }
+        let now = Date.now
+        guard now.timeIntervalSince(badge.at) <= 2.5 else {
+            streak("badge ticking", store.shell.sidebarVisible, limit: 1, "\(thread) sidebar badge still shows “\(badge.text)” \(String(format: "%.1f", now.timeIntervalSince(badge.at))) s after it was drawn, after \(monitor.context)")
+            return
+        }
+        streaks["badge ticking"] = 0
+        guard badge.text.hasSuffix("s"), let seconds = Int(badge.text.dropLast().split(separator: " ").last ?? "") else { return }
+        let expected = Int((Int64(badge.at.timeIntervalSince1970 * 1_000) - started) / 1_000)
+        if abs(seconds - expected) > 1 {
+            record("badge elapsed", "\(thread) sidebar badge shows “\(badge.text)” while its working row shows \(expected)s, after \(monitor.context)")
+        }
     }
 
     private func checkPendings() {
