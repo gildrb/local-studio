@@ -142,12 +142,26 @@ pub struct UsageReport {
     pub period: UsagePeriod,
     pub total_tokens: u64,
     pub input_tokens: u64,
+    pub cache_read_tokens: u64,
     pub output_tokens: u64,
     pub cost_usd: f64,
     pub requests: u64,
+    pub sessions: u64,
     pub by_model: Vec<UsageByModel>,
-    pub daily: Vec<UsageDay>,
+    pub series: Vec<UsageBucket>,
+    pub series_step_ms: i64,
+    pub lifetime: TokenHistory,
+    pub lifetime_cost_usd: f64,
+    pub daily_cost_usd: Vec<f64>,
     pub limits: Vec<UsageLimit>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct UsageBucket {
+    pub start_ms: i64,
+    pub tokens: u64,
+    pub cost_usd: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1127,7 +1141,7 @@ pub struct LocalDashboard {
     pub decode_series: Vec<f64>,
     pub decode_series_start_ms: i64,
     pub decode_series_step_ms: i64,
-    pub tokens: LocalTokenHistory,
+    pub tokens: TokenHistory,
     pub generated_at_ms: i64,
 }
 
@@ -1155,7 +1169,7 @@ pub struct LocalGpuTelemetry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
-pub struct LocalTokenHistory {
+pub struct TokenHistory {
     pub since_day: Option<String>,
     pub total: u64,
     pub read: u64,
