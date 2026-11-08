@@ -202,6 +202,7 @@ enum Command {
         models: Vec<ModelKey>,
     },
     Send {
+        request: String,
         thread: String,
         prompt: PromptDraft,
         delivery: Delivery,
@@ -475,8 +476,8 @@ impl Studio {
         self.send_command(Command::StartThreads { draft, project, prompt, settings, models });
     }
 
-    pub fn send(&self, thread: String, prompt: PromptDraft, delivery: Delivery) {
-        self.send_command(Command::Send { thread, prompt, delivery });
+    pub fn send(&self, request: String, thread: String, prompt: PromptDraft, delivery: Delivery) {
+        self.send_command(Command::Send { request, thread, prompt, delivery });
     }
 
     pub fn abort(&self, thread: String) {
@@ -915,9 +916,9 @@ impl Actor {
             Command::StartThreads { draft, project, prompt, settings, models } => {
                 self.start_threads(&draft, project, prompt, settings, models).await;
             }
-            Command::Send { thread, prompt, delivery } => {
-                if let Err(error) = self.send_prompt(&thread, prompt, delivery).await {
-                    self.mailbox.notice(NoticeLevel::Error, error);
+            Command::Send { request, thread, prompt, delivery } => {
+                if let Err(message) = self.send_prompt(&thread, prompt, delivery).await {
+                    self.mailbox.push(Update::RequestFailed { request, message });
                 }
             }
             Command::Abort { thread } => {

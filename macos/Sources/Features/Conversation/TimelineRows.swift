@@ -93,6 +93,18 @@ private struct TimelineEntryView: View {
     }
 }
 
+struct OutgoingBubble: View {
+    let message: OutgoingMessage
+    let store: StudioStore
+
+    var body: some View {
+        UserBubble(
+            id: .max, text: message.text, images: UInt32(message.shape.images.count), thumbnails: message.thumbnails,
+            createdAt: message.createdAt, anchor: nil, store: store
+        )
+    }
+}
+
 private struct UserBubble: View {
     let id: UInt64
     let text: String
@@ -167,15 +179,16 @@ private struct UserBubble: View {
 private struct BubbleFrameProbe: ViewModifier {
     let text: String
     let probe: RenderProbe
+    @State private var view = UUID()
 
     func body(content: Content) -> some View {
         if probe.drawn != nil {
             content
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
-                    probe.bubbles[text] = frame
+                    probe.bubble(text, view: view, frame: frame)
                 }
                 .onDisappear {
-                    probe.bubbles[text] = nil
+                    probe.bubble(text, view: view, frame: nil)
                 }
         } else {
             content

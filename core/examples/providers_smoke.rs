@@ -495,7 +495,7 @@ fn add_and_chat(harness: &mut Harness, agent: &Path, port: u16, project: &str) -
     })?;
 
     studio.set_model(thread.clone(), "stub-endpoint".to_string(), "stub-2".to_string());
-    studio.send(thread.clone(), prompt("ping again"), Delivery::Default);
+    studio.send(harness.request(), thread.clone(), prompt("ping again"), Delivery::Default);
     let watched = thread.clone();
     harness.pump_until("a thread opened before the model existed switches to it and gets the reply", move |view| {
         view.answer(&watched).contains("Stub reply from stub-2 (key ok).")

@@ -29,14 +29,14 @@ enum Screen {
     }
 
     static func bubbleShown(_ text: String, in window: NSWindow, probe: RenderProbe) -> Bool {
-        guard let frame = probe.bubbles[text], let area = timelineArea(in: window) else { return false }
-        return frame.intersects(area)
+        guard let frames = probe.bubbles[text], let area = timelineArea(in: window) else { return false }
+        return frames.values.contains { $0.intersects(area) }
     }
 
     static func describeBubble(_ text: String, in window: NSWindow, probe: RenderProbe) -> String {
         let area = timelineArea(in: window).map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))×\(Int($0.height))" } ?? "none"
-        let frame = probe.bubbles[text].map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))×\(Int($0.height))" } ?? "not drawn"
-        return "bubble \(frame), timeline area \(area)"
+        let frames = probe.bubbles[text]?.values.map { "\(Int($0.minX)),\(Int($0.minY)) \(Int($0.width))×\(Int($0.height))" } ?? []
+        return "bubble \(frames.isEmpty ? "not drawn" : frames.joined(separator: ", ")), timeline area \(area)"
     }
 
     private static func timelineArea(in window: NSWindow) -> CGRect? {

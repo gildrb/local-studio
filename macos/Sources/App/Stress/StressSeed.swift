@@ -25,7 +25,7 @@ struct StressSeed {
 
     static var plans: [Plan] {
         guard realModel else { return fauxPlans }
-        return [Plan(project: "alpha", turns: 2), Plan(project: "beta", turns: 1), Plan(project: "gamma", turns: 1), Plan(project: "alpha", turns: 1)]
+        return [Plan(project: "alpha", turns: 3), Plan(project: "beta", turns: 2), Plan(project: "gamma", turns: 1), Plan(project: "alpha", turns: 1)]
     }
 
     static var seedSends: Int {

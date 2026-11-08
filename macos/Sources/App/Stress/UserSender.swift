@@ -14,6 +14,7 @@ final class UserSender {
         var done = false
         var bubble: TimeInterval?
         var draft: String?
+        var followUp = false
     }
 
     private let store: StudioStore
@@ -73,7 +74,7 @@ final class UserSender {
             store.conversation.newThread.existingWorktree = nil
             return nil
         }
-        turns.append(Turn(text: text, sentAt: .now))
+        turns.append(Turn(text: text, sentAt: .now, thread: target, followUp: target != nil))
         let index = turns.count - 1
         context("send")
         press("return", window)
@@ -180,10 +181,16 @@ final class UserSender {
 
     var summary: String {
         let sent = turns.filter { $0.thread != nil }
-        let bubbles = turns.compactMap(\.bubble).sorted()
-        let median = bubbles.isEmpty ? 0 : bubbles[bubbles.count / 2]
         return "sends: \(turns.count) through the composer, \(sent.count) became threads, Working episodes per send max \(sent.map(\.episodes).max() ?? 0); "
-            + "user message on screen after Return p50 \(Int(median * 1000)) ms max \(Int((bubbles.last ?? 0) * 1000)) ms"
+            + "user message on screen after Return \(Self.latencies(turns))"
+            + "; follow-ups in existing threads (\(turns.filter(\.followUp).count)) \(Self.latencies(turns.filter(\.followUp)))"
+    }
+
+    private static func latencies(_ turns: [Turn]) -> String {
+        let bubbles = turns.compactMap(\.bubble).sorted()
+        guard !bubbles.isEmpty else { return "none" }
+        let p95 = bubbles[min(bubbles.count - 1, bubbles.count * 95 / 100)]
+        return "p50 \(Int(bubbles[bubbles.count / 2] * 1000)) ms p95 \(Int(p95 * 1000)) ms max \(Int((bubbles.last ?? 0) * 1000)) ms"
     }
 
     static func seconds(_ text: String) -> Int? {
