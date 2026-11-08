@@ -1,7 +1,7 @@
 use std::collections::{BTreeSet, HashMap};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
@@ -359,12 +359,38 @@ fn main() -> anyhow::Result<()> {
     let daemon = PathBuf::from(args.next().context(usage)?);
     let base = args.next().map_or_else(|| PathBuf::from("/tmp/ls-providers"), PathBuf::from);
     let root = base.join(format!("run-{}", std::process::id()));
+    let real = root.join("real");
+    let _credentials = real_model::install(&real.join("agent"))?;
+    run(&daemon, &real, None)?;
+    let custom = root.join("custom");
+    let agent = custom.join("agent");
+    std::fs::create_dir_all(&agent)?;
+    for (name, content) in [("auth.json", "{}"), ("models.json", r#"{"providers":{}}"#)] {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(agent.join(name))?
+            .write_all(content.as_bytes())?;
+    }
+    let (stub, port) = start_stub()?;
+    let outcome = run(&daemon, &custom, Some(port));
+    let stopped_stub = stop_stub(stub);
+    outcome?;
+    stopped_stub?;
+    println!("PASS providers smoke ({})", root.display());
+    Ok(())
+}
+
+fn run(daemon: &Path, root: &Path, stub: Option<u16>) -> anyhow::Result<()> {
     let agent = root.join("agent");
     let work = root.join("work");
-    let _credentials = real_model::install(&agent)?;
-    let original =
-        Original { providers: read_json(&agent.join("models.json"))?["providers"].clone(), keys: auth_keys(&agent)? };
     std::fs::create_dir_all(&work)?;
+    let models = agent.join("models.json");
+    let original = Original {
+        providers: if models.exists() { read_json(&models)?["providers"].clone() } else { Value::Null },
+        keys: auth_keys(&agent)?,
+    };
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", root.join("data"));
     std::env::set_var("LOCAL_STUDIO_CONTROLLER_URL", format!("http://127.0.0.1:{}", free_port()?));
     let socket = root.join("d.sock");
@@ -378,38 +404,40 @@ fn main() -> anyhow::Result<()> {
         }),
         controller_main: Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../controller/src/main.ts").to_string()),
     };
-    let (stub, port) = start_stub()?;
     let outcome = Harness::new(config).and_then(|mut harness| {
-        let outcome = drive(&mut harness, &agent, &work, port, &original);
+        let outcome = drive(&mut harness, &agent, &work, stub, &original);
         harness.studio.shutdown();
         outcome
     });
-    let stopped_stub = stop_stub(stub);
     let stopped = stop_daemon(&socket);
     outcome?;
-    stopped_stub?;
-    stopped?;
-    println!("PASS providers smoke ({})", root.display());
-    Ok(())
+    stopped
 }
 
-fn drive(harness: &mut Harness, agent: &Path, work: &Path, port: u16, original: &Original) -> anyhow::Result<()> {
+fn drive(
+    harness: &mut Harness,
+    agent: &Path,
+    work: &Path,
+    stub: Option<u16>,
+    original: &Original,
+) -> anyhow::Result<()> {
     let studio = Arc::clone(&harness.studio);
     harness.pump_until("daemon launched and connected", |view| matches!(view.connection, Some(Connection::Ready)))?;
     studio.add_project(work.to_string_lossy().into_owned());
     harness.pump_until("project added", |view| view.projects.len() == 1)?;
     let project = harness.view.projects[0].clone();
-
+    let Some(port) = stub else {
+        built_in(harness, &project)?;
+        let request = harness.request();
+        harness.studio.load_usage(request, UsagePeriod::Day);
+        harness.pump_until("usage report loaded", |view| view.usage.is_some())?;
+        return real_model::check_usage(harness.view.usage.as_ref().context("usage")?);
+    };
     discovery(harness, port)?;
-    built_in(harness, &project)?;
     add_and_chat(harness, agent, port, &project)?;
     edit_and_keys(harness, agent, port)?;
     local_fleet(harness, port, &project)?;
-    cleanup(harness, agent, original)?;
-    let request = harness.request();
-    harness.studio.load_usage(request, UsagePeriod::Day);
-    harness.pump_until("usage report loaded", |view| view.usage.is_some())?;
-    real_model::check_usage(harness.view.usage.as_ref().context("usage")?)
+    cleanup(harness, agent, original)
 }
 
 fn built_in(harness: &mut Harness, project: &str) -> anyhow::Result<()> {
