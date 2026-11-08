@@ -105,7 +105,13 @@ enum PageFormat {
     }
 
     static func cost(_ value: Double) -> String {
-        value.formatted(.currency(code: "USD").precision(.fractionLength(value >= 100 ? 0 : 2)))
+        let style = FloatingPointFormatStyle<Double>.Currency(code: "USD")
+        switch value {
+        case 100...: return value.formatted(style.precision(.fractionLength(0)))
+        case 0.01...: return value.formatted(style.precision(.fractionLength(2)))
+        case let small where small > 0: return value.formatted(style.precision(.significantDigits(1...2)))
+        default: return value.formatted(style.precision(.fractionLength(2)))
+        }
     }
 
     static func count(_ value: UInt64) -> String {
