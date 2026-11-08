@@ -35,9 +35,31 @@ struct KeyChord: Equatable, CustomStringConvertible {
             return KeyChord(keyCode: special.code, characters: text, ignoring: text, flags: flags, spec: spec)
         }
         let lower = name.lowercased()
+        if let key = layout.first(where: { $0.plain == lower }) {
+            let typed = flags.contains(.shift) ? key.shifted : lower
+            return KeyChord(keyCode: key.code, characters: typed, ignoring: typed, flags: flags, spec: spec)
+        }
+        if let code = layout.first(where: { $0.shifted == lower })?.code {
+            return KeyChord(keyCode: code, characters: lower, ignoring: lower, flags: flags.union(.shift), spec: spec)
+        }
         guard let code = codes[lower] else { return nil }
         let typed = flags.contains(.shift) ? (shifted[lower] ?? lower.uppercased()) : lower
         return KeyChord(keyCode: code, characters: typed, ignoring: typed, flags: flags, spec: spec)
+    }
+
+    private struct LayoutKey {
+        let code: UInt16
+        let plain: String
+        let shifted: String
+    }
+
+    private static let layout: [LayoutKey] = (UInt16(0)...UInt16(50)).compactMap { code in
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code
+        ), let plain = event.characters(byApplyingModifiers: []), let shifted = event.characters(byApplyingModifiers: .shift),
+        plain.count == 1, shifted.count == 1 else { return nil }
+        return LayoutKey(code: code, plain: plain, shifted: shifted)
     }
 
     static func character(_ character: Character) -> KeyChord? {
