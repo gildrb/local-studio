@@ -122,7 +122,7 @@ struct DashboardFigureRow: View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(figures, id: \.label) { figure in
                 DashboardFigureView(figure: figure)
-                    .frame(width: column, alignment: .leading)
+                    .frame(minWidth: 0, maxWidth: column, alignment: .leading)
             }
             Spacer(minLength: 0)
         }

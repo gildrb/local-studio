@@ -34,6 +34,7 @@ enum Phase {
     Terminal,
     Typing,
     Chat,
+    Endpoint,
     Discovering,
     Adding,
     Removing,
@@ -48,21 +49,42 @@ pub fn start(app: &Rc<App>, failed: Rc<Cell<bool>>) {
         finish(app, &phase, &failed, false, &format!("create {}: {error}", project.display()));
         return;
     }
-    let tick_phase = Rc::clone(&phase);
-    let tick_failed = Rc::clone(&failed);
-    let tick_project = project.to_string_lossy().into_owned();
+    let project = project.to_string_lossy().into_owned();
+    drive(app, phase, failed, move |app, phase, failed| advance(app, phase, failed, &project));
+}
+
+pub fn start_providers(app: &Rc<App>, failed: Rc<Cell<bool>>) {
+    let phase = Rc::new(Cell::new(Phase::Endpoint));
+    let base = std::env::var("LS_SMOKE_PROVIDER").unwrap_or_default();
+    if base.is_empty() {
+        finish(app, &phase, &failed, false, "set LS_SMOKE_PROVIDER to the provider_stub endpoint");
+        return;
+    }
+    drive(app, phase, failed, move |app, phase, failed| providers(app, phase, failed, &base));
+}
+
+fn drive(
+    app: &Rc<App>,
+    phase: Rc<Cell<Phase>>,
+    failed: Rc<Cell<bool>>,
+    step: impl Fn(&Rc<App>, &Rc<Cell<Phase>>, &Rc<Cell<bool>>) + 'static,
+) {
+    let step = Rc::new(step);
+    let (tick_phase, tick_failed, tick_step) = (Rc::clone(&phase), Rc::clone(&failed), Rc::clone(&step));
     app.on_tick.replace(Some(Rc::new(move |app: &Rc<App>| {
-        advance(app, &tick_phase, &tick_failed, &tick_project);
+        tick_step(app, &tick_phase, &tick_failed);
     })));
-    let (poll_phase, poll_failed, poll_project, poll_app) =
-        (Rc::clone(&phase), Rc::clone(&failed), project.to_string_lossy().into_owned(), Rc::downgrade(app));
+    let (poll_phase, poll_failed, poll_app) = (Rc::clone(&phase), Rc::clone(&failed), Rc::downgrade(app));
     glib::timeout_add_local(Duration::from_millis(250), move || {
         let Some(app) = poll_app.upgrade() else { return glib::ControlFlow::Break };
         if poll_phase.get() == Phase::Finished {
             return glib::ControlFlow::Break;
         }
-        if matches!(poll_phase.get(), Phase::Discovering | Phase::Adding | Phase::Removing | Phase::Keys) {
-            advance(&app, &poll_phase, &poll_failed, &poll_project);
+        if matches!(
+            poll_phase.get(),
+            Phase::Endpoint | Phase::Discovering | Phase::Adding | Phase::Removing | Phase::Keys
+        ) {
+            step(&app, &poll_phase, &poll_failed);
         }
         glib::ControlFlow::Continue
     });
@@ -163,9 +185,8 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
             }
         }
         Phase::Terminal | Phase::Typing | Phase::Chat => terminal(app, phase),
-        Phase::Discovering | Phase::Adding | Phase::Removing => providers(app, phase, failed),
         Phase::Keys => keys(app, phase, failed),
-        Phase::Finished => {}
+        Phase::Endpoint | Phase::Discovering | Phase::Adding | Phase::Removing | Phase::Finished => {}
     }
 }
 
@@ -275,26 +296,29 @@ fn terminal(app: &Rc<App>, phase: &Rc<Cell<Phase>>) {
         }
         Phase::Chat if app.composer.extras.context_texts().iter().any(|text| text.contains(&expected)) => {
             println!("ok   Add to Chat put the recent terminal output in the composer");
-            match std::env::var("LS_SMOKE_PROVIDER") {
-                Ok(base) if !base.is_empty() => {
-                    phase.set(Phase::Discovering);
-                    crate::providers::open_dialog_discover(app, &base, STUB_KEY);
-                }
-                _ => {
-                    println!("     LS_SMOKE_PROVIDER unset; skipping the providers round-trip");
-                    phase.set(Phase::Keys);
-                }
-            }
+            phase.set(Phase::Keys);
         }
         _ => {}
     }
 }
 
-fn providers(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>) {
+fn providers(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, base: &str) {
     let stub = |state: &crate::state::State| {
         state.providers.iter().find(|provider| provider.name == STUB_NAME).map(|provider| provider.id.clone())
     };
     match phase.get() {
+        Phase::Endpoint => {
+            let ready = {
+                let state = app.state.borrow();
+                matches!(state.connection, Some(Connection::Ready)) && state.providers_loaded
+            };
+            if !ready {
+                return;
+            }
+            println!("ok   connected to the Eukhe daemon and loaded providers");
+            phase.set(Phase::Discovering);
+            crate::providers::open_dialog_discover(app, base, STUB_KEY);
+        }
         Phase::Discovering => {
             let Some((models, ready)) = crate::providers::dialog_state() else {
                 finish(app, phase, failed, false, "the endpoint dialog closed before discovery");
@@ -320,8 +344,7 @@ fn providers(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>) {
             if stub(&app.state.borrow()).is_some() {
                 return;
             }
-            println!("ok   endpoint removed");
-            phase.set(Phase::Keys);
+            finish(app, phase, failed, true, "custom endpoint discovered, added and removed through the dialog");
         }
         _ => {}
     }
@@ -355,13 +378,7 @@ fn keys(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>) {
     let mode = app.composer.vim.mode();
     println!("ok   vim composer edits (dw, dd, u), ending in {mode:?} mode");
     app.composer.set_text("");
-    finish(
-        app,
-        phase,
-        failed,
-        true,
-        "inbox, timeline, composer, workspace, terminal, providers and keyboard exercised",
-    );
+    finish(app, phase, failed, true, "inbox, timeline, composer, workspace, terminal and keyboard exercised");
 }
 
 fn finish(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, passed: bool, detail: &str) {

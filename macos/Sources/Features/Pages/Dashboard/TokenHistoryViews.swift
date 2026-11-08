@@ -215,13 +215,12 @@ private struct HeatmapGrid: View, Equatable {
     let label: Color
 
     var body: some View {
-        Canvas { context, _ in
+        Canvas { context, size in
             for month in layout.months {
-                context.draw(
-                    Text(month.title).font(.system(size: 11)).foregroundStyle(label),
-                    at: CGPoint(x: CGFloat(month.column) * layout.pitch, y: 0),
-                    anchor: .topLeading
-                )
+                let text = context.resolve(Text(month.title).font(.system(size: 11)).foregroundStyle(label))
+                let x = CGFloat(month.column) * layout.pitch
+                let fits = x + text.measure(in: size).width <= size.width
+                context.draw(text, at: CGPoint(x: fits ? x : size.width, y: 0), anchor: fits ? .topLeading : .topTrailing)
             }
             var shading = Array(repeating: Path(), count: HeatmapLayout.opacities.count)
             for index in layout.daily.indices {
