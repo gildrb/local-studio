@@ -223,6 +223,8 @@ impl Drawer {
                 split.set_start_child(Some(&widget));
                 split.set_end_child(Some(&rest));
                 split.set_wide_handle(false);
+                split.set_shrink_start_child(false);
+                split.set_shrink_end_child(false);
                 Some(split.upcast())
             }
         });
@@ -255,6 +257,7 @@ impl Drawer {
         status.set_can_target(false);
         status.set_visible(false);
         let root = gtk::Overlay::new();
+        root.set_size_request(160, 60);
         root.set_child(Some(&view.area));
         root.add_overlay(&status);
         let actions = gio::SimpleActionGroup::new();

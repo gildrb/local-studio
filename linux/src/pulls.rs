@@ -238,11 +238,13 @@ impl PullsPage {
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&column).build();
         scroller.set_size_request(360, -1);
         let detail = PullDetail::new();
+        detail.root.set_size_request(320, -1);
         let root = gtk::Paned::new(gtk::Orientation::Horizontal);
         root.set_start_child(Some(&scroller));
         root.set_end_child(Some(&detail.root));
         root.set_position(400);
         root.set_shrink_start_child(false);
+        root.set_shrink_end_child(false);
         let weak = app.clone();
         filter.connect_active_name_notify(move |_| {
             if let Some(app) = weak.upgrade() {
