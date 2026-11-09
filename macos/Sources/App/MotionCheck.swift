@@ -3,10 +3,6 @@ import LocalStudioKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// `+motion <dir> [filter]`: plays each deliberate animation in a small on-screen window under the app's
-/// animation switch-off, captures the rendered layers every frame and checks that the motion plays, can be
-/// interrupted, settles without looping, stays still on repeated actions and is off under Reduce Motion.
-/// Writes a frame strip per run (`motion-<scene>-<run>.png`).
 @MainActor
 enum MotionCheck {
     private struct Stage {
@@ -15,13 +11,9 @@ enum MotionCheck {
         let host: NSView
     }
 
-    /// What a second action part-way through the motion must do.
     private enum Interrupt {
-        /// Reverses mid-way: moves back through in-between frames to the start without reaching the end.
         case reverse
-        /// Cancels mid-way: returns to the start without reaching the end.
         case cancel
-        /// Repeats mid-way: carries on to the end without restarting from the start.
         case retrigger
     }
 
@@ -33,17 +25,11 @@ enum MotionCheck {
         let view: @MainActor (StudioStore) -> AnyView
         let forward: @MainActor (Stage) -> Void
         var interrupt: (Interrupt, @MainActor (Stage) -> Void)?
-        /// The repeated forward action must leave every pixel alone.
         var repeats = false
-        /// False for instant changes that must never animate.
         var animates = true
         var duration = 1.2
-        /// Frames from here on must already show the end state: the motions run at most 0.3 s, a symbol bounce
-        /// about 0.55 s after it starts.
         var settledAfter = 0.6
-        /// When the interrupting action comes: part-way through the visible motion.
         var interruptAfter = 0.1
-        /// The state a second later: the end (held) or the start (a confirmation that times out).
         var restsAtStart = false
     }
 
@@ -266,8 +252,6 @@ enum MotionCheck {
         return drawn ? bytes : nil
     }
 
-    /// Writes the start, up to 14 frames spread over the span in which the frames change, and the end, in a grid
-    /// read left to right, top to bottom.
     private static func write(_ run: Run, scene: Scene, suffix: String, into directory: URL) {
         let moving = run.frames.indices.filter { difference(run.frames[$0], run.start) > 0 }
         let last = run.frames.count - 1

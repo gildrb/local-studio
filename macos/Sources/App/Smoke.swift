@@ -79,8 +79,6 @@ final class Smoke {
         }
     }
 
-    /// A fresh window loads the models on its own; once they arrive the empty thread's composer must name the
-    /// default model and thinking level within a second.
     private func checkComposer() {
         guard !composerShown, phase != .finished, store.conversation.modelsLoaded else { return }
         let loaded = modelsAt ?? .now
