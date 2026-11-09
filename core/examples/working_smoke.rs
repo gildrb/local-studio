@@ -154,6 +154,7 @@ fn apply(watch: &mut Watch, update: Update) {
         | Update::Queue { .. }
         | Update::ComposerText { .. }
         | Update::Models { .. }
+        | Update::DaemonDefault { .. }
         | Update::Commands { .. }
         | Update::Skills { .. }
         | Update::Subagents { .. }

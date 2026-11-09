@@ -279,6 +279,7 @@ impl Harness {
             | Update::ProjectScripts { .. }
             | Update::ProjectSettings { .. }
             | Update::WorktreeSetup { .. }
+            | Update::DaemonDefault { .. }
             | Update::Daemon { .. }
             | Update::LocalDashboard { .. } => {}
         }

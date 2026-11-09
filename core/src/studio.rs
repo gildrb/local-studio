@@ -2178,10 +2178,18 @@ impl Actor {
                 return;
             }
         };
-        match self
-            .call(DaemonCommand::GetModelCatalog { id: None, active_session_id: active, rest: Map::default() })
-            .await
-        {
+        let catalog =
+            self.call(DaemonCommand::GetModelCatalog { id: None, active_session_id: active, rest: Map::default() });
+        let (catalog, default) = tokio::join!(catalog, self.daemon_default());
+        match default {
+            Ok((model, thinking_level)) => self.mailbox.push(Update::DaemonDefault { model, thinking_level }),
+            Err(error) => {
+                self.mailbox.push(Update::DaemonDefault { model: None, thinking_level: None });
+                self.mailbox
+                    .notice(NoticeLevel::Warning, format!("Could not read the daemon's default model: {error}"));
+            }
+        }
+        match catalog {
             Ok(data) => match session::model_options(&data) {
                 Ok((models, errors)) => {
                     self.models = models;
@@ -2192,6 +2200,42 @@ impl Actor {
             },
             Err(error) => self.mailbox.notice(NoticeLevel::Error, error),
         }
+    }
+
+    async fn daemon_default(&self) -> Result<(Option<ModelKey>, Option<String>), String> {
+        let created = self
+            .call(DaemonCommand::Create {
+                id: None,
+                session_path: None,
+                continue_recent: None,
+                no_session: Some(true),
+                name: None,
+                config: Some(self.create_config(&self.home)),
+                runtime_metadata: None,
+                lifecycle: Some(DaemonSessionLifecycle::ClientOwned),
+                env: None,
+                launch_env: None,
+                rest: Map::default(),
+            })
+            .await?;
+        let active = created
+            .get("activeSessionId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "The daemon opened a session without an id.".to_string())?
+            .to_string();
+        let state = self
+            .call(DaemonCommand::GetState { id: None, active_session_id: active.clone(), rest: Map::default() })
+            .await;
+        let killed = self.call(DaemonCommand::Kill { id: None, active_session_id: active, rest: Map::default() }).await;
+        let state = state?;
+        killed?;
+        let model = state
+            .get("model")
+            .and_then(session::model_ref)
+            .filter(|model| !model.provider.is_empty())
+            .map(|model| ModelKey { provider: model.provider, model: model.id });
+        let thinking_level = state.get("thinkingLevel").and_then(Value::as_str).map(str::to_string);
+        Ok((model, thinking_level))
     }
 
     async fn project_resources(&mut self, project: Option<String>) -> Result<Resources, String> {

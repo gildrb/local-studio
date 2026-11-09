@@ -460,6 +460,13 @@ impl App {
                 dirty.composer = true;
                 dirty.settings = true;
             }
+            Update::DaemonDefault { model, thinking_level } => {
+                let mut state = self.state.borrow_mut();
+                state.daemon_model = model;
+                state.daemon_thinking = thinking_level;
+                dirty.composer = true;
+                dirty.settings = true;
+            }
             Update::Commands { request, commands } => {
                 if self.take_request(&request) == Some(Target::Commands) {
                     self.composer.extras.commands_loaded(commands);

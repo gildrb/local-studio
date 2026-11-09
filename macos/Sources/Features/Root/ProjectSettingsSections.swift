@@ -73,8 +73,10 @@ struct ProjectDefaultsSection: View {
     }
 
     private func effectiveModel(_ settings: LocalStudioKit.Settings?) -> String {
-        guard let settings, let provider = settings.defaultProvider, let model = settings.defaultModel else { return "first available model" }
-        return modelName(ModelKey(provider: provider, model: model))
+        if let settings, let provider = settings.defaultProvider, let model = settings.defaultModel {
+            return modelName(ModelKey(provider: provider, model: model))
+        }
+        return store.conversation.daemonModel.map(modelName) ?? "Eukhe's default model"
     }
 
     private func inherit(_ value: String) -> String {

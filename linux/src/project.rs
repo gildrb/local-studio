@@ -220,14 +220,26 @@ fn defaults_group(app: &Rc<App>, open: &Rc<Open>, settings: &ProjectSettings) ->
             "Threads started in this project use these instead of Settings → General. Inherit keeps the global value.",
         )
         .build();
-    let (global, models) = {
+    let (global, models, daemon_model) = {
         let state = app.state.borrow();
-        (state.settings.clone(), state.models.iter().filter(|model| model.configured).cloned().collect::<Vec<_>>())
+        (
+            state.settings.clone(),
+            state.models.iter().filter(|model| model.configured).cloned().collect::<Vec<_>>(),
+            state.daemon_model.clone(),
+        )
     };
     let global_model = global
         .default_model
         .as_ref()
         .and_then(|id| models.iter().find(|model| &model.id == id).map(|model| model.name.clone()))
+        .or_else(|| {
+            daemon_model.and_then(|key| {
+                models
+                    .iter()
+                    .find(|model| model.provider == key.provider && model.id == key.model)
+                    .map(|model| model.name.clone())
+            })
+        })
         .unwrap_or_else(|| "automatic".to_string());
     let mut model_names = vec![format!("Inherit ({global_model})")];
     model_names.extend(models.iter().map(|model| model.name.clone()));

@@ -8,6 +8,7 @@ final class Smoke {
     private enum Phase: String {
         case connecting
         case project
+        case unset
         case opening
         case replying
         case finished
@@ -20,6 +21,7 @@ final class Smoke {
     private var subscription: AnyCancellable?
     private var modelsAt: Date?
     private var composerShown = false
+    private var shownWithoutDefault: ComposerProbe?
 
     init(store: StudioStore) {
         self.store = store
@@ -41,12 +43,16 @@ final class Smoke {
             phase = .project
             store.inbox.addProject(path: ProcessInfo.processInfo.environment["HOME"] ?? NSHomeDirectory())
         case .project:
-            guard composerShown, store.inbox.currentProject != nil, !store.inbox.projects.isEmpty else { return }
-            guard SmokeModel.select(store.conversation) else { return }
-            phase = .opening
-            print("ok   real model \(SmokeModel.label)")
-            store.conversation.newThread.access = .fullAccess
-            store.conversation.send(Self.prompt, project: store.inbox.currentProject, steer: false)
+            guard composerShown, store.inbox.currentProject != nil, !store.inbox.projects.isEmpty, SmokeModel.configured(store.conversation) else { return }
+            phase = .unset
+            store.pages.update {
+                $0.defaultProvider = nil
+                $0.defaultModel = nil
+                $0.defaultThinkingLevel = nil
+            }
+            checkUnset(until: .now + 2)
+        case .unset:
+            return
         case .opening:
             guard store.conversation.thread != nil else { return }
             phase = .replying
@@ -57,6 +63,12 @@ final class Smoke {
             for item in items {
                 print("item \(item.kind)".prefix(400))
             }
+            let reported = Self.reported(info, models: store.conversation.models)
+            guard reported == shownWithoutDefault else {
+                finish(passed: false, "with no default set the composer showed \(Self.describe(shownWithoutDefault)), but the started thread runs on \(Self.describe(reported))")
+                return
+            }
+            print("ok   the started thread runs on \(Self.describe(reported)), as the composer showed")
             guard SmokeModel.toolSucceeded(items, output: "smoke-ok") else {
                 finish(passed: false, "the turn finished without a succeeded bash call printing smoke-ok")
                 return
@@ -86,6 +98,40 @@ final class Smoke {
             let expected = expectedComposer.map(Self.describe) ?? "the settings' default model, which the catalog does not list (set defaultProvider and defaultModel)"
             finish(passed: false, "1 s after the models loaded the composer shows \(Self.describe(store.shell.probe.composer)), expected \(expected)")
         }
+    }
+
+    private func checkUnset(until deadline: Date) {
+        guard phase == .unset else { return }
+        let conversation = store.conversation
+        let settings = store.pages.settings
+        let daemon = conversation.daemonModel.flatMap { key in conversation.models.first { $0.provider == key.provider && $0.id == key.model } }
+        let expected = daemon.map { ComposerProbe(model: $0.name, thinking: conversation.daemonThinkingLevel.map(ThinkingMenu.title)) }
+        if let key = conversation.daemonModel, key != SmokeModel.key {
+            finish(passed: false, "the daemon's default model is \(key.provider)/\(key.model), expected \(SmokeModel.label) (set defaultProvider and defaultModel in the agent settings)")
+            return
+        }
+        if settings?.defaultModel == nil, settings?.defaultThinkingLevel == nil, let expected, store.shell.probe.composer == expected {
+            shownWithoutDefault = expected
+            print("ok   with no default set the composer shows the daemon's default \(Self.describe(expected)) (real model \(SmokeModel.label))")
+            phase = .opening
+            conversation.newThread.access = .fullAccess
+            conversation.send(Self.prompt, project: store.inbox.currentProject, steer: false)
+            return
+        }
+        guard Date.now < deadline else {
+            let wanted = expected.map(Self.describe) ?? "the daemon's default model, which never arrived"
+            finish(passed: false, "with no default set the composer shows \(Self.describe(store.shell.probe.composer)), expected \(wanted)")
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.checkUnset(until: deadline)
+        }
+    }
+
+    private static func reported(_ info: ThreadInfo, models: [ModelOption]) -> ComposerProbe? {
+        guard let model = info.model else { return nil }
+        let name = models.first { $0.provider == model.provider && $0.id == model.id }?.name ?? model.name ?? model.id
+        return ComposerProbe(model: name, thinking: info.thinkingLevel.isEmpty ? nil : ThinkingMenu.title(info.thinkingLevel))
     }
 
     private var expectedComposer: ComposerProbe? {

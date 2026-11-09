@@ -111,22 +111,7 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
             phase.set(Phase::Project);
             app.core.run(|studio| studio.add_project(project.to_string()));
         }
-        Phase::Project => {
-            let first = app.state.borrow().projects.first().map(|project| project.id.clone());
-            let Some(first) = first else { return };
-            println!("ok   project added in the sidebar: {first}");
-            phase.set(Phase::Opening);
-            app.new_thread(Some(first));
-            {
-                let mut state = app.state.borrow_mut();
-                state.draft_settings.model =
-                    Some(ModelKey { provider: PROVIDER.to_string(), model: MODEL.to_string() });
-                state.draft_settings.thinking = Some(THINKING.to_string());
-            }
-            println!("     real model {PROVIDER}/{MODEL} thinking {THINKING}");
-            app.composer.set_text(PROMPT);
-            app.composer.submit(app);
-        }
+        Phase::Project => start_draft(app, phase, failed),
         Phase::Opening => {
             if app.state.borrow().selected.is_none() {
                 return;
@@ -188,6 +173,53 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
         Phase::Keys => keys(app, phase, failed),
         Phase::Endpoint | Phase::Discovering | Phase::Adding | Phase::Removing | Phase::Finished => {}
     }
+}
+
+fn start_draft(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>) {
+    let first = {
+        let state = app.state.borrow();
+        if state.models.is_empty() || state.daemon_model.is_none() {
+            return;
+        }
+        state.projects.first().map(|project| project.id.clone())
+    };
+    let Some(first) = first else { return };
+    println!("ok   project added in the sidebar: {first}");
+    app.new_thread(Some(first));
+    let (chip, daemon, unset) = {
+        let state = app.state.borrow();
+        (
+            (state.active_model(), state.active_thinking()),
+            (state.daemon_model.clone(), state.daemon_thinking.clone()),
+            state.settings.default_model.is_none() && state.settings.default_thinking_level.is_none(),
+        )
+    };
+    let real =
+        (Some(ModelKey { provider: PROVIDER.to_string(), model: MODEL.to_string() }), Some(THINKING.to_string()));
+    if !unset {
+        finish(
+            app,
+            phase,
+            failed,
+            false,
+            "the smoke needs Local Studio settings without a default model or thinking level",
+        );
+        return;
+    }
+    if daemon != real {
+        let detail = format!("the daemon's default is {daemon:?}, expected {real:?} (set it in the agent settings)");
+        finish(app, phase, failed, false, &detail);
+        return;
+    }
+    if chip != daemon {
+        let detail = format!("with no default set the composer shows {chip:?}, not the daemon's default {daemon:?}");
+        finish(app, phase, failed, false, &detail);
+        return;
+    }
+    println!("ok   with no default set the composer shows the daemon's default {PROVIDER}/{MODEL} thinking {THINKING}");
+    phase.set(Phase::Opening);
+    app.composer.set_text(PROMPT);
+    app.composer.submit(app);
 }
 
 fn follow_up(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, project: &str) {
@@ -270,7 +302,11 @@ fn verify_turn(app: &Rc<App>, items: &[local_studio_core::Item], project: &str) 
     }
     let model = state.info.as_ref().and_then(|info| info.model.clone());
     if !model.as_ref().is_some_and(|model| model.provider == PROVIDER && model.id == MODEL) {
-        return Err(format!("the thread ran on {model:?}, not {PROVIDER}/{MODEL}"));
+        return Err(format!("the thread ran on {model:?}, not {PROVIDER}/{MODEL} as the composer showed"));
+    }
+    let thinking = state.info.as_ref().map(|info| info.thinking_level.clone()).unwrap_or_default();
+    if thinking != THINKING {
+        return Err(format!("the thread runs at thinking {thinking:?}, not {THINKING} as the composer showed"));
     }
     Ok(())
 }

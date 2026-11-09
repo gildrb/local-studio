@@ -113,6 +113,7 @@ impl Harness {
             | Update::Queue { .. }
             | Update::ComposerText { .. }
             | Update::Models { .. }
+            | Update::DaemonDefault { .. }
             | Update::Commands { .. }
             | Update::Skills { .. }
             | Update::Subagents { .. }

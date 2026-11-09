@@ -210,6 +210,7 @@ impl Harness {
             | Update::TerminalText { .. }
             | Update::TerminalExited { .. }
             | Update::Local { .. }
+            | Update::DaemonDefault { .. }
             | Update::LocalDashboard { .. }
             | Update::Providers { .. }
             | Update::ProviderModels { .. }

@@ -65,6 +65,8 @@ pub struct State {
     pub models: Vec<ModelOption>,
     pub favorites: Vec<ModelKey>,
     pub hidden: Vec<ModelKey>,
+    pub daemon_model: Option<ModelKey>,
+    pub daemon_thinking: Option<String>,
     pub settings: Settings,
     pub keybindings: Vec<Keybinding>,
     pub scripts: HashMap<String, Vec<ProjectScript>>,
@@ -150,12 +152,14 @@ impl State {
                 .and_then(|info| info.model.as_ref())
                 .map(|model| ModelKey { provider: model.provider.clone(), model: model.id.clone() });
         }
-        self.draft_settings.model.clone().or_else(|| {
-            match (&self.settings.default_provider, &self.settings.default_model) {
+        self.draft_settings
+            .model
+            .clone()
+            .or_else(|| match (&self.settings.default_provider, &self.settings.default_model) {
                 (Some(provider), Some(model)) => Some(ModelKey { provider: provider.clone(), model: model.clone() }),
                 _ => None,
-            }
-        })
+            })
+            .or_else(|| self.daemon_model.clone())
     }
 
     pub fn active_access(&self) -> AccessMode {
@@ -184,7 +188,13 @@ impl State {
         if self.selected.is_some() {
             return self.info.as_ref().map(|info| info.thinking_level.clone()).filter(|level| !level.is_empty());
         }
-        self.draft_settings.thinking.clone().or_else(|| self.settings.default_thinking_level.clone())
+        if let Some(level) =
+            self.draft_settings.thinking.clone().or_else(|| self.settings.default_thinking_level.clone())
+        {
+            return Some(level);
+        }
+        let levels = self.thinking_levels();
+        self.daemon_thinking.clone().filter(|level| levels.contains(level)).or_else(|| levels.first().cloned())
     }
 
     pub fn run_start(&self, thread: &str, reported: Option<i64>) -> Option<i64> {

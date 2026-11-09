@@ -25,6 +25,8 @@ final class ConversationStore {
     private(set) var favorites: [ModelKey] = []
     private(set) var hiddenModels: [ModelKey] = []
     private(set) var modelsLoaded = false
+    private(set) var daemonModel: ModelKey?
+    private(set) var daemonThinkingLevel: String?
     private(set) var commands: [SlashCommand] = []
     private(set) var commandsLoaded = false
     private(set) var mentionRequest: String?
@@ -510,6 +512,11 @@ final class ConversationStore {
         modelsLoaded = true
     }
 
+    func setDaemonDefault(model: ModelKey?, thinkingLevel: String?) {
+        if daemonModel != model { daemonModel = model }
+        if daemonThinkingLevel != thinkingLevel { daemonThinkingLevel = thinkingLevel }
+    }
+
     func setCommands(request: String, commands: [SlashCommand]) {
         guard request == commandsRequest else { return }
         commandsRequest = nil
@@ -757,11 +764,13 @@ final class ConversationStore {
                 )
         }
         let selectable = models.filter { $0.configured && !isHidden($0) }
-        let chosen = newThread.model ?? settings.flatMap { settings in
+        let settingsModel = settings.flatMap { settings in
             settings.defaultProvider.flatMap { provider in settings.defaultModel.map { ModelKey(provider: provider, model: $0) } }
         }
-        if let chosen, let model = selectable.first(where: { $0.provider == chosen.provider && $0.id == chosen.model }) {
-            return model
+        for key in [newThread.model, settingsModel, daemonModel].compactMap(\.self) {
+            if let model = selectable.first(where: { $0.provider == key.provider && $0.id == key.model }) {
+                return model
+            }
         }
         return selectable.first(where: isFavorite) ?? selectable.first
     }
@@ -770,7 +779,11 @@ final class ConversationStore {
         if thread != nil {
             return info?.thinkingLevel
         }
-        return newThread.thinkingLevel ?? settings?.defaultThinkingLevel
+        if let level = newThread.thinkingLevel ?? settings?.defaultThinkingLevel {
+            return level
+        }
+        let levels = currentModel(settings: settings)?.thinkingLevels ?? []
+        return daemonThinkingLevel.flatMap { levels.contains($0) ? $0 : nil } ?? levels.first
     }
 
     func thinkingLevels(settings: Settings?) -> [String] {

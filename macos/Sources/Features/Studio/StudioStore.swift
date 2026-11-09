@@ -134,6 +134,8 @@ final class StudioStore {
             conversation.setComposerText(thread: thread, text: text)
         case .models(let models, let favorites, let hidden):
             conversation.setModels(models, favorites: favorites, hidden: hidden)
+        case .daemonDefault(let model, let thinkingLevel):
+            conversation.setDaemonDefault(model: model, thinkingLevel: thinkingLevel)
         case .commands(let request, let commands):
             requests.settle(request)
             conversation.setCommands(request: request, commands: commands)

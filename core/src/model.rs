@@ -422,6 +422,7 @@ pub enum Update {
     Queue { thread: String, queued: Vec<QueuedMessage> },
     ComposerText { thread: String, text: String },
     Models { models: Vec<ModelOption>, favorites: Vec<ModelKey>, hidden: Vec<ModelKey> },
+    DaemonDefault { model: Option<ModelKey>, thinking_level: Option<String> },
     Commands { request: String, commands: Vec<SlashCommand> },
     Skills { request: String, skills: Vec<SkillEntry> },
     Subagents { thread: String, agents: Vec<Subagent> },
