@@ -112,11 +112,13 @@ impl SettingsDialog {
 
     fn refresh_kernel(&self, state: &State) {
         let (subtitle, button) = match &state.kernel {
-            Some(KernelState::Installed { python }) => (format!("Installed · {python}"), None),
+            Some(KernelState::Ready { python, version, source }) => {
+                (format!("Python {version} · {python} ({source})"), None)
+            }
             Some(KernelState::Installing { detail }) => {
                 (format!("Installing… {}", detail.as_deref().unwrap_or_default()), None)
             }
-            Some(KernelState::Missing) => ("Not installed".to_string(), Some("Install")),
+            Some(KernelState::Missing) => ("No Python 3.11+ found".to_string(), Some("Install")),
             Some(KernelState::Failed { message }) => (format!("Install failed: {message}"), Some("Retry")),
             Some(KernelState::Unavailable { reason }) => (reason.clone(), Some("Retry")),
             Some(KernelState::Checking) | None => ("Checking…".to_string(), None),

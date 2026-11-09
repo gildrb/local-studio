@@ -7,24 +7,37 @@ import LocalStudioKit
 final class KernelSmoke {
     private enum Phase: String {
         case kernel
+        case installing
+        case connecting
         case project
         case opening
         case replying
         case finished
     }
 
-    private static let prompt = "List the files here and count them with Python: use the ipython tool once, then reply with only the count."
-    private static let files = ["alpha.txt", "beta.txt", "gamma.txt"]
+    private static let prompt = "Use the ipython tool once to run exactly `import os, sys; print(sys.version)`, then reply with only the Python version it printed."
+    private static let readyWithin: TimeInterval = 10
 
     private let store: StudioStore
-    private let expectInstall: Bool
+    private let install: Bool
+    private let started = KernelSmoke.launched()
     private var phase = Phase.kernel
-    private var sawInstalling = false
+    private var version = ""
+    private var detail: String?
     private var subscription: AnyCancellable?
 
-    init(store: StudioStore, expectInstall: Bool) {
+    init(store: StudioStore, install: Bool) {
         self.store = store
-        self.expectInstall = expectInstall
+        self.install = install
+    }
+
+    private nonisolated static func launched() -> Date {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var name = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+        guard sysctl(&name, u_int(name.count), &info, &size, nil, 0) == 0 else { return Date() }
+        let start = info.kp_proc.p_un.__p_starttime
+        return Date(timeIntervalSince1970: TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
     }
 
     func start() {
@@ -36,13 +49,16 @@ final class KernelSmoke {
     }
 
     private func advance() {
-        if store.kernel?.installing == true, !sawInstalling {
-            sawInstalling = true
-            print("ok   kernel install started on launch")
-        }
         switch phase {
         case .kernel:
             checkKernel()
+        case .installing:
+            checkInstall()
+        case .connecting:
+            guard store.connection == .ready, let project = makeProject() else { return }
+            phase = .project
+            store.inbox.addProject(path: project.path)
+            store.conversation.loadModels()
         case .project:
             guard store.inbox.currentProject != nil, !store.inbox.projects.isEmpty, SmokeModel.select(store.conversation) else { return }
             phase = .opening
@@ -60,25 +76,62 @@ final class KernelSmoke {
     }
 
     private func checkKernel() {
-        guard store.connection == .ready, let kernel = store.kernel else { return }
+        guard let kernel = store.kernel else { return }
+        let elapsed = String(format: "%.2f s", Date().timeIntervalSince(started))
         switch kernel {
-        case .checking, .missing, .installing:
+        case .checking:
             return
+        case .installing:
+            finish(passed: false, "the launch started an install on its own")
         case .failed(let message):
-            finish(passed: false, "the kernel install failed: \(message)")
+            finish(passed: false, "the kernel failed on launch: \(message)")
         case .unavailable(let reason):
             finish(passed: false, "the kernel is unavailable: \(reason)")
-        case .installed(let python):
-            guard sawInstalling == expectInstall else {
-                finish(passed: false, expectInstall ? "the kernel was never installed on a launch without one" : "a launch with an installed kernel installed it again")
+        case .missing:
+            guard install else {
+                finish(passed: false, "no Python found after \(elapsed) although one is on PATH")
                 return
             }
-            print("ok   kernel installed at \(python) (\(sawInstalling ? "installed by this launch" : "no install on this launch"))")
-            guard let project = makeProject() else { return }
-            phase = .project
-            store.inbox.addProject(path: project.path)
-            store.conversation.loadModels()
+            print("ok   no Python found after \(elapsed); pressing Install")
+            phase = .installing
+            store.installKernel()
+        case .ready(let python, let version, let source):
+            guard !install else {
+                finish(passed: false, "found \(python) (Python \(version), \(source)) although every Python was hidden")
+                return
+            }
+            guard Date().timeIntervalSince(started) <= Self.readyWithin else {
+                finish(passed: false, "the kernel took \(elapsed) to become ready")
+                return
+            }
+            print("ok   kernel ready in \(elapsed) with no install: \(python) (Python \(version), \(source))")
+            openProject(version: version)
         }
+    }
+
+    private func checkInstall() {
+        switch store.kernel {
+        case .installing(let detail):
+            if let detail, detail != self.detail {
+                self.detail = detail
+                print("     install: \(detail)".prefix(200))
+            }
+        case .failed(let message):
+            finish(passed: false, "the install failed: \(message)")
+        case .unavailable(let reason):
+            finish(passed: false, "the kernel is unavailable after the install: \(reason)")
+        case .ready(let python, let version, let source):
+            print("ok   installed in \(String(format: "%.1f s", Date().timeIntervalSince(started))): \(python) (Python \(version), \(source))")
+            openProject(version: version)
+        case .checking, .missing, nil:
+            return
+        }
+    }
+
+    private func openProject(version: String) {
+        self.version = version
+        phase = .connecting
+        advance()
     }
 
     private func checkReply() {
@@ -88,18 +141,21 @@ final class KernelSmoke {
         for item in items {
             print("item \(item.kind)".prefix(400))
         }
-        if items.contains(where: { String(describing: $0.kind).contains("kernel is not installed") }) {
-            finish(passed: false, "the transcript reports the Python kernel as not installed")
+        if items.contains(where: { item in
+            if case .notice(.warning, let text) = item.kind { text.lowercased().contains("kernel") } else { false }
+        }) {
+            finish(passed: false, "the transcript shows a kernel warning notice")
             return
         }
-        let python = items.contains { item in
-            if case .tool(_, "ipython", _, _, _, .succeeded, _, _, _, _) = item.kind { true } else { false }
+        let output = items.compactMap { item -> String? in
+            if case .tool(_, "ipython", _, _, _, .succeeded, let output, _, _, _) = item.kind { output } else { nil }
         }
-        guard python else {
-            finish(passed: false, "the turn finished without a succeeded ipython call")
+        guard let printed = output.first(where: { $0.contains(version) }) else {
+            finish(passed: false, "no succeeded ipython call printed Python \(version) (\(output.count) succeeded ipython calls)")
             return
         }
-        finish(passed: true, "a real ipython call succeeded and the model replied “\(reply)” (\(items.count) transcript items)")
+        let line = printed.split(separator: "\n").first(where: { $0.contains(version) }).map(String.init) ?? printed
+        finish(passed: true, "kernel: a real ipython call printed “\(line)” and the model replied “\(reply)” (\(items.count) transcript items, \(String(format: "%.1f s", Date().timeIntervalSince(started))) total)")
     }
 
     private func makeProject() -> URL? {
@@ -107,9 +163,6 @@ final class KernelSmoke {
         let project = URL(fileURLWithPath: home, isDirectory: true).appending(path: "kernel-smoke", directoryHint: .isDirectory)
         do {
             try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-            for name in Self.files {
-                try Data(name.utf8).write(to: project.appending(path: name))
-            }
             return project
         } catch {
             finish(passed: false, "could not create the smoke project: \(error.localizedDescription)")

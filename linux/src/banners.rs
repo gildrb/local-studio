@@ -27,25 +27,38 @@ impl Banners {
     }
 
     pub fn render_kernel(&self, state: Option<&KernelState>, fresh: bool) {
-        match state {
+        let (title, button, action, error) = match state {
+            Some(KernelState::Missing) => (
+                "No Python 3.11+ found. Install a managed Python for the ipython tool.".to_string(),
+                "Install",
+                Some("win.install-kernel"),
+                false,
+            ),
             Some(KernelState::Installing { detail }) => {
-                let detail = detail.as_deref().unwrap_or("Downloading Python and the kernel packages.");
-                self.kernel.set_title(&format::escape(&format!("Installing the Python kernel… {detail}")));
-                self.kernel.set_button_label(Some("Hide"));
-                self.kernel.set_action_name(None);
-                self.kernel.remove_css_class("ls-banner-error");
-                if fresh {
-                    self.kernel.set_revealed(true);
-                }
+                let detail = detail.as_deref().unwrap_or("Downloading Python for the ipython tool.");
+                (format!("Installing Python… {detail}"), "Hide", None, false)
             }
             Some(KernelState::Failed { message }) => {
-                self.kernel.set_title(&format::escape(&format!("The Python kernel could not be installed: {message}")));
-                self.kernel.set_button_label(Some("Retry"));
-                self.kernel.set_action_name(Some("win.install-kernel"));
-                self.kernel.add_css_class("ls-banner-error");
-                self.kernel.set_revealed(true);
+                (format!("Python could not be installed: {message}"), "Retry", Some("win.install-kernel"), true)
             }
-            _ => self.kernel.set_revealed(false),
+            Some(KernelState::Unavailable { reason }) => {
+                (format!("The ipython tool is unavailable: {reason}"), "Retry", Some("win.install-kernel"), true)
+            }
+            Some(KernelState::Checking | KernelState::Ready { .. }) | None => {
+                self.kernel.set_revealed(false);
+                return;
+            }
+        };
+        self.kernel.set_title(&format::escape(&title));
+        self.kernel.set_button_label(Some(button));
+        self.kernel.set_action_name(action);
+        if error {
+            self.kernel.add_css_class("ls-banner-error");
+        } else {
+            self.kernel.remove_css_class("ls-banner-error");
+        }
+        if fresh || error {
+            self.kernel.set_revealed(true);
         }
     }
 

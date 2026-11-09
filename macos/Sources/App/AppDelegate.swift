@@ -89,8 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             providersSmoke = smoke
         }
         if let flag = arguments.firstIndex(of: "+smoke-kernel") {
-            let expectation = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : "install"
-            let smoke = KernelSmoke(store: store, expectInstall: expectation != "installed")
+            let install = arguments.indices.contains(flag + 1) && arguments[flag + 1] == "install"
+            let smoke = KernelSmoke(store: store, install: install)
             smoke.start()
             kernelSmoke = smoke
         }

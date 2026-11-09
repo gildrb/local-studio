@@ -12,7 +12,7 @@ private struct KernelNoticeContent {
     let tint: Color
     let title: String
     let detail: String?
-    let failed: Bool
+    let action: String?
 }
 
 struct KernelNotice: View {
@@ -31,14 +31,14 @@ struct KernelNotice: View {
                         Text(detail)
                             .font(.system(size: 12))
                             .foregroundStyle(Theme.secondaryText)
-                            .lineLimit(content.failed ? 4 : 1)
+                            .lineLimit(content.action == nil ? 1 : 4)
                             .truncationMode(.middle)
                             .textSelection(.enabled)
                     }
                 }
                 Spacer(minLength: 8)
-                if content.failed {
-                    Button("Retry") { store.installKernel() }
+                if let action = content.action {
+                    Button(action) { store.installKernel() }
                 }
                 Button("Hide", systemImage: "xmark") { store.kernelNoticeHidden = true }
                     .labelStyle(.iconOnly)
@@ -58,14 +58,21 @@ struct KernelNotice: View {
 
     private var content: KernelNoticeContent? {
         switch store.kernel {
+        case .missing:
+            KernelNoticeContent(
+                symbol: "exclamationmark.triangle", tint: Theme.warning, title: "No Python 3.11+ found",
+                detail: "Install a managed Python for the ipython tool.", action: "Install"
+            )
         case .installing(let detail):
             KernelNoticeContent(
-                symbol: "arrow.down.circle", tint: Theme.primary, title: "Installing the Python kernel…",
-                detail: detail ?? "Downloading Python and the kernel packages. Threads keep working meanwhile.", failed: false
+                symbol: "arrow.down.circle", tint: Theme.primary, title: "Installing Python…",
+                detail: detail ?? "Downloading Python for the ipython tool. Threads keep working meanwhile.", action: nil
             )
         case .failed(let message):
-            KernelNoticeContent(symbol: "exclamationmark.circle", tint: Theme.danger, title: "The Python kernel could not be installed", detail: message, failed: true)
-        default:
+            KernelNoticeContent(symbol: "exclamationmark.circle", tint: Theme.danger, title: "Python could not be installed", detail: message, action: "Retry")
+        case .unavailable(let reason):
+            KernelNoticeContent(symbol: "exclamationmark.circle", tint: Theme.danger, title: "The ipython tool is unavailable", detail: reason, action: "Retry")
+        case .checking, .ready, nil:
             nil
         }
     }
@@ -76,21 +83,18 @@ struct KernelStatus: View {
 
     var body: some View {
         switch store.kernel {
-        case .installed(let python):
-            HStack(spacing: 6) {
-                Text("Installed")
-                Text(python)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .foregroundStyle(Theme.secondaryText)
-                    .textSelection(.enabled)
-            }
+        case .ready(let python, let version, let source):
+            Text("Python \(version) · \(python) (\(source))")
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .foregroundStyle(Theme.secondaryText)
+                .textSelection(.enabled)
         case .installing:
             Text("Installing…")
                 .foregroundStyle(Theme.secondaryText)
         case .missing:
             HStack {
-                Text("Not installed")
+                Text("No Python 3.11+ found")
                     .foregroundStyle(Theme.secondaryText)
                 Button("Install") { store.installKernel() }
             }

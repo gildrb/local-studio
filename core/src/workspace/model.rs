@@ -281,7 +281,7 @@ pub enum KernelState {
     Checking,
     Missing,
     Installing { detail: Option<String> },
-    Installed { python: String },
+    Ready { python: String, version: String, source: String },
     Failed { message: String },
     Unavailable { reason: String },
 }

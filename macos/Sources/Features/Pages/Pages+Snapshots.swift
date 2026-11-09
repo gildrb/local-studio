@@ -12,9 +12,15 @@ extension SnapshotCatalog {
                 view: { store in AnyView(SettingsView(store: store, pane: .general, query: "diff")) }
             ),
             SnapshotEntry(
-                name: "pages-settings-kernel-installed",
+                name: "pages-settings-kernel-ready",
                 size: settingsSize,
-                updates: PagesFixtures.base + [.kernel(state: .installed(python: "/Users/demo/.eukhe/kernel-venv/bin/python"))],
+                updates: PagesFixtures.base + [.kernel(state: .ready(python: "/opt/homebrew/bin/python3", version: "3.15.2", source: "PATH"))],
+                view: { store in AnyView(SettingsView(store: store, pane: .general, query: "python")) }
+            ),
+            SnapshotEntry(
+                name: "pages-settings-kernel-missing",
+                size: settingsSize,
+                updates: PagesFixtures.base + [.kernel(state: .missing)],
                 view: { store in AnyView(SettingsView(store: store, pane: .general, query: "python")) }
             ),
             SnapshotEntry(

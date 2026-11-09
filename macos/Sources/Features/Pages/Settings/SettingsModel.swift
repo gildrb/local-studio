@@ -330,7 +330,7 @@ enum SettingKey: CaseIterable {
         case .textGenerationModel: "titles commit messages"
         case .version: "about update"
         case .dataFolder, .dataLocation: "logs finder reveal storage"
-        case .pythonKernel: "ipython runtime venv install uv eukhe"
+        case .pythonKernel: "ipython python3 version path runtime venv install uv eukhe"
         case .contextMeter: "legacy tokens"
         case .colorScheme: "dark light system mode"
         case .themes: "theme palette colors import vs code editor"

@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use super::model::KernelState;
@@ -27,9 +27,19 @@ impl Default for Kernel {
 }
 
 enum Check {
-    Ready(String),
-    Missing,
+    Ready { python: String, version: String, source: String },
+    Missing(String),
     Broken(String),
+}
+
+impl From<Check> for KernelState {
+    fn from(check: Check) -> Self {
+        match check {
+            Check::Ready { python, version, source } => Self::Ready { python, version, source },
+            Check::Missing(_) => Self::Missing,
+            Check::Broken(reason) => Self::Unavailable { reason },
+        }
+    }
 }
 
 impl Workspace {
@@ -42,11 +52,7 @@ impl Workspace {
                 workspace.set_kernel(KernelState::Unavailable { reason: UNMANAGED.to_string() });
                 return;
             };
-            match check(&program).await {
-                Check::Ready(python) => workspace.set_kernel(KernelState::Installed { python }),
-                Check::Missing => workspace.run_kernel_install(&program).await,
-                Check::Broken(reason) => workspace.set_kernel(KernelState::Unavailable { reason }),
-            }
+            workspace.set_kernel(check(&program).await.into());
         });
     }
 
@@ -82,10 +88,17 @@ impl Workspace {
     async fn run_kernel_install(&self, program: &Path) {
         self.set_kernel(KernelState::Installing { detail: None });
         let state = match tokio::time::timeout(INSTALL_TIMEOUT, self.kernel_install(program)).await {
-            Ok(Ok(python)) => {
-                self.inner.mailbox.notice(NoticeLevel::Info, "The Python kernel is installed.");
-                KernelState::Installed { python }
-            }
+            Ok(Ok(())) => match check(program).await {
+                Check::Missing(reason) => {
+                    KernelState::Failed { message: format!("The install finished but no Python works: {reason}") }
+                }
+                check => {
+                    if matches!(check, Check::Ready { .. }) {
+                        self.inner.mailbox.notice(NoticeLevel::Info, "Python is installed for the ipython tool.");
+                    }
+                    check.into()
+                }
+            },
             Ok(Err(message)) => KernelState::Failed { message },
             Err(_) => KernelState::Failed {
                 message: format!("The install did not finish within {} minutes.", INSTALL_TIMEOUT.as_secs() / 60),
@@ -94,26 +107,16 @@ impl Workspace {
         self.set_kernel(state);
     }
 
-    async fn kernel_install(&self, program: &Path) -> Result<String, String> {
+    async fn kernel_install(&self, program: &Path) -> Result<(), String> {
         let mut child = command(program, &["kernel", "install"])
-            .stdout(Stdio::piped())
+            .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .process_group(0)
             .spawn()
             .map_err(|error| format!("Could not run {}: {error}", program.display()))?;
         *self.inner.kernel.install.lock().unwrap_or_else(PoisonError::into_inner) = child.id();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
         let mut errors = Vec::new();
-        let read_stdout = async {
-            let mut text = String::new();
-            if let Some(mut stdout) = stdout {
-                stdout.read_to_string(&mut text).await.ok();
-            }
-            text
-        };
-        let read_stderr = async {
-            let Some(stderr) = stderr else { return };
+        if let Some(stderr) = child.stderr.take() {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 let line = line.rsplit('\r').next().unwrap_or_default().trim().to_string();
@@ -123,18 +126,12 @@ impl Workspace {
                 self.set_kernel(KernelState::Installing { detail: Some(line.clone()) });
                 errors.push(line);
             }
-        };
-        let (text, ()) = tokio::join!(read_stdout, read_stderr);
+        }
         let status = child.wait().await;
         self.inner.kernel.install.lock().unwrap_or_else(PoisonError::into_inner).take();
         let status = status.map_err(|error| format!("The install stopped: {error}"))?;
         if status.success() {
-            return text
-                .lines()
-                .rev()
-                .find_map(python_path)
-                .map(str::to_string)
-                .ok_or_else(|| format!("The install finished without naming its Python: {}", text.trim()));
+            return Ok(());
         }
         Err(failure(&errors, status.code()))
     }
@@ -146,20 +143,30 @@ async fn check(program: &Path) -> Check {
     let output = match output {
         Ok(Ok(output)) => output,
         Ok(Err(error)) => return Check::Broken(format!("Could not run {}: {error}", program.display())),
-        Err(_) => return Check::Broken("Checking the Python kernel timed out.".to_string()),
+        Err(_) => return Check::Broken("Checking for a Python timed out.".to_string()),
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
     let line = stdout.lines().next().unwrap_or_default().trim();
     if output.status.success() {
-        return python_path(line).map_or(Check::Missing, |python| Check::Ready(python.to_string()));
+        return ready(line).unwrap_or_else(|| Check::Broken(format!("Unexpected answer from eukhe: {line}")));
     }
-    if line.starts_with("not installed") || line.starts_with("out of date") {
-        return Check::Missing;
+    if let Some(reason) = line.strip_prefix("no python: ") {
+        return Check::Missing(reason.to_string());
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
     let lines: Vec<String> =
         stderr.lines().map(str::trim).filter(|line| !line.is_empty()).map(str::to_string).collect();
     Check::Broken(failure(&lines, output.status.code()))
+}
+
+fn ready(line: &str) -> Option<Check> {
+    let (python, rest) = line.strip_prefix("ready: ")?.rsplit_once(" (Python ")?;
+    let (version, source) = rest.strip_suffix(')')?.split_once(", ")?;
+    (!python.is_empty()).then(|| Check::Ready {
+        python: python.to_string(),
+        version: version.to_string(),
+        source: source.to_string(),
+    })
 }
 
 fn command(program: &Path, args: &[&str]) -> Command {
@@ -169,18 +176,6 @@ fn command(program: &Path, args: &[&str]) -> Command {
         command.env("PATH", path);
     }
     command
-}
-
-fn python_path(line: &str) -> Option<&str> {
-    let line = line.trim();
-    line.strip_prefix("installed: ")
-        .or_else(|| line.strip_prefix("already installed: "))
-        .or_else(|| {
-            line.split_once(" the kernel uses ")
-                .and_then(|(_, rest)| rest.split_once(" and eukhe"))
-                .map(|(path, _)| path)
-        })
-        .filter(|path| !path.is_empty())
 }
 
 fn failure(lines: &[String], code: Option<i32>) -> String {

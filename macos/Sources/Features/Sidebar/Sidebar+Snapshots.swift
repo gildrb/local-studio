@@ -121,6 +121,9 @@ extension SnapshotCatalog {
                 store.shell.sidebarVisible = false
                 return AnyView(RootView(store: store))
             },
+            SnapshotEntry(name: "shell-window-kernel-missing", size: CGSize(width: 1100, height: 640), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + [.kernel(state: .missing)]) { store in
+                AnyView(RootView(store: store))
+            },
             SnapshotEntry(name: "shell-window-kernel-installing", size: CGSize(width: 1100, height: 640), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + [.kernel(state: .installing(detail: "Downloading cpython-3.11.15-macos-aarch64-none (17.9MiB)"))]) { store in
                 AnyView(RootView(store: store))
             },
