@@ -7,7 +7,7 @@ use local_studio_core::{PullRequest, PullRequestDetail};
 
 use crate::app::{App, Target};
 use crate::format;
-use crate::timeline::{diff_stat, markdown_widget};
+use crate::timeline::diff_stat;
 
 pub struct PullDetail {
     pub root: gtk::ScrolledWindow,
@@ -110,9 +110,8 @@ impl PullDetail {
             empty.add_css_class("dim-label");
             empty.set_xalign(0.0);
             body.append(&empty);
-        }
-        for block in format::markdown(&detail.body) {
-            body.append(&markdown_widget(block));
+        } else {
+            body.append(&crate::markdown::view(&detail.body));
         }
         column.append(&body);
         if !detail.files.is_empty() {

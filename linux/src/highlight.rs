@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
@@ -10,7 +9,6 @@ use gtk::{gio, glib};
 use local_studio_core::{CodeSegment, SyntaxKind};
 
 use crate::colors::Syntax;
-use crate::format;
 
 const ASYNC_BYTES: usize = 2 * 1024;
 const CACHE_LIMIT: usize = 256;
@@ -80,25 +78,6 @@ pub fn color(kind: SyntaxKind, syntax: &Syntax) -> &'static str {
 
 fn tag_name(kind: SyntaxKind) -> String {
     format!("syntax-{kind:?}")
-}
-
-pub fn markup(segments: &[CodeSegment], syntax: &Syntax) -> String {
-    let mut out = String::new();
-    for segment in segments {
-        let style = if segment.kind == SyntaxKind::Comment { " style=\"italic\"" } else { "" };
-        write!(
-            out,
-            "<span foreground=\"{}\"{style}>{}</span>",
-            color(segment.kind, syntax),
-            format::escape(&segment.text)
-        )
-        .ok();
-    }
-    out
-}
-
-pub fn plain(text: &str, syntax: &Syntax) -> String {
-    format!("<span foreground=\"{}\">{}</span>", syntax.default, format::escape(text))
 }
 
 pub fn segments(
@@ -237,4 +216,20 @@ pub fn fill(buffer: &gtk::TextBuffer, segments: &[CodeSegment]) {
     ensure_tags(buffer);
     buffer.set_text("");
     insert(buffer, segments, None);
+}
+
+pub fn paint_plain(buffer: &gtk::TextBuffer, start: i32, end: i32) {
+    buffer.apply_tag_by_name(&tag_name(SyntaxKind::Plain), &buffer.iter_at_offset(start), &buffer.iter_at_offset(end));
+}
+
+pub fn paint_segments(buffer: &gtk::TextBuffer, start: i32, segments: &[CodeSegment]) {
+    let mut offset = start;
+    for segment in segments {
+        let end = offset + i32::try_from(segment.text.chars().count()).unwrap_or(0);
+        if segment.kind != SyntaxKind::Plain {
+            let name = tag_name(segment.kind);
+            buffer.apply_tag_by_name(&name, &buffer.iter_at_offset(offset), &buffer.iter_at_offset(end));
+        }
+        offset = end;
+    }
 }

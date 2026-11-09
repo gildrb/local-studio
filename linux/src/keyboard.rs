@@ -144,8 +144,9 @@ fn install_panel_escape(app: &Rc<App>) {
         if key != gdk::Key::Escape || !plain(modifiers) {
             return glib::Propagation::Proceed;
         }
-        let editing = gtk::prelude::GtkWindowExt::focus(&app.window)
-            .is_some_and(|widget| widget.is::<gtk::Text>() || widget.is::<gtk::TextView>());
+        let editing = gtk::prelude::GtkWindowExt::focus(&app.window).is_some_and(|widget| {
+            widget.is::<gtk::Text>() || (widget.is::<gtk::TextView>() && !widget.has_css_class("ls-markdown"))
+        });
         if editing {
             return glib::Propagation::Proceed;
         }

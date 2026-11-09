@@ -188,18 +188,33 @@ pub fn function_key(key: &str) -> bool {
         .is_some_and(|number| !number.is_empty() && number.chars().all(|ch| ch.is_ascii_digit()))
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub struct Style {
+    pub bold: bool,
+    pub italic: bool,
+    pub code: bool,
+}
+
+pub struct Span {
+    pub text: String,
+    pub style: Style,
+    pub link: Option<String>,
+}
+
 pub enum Markdown {
-    Paragraph(String),
-    Heading(u8, String),
-    Bullet(String, String),
-    Quote(String),
+    Paragraph(Vec<Span>),
+    Heading(u8, Vec<Span>),
+    Bullet(usize, String, Vec<Span>),
+    Quote(Vec<Span>),
     Code(Option<String>, String),
+    Table(Vec<Vec<Vec<Span>>>),
     Rule,
 }
 
 pub fn markdown(text: &str) -> Vec<Markdown> {
     let mut blocks = Vec::new();
     let mut paragraph: Vec<&str> = Vec::new();
+    let mut table: Vec<Vec<Vec<Span>>> = Vec::new();
     let mut code: Option<(Option<String>, Vec<&str>)> = None;
     for line in text.lines() {
         let trimmed = line.trim_start();
@@ -212,6 +227,10 @@ pub fn markdown(text: &str) -> Vec<Markdown> {
             }
             continue;
         }
+        let cells = row(trimmed.trim_end());
+        if cells.is_none() && !table.is_empty() {
+            blocks.push(Markdown::Table(std::mem::take(&mut table)));
+        }
         if let Some(fence) = trimmed.strip_prefix("```") {
             flush(&mut paragraph, &mut blocks);
             let language = Some(fence.trim().to_string()).filter(|language| !language.is_empty());
@@ -220,6 +239,13 @@ pub fn markdown(text: &str) -> Vec<Markdown> {
         }
         if trimmed.is_empty() {
             flush(&mut paragraph, &mut blocks);
+            continue;
+        }
+        if let Some(cells) = cells {
+            flush(&mut paragraph, &mut blocks);
+            if !divider(&cells) {
+                table.push(cells.into_iter().map(inline).collect());
+            }
             continue;
         }
         if let Some((level, heading)) = heading(trimmed) {
@@ -234,7 +260,9 @@ pub fn markdown(text: &str) -> Vec<Markdown> {
         }
         if let Some((marker, item)) = bullet(trimmed) {
             flush(&mut paragraph, &mut blocks);
-            blocks.push(Markdown::Bullet(marker, inline(item)));
+            let indent: usize =
+                line[..line.len() - trimmed.len()].chars().map(|ch| if ch == '\t' { 4 } else { 1 }).sum();
+            blocks.push(Markdown::Bullet((indent / 2).min(3), marker, inline(item)));
             continue;
         }
         if let Some(quote) = trimmed.strip_prefix('>') {
@@ -247,6 +275,9 @@ pub fn markdown(text: &str) -> Vec<Markdown> {
     if let Some((language, lines)) = code {
         blocks.push(Markdown::Code(language, lines.join("\n")));
     }
+    if !table.is_empty() {
+        blocks.push(Markdown::Table(table));
+    }
     flush(&mut paragraph, &mut blocks);
     blocks
 }
@@ -256,6 +287,19 @@ fn flush(paragraph: &mut Vec<&str>, blocks: &mut Vec<Markdown>) {
         blocks.push(Markdown::Paragraph(inline(&paragraph.join(" "))));
         paragraph.clear();
     }
+}
+
+fn row(line: &str) -> Option<Vec<&str>> {
+    let inner = line.strip_prefix('|')?;
+    let inner = inner.strip_suffix('|').unwrap_or(inner);
+    Some(inner.split('|').map(str::trim).collect())
+}
+
+fn divider(cells: &[&str]) -> bool {
+    cells.iter().all(|cell| {
+        let dashes = cell.trim_matches(':');
+        !dashes.is_empty() && dashes.chars().all(|ch| ch == '-')
+    })
 }
 
 fn heading(line: &str) -> Option<(u8, &str)> {
@@ -283,15 +327,20 @@ fn bullet(line: &str) -> Option<(String, &str)> {
     None
 }
 
-pub fn inline(text: &str) -> String {
-    let mut out = String::new();
+fn inline(text: &str) -> Vec<Span> {
+    let mut spans = Vec::new();
+    push_inline(text, Style::default(), None, &mut spans);
+    spans
+}
+
+fn push_inline(text: &str, style: Style, link: Option<&str>, spans: &mut Vec<Span>) {
+    let mut plain = String::new();
     let mut rest = text;
     while let Some(ch) = rest.chars().next() {
         if let Some(after) = rest.strip_prefix('`') {
             if let Some(end) = after.find('`') {
-                out.push_str("<span font_family=\"monospace\">");
-                out.push_str(&escape(&after[..end]));
-                out.push_str("</span>");
+                push_span(spans, &std::mem::take(&mut plain), style, link);
+                push_span(spans, &after[..end], Style { code: true, ..style }, link);
                 rest = &after[end + 1..];
                 continue;
             }
@@ -299,20 +348,16 @@ pub fn inline(text: &str) -> String {
         if let Some(after) = rest.strip_prefix("**").or_else(|| rest.strip_prefix("__")) {
             let marker = &rest[..2];
             if let Some(end) = after.find(marker).filter(|end| *end > 0) {
-                out.push_str("<b>");
-                out.push_str(&inline(&after[..end]));
-                out.push_str("</b>");
+                push_span(spans, &std::mem::take(&mut plain), style, link);
+                push_inline(&after[..end], Style { bold: true, ..style }, link, spans);
                 rest = &after[end + 2..];
                 continue;
             }
         }
         if let Some(after) = rest.strip_prefix('[') {
-            if let Some((label, url, consumed)) = link(after) {
-                out.push_str("<a href=\"");
-                out.push_str(&escape(url));
-                out.push_str("\">");
-                out.push_str(&inline(label));
-                out.push_str("</a>");
+            if let Some((label, url, consumed)) = self::link(after) {
+                push_span(spans, &std::mem::take(&mut plain), style, link);
+                push_inline(label, style, Some(url), spans);
                 rest = &after[consumed..];
                 continue;
             }
@@ -323,19 +368,29 @@ pub fn inline(text: &str) -> String {
                 if let Some(end) = after.find(ch).filter(|end| *end > 0) {
                     let boundary = after[end + 1..].chars().next().is_none_or(|next| !next.is_alphanumeric());
                     if boundary && !after[..end].ends_with(' ') {
-                        out.push_str("<i>");
-                        out.push_str(&inline(&after[..end]));
-                        out.push_str("</i>");
+                        push_span(spans, &std::mem::take(&mut plain), style, link);
+                        push_inline(&after[..end], Style { italic: true, ..style }, link, spans);
                         rest = &after[end + 1..];
                         continue;
                     }
                 }
             }
         }
-        out.push_str(&escape(&rest[..ch.len_utf8()]));
+        plain.push(ch);
         rest = &rest[ch.len_utf8()..];
     }
-    out
+    push_span(spans, &plain, style, link);
+}
+
+fn push_span(spans: &mut Vec<Span>, text: &str, style: Style, link: Option<&str>) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some(last) = spans.last_mut().filter(|last| last.style == style && last.link.as_deref() == link) {
+        last.text.push_str(text);
+        return;
+    }
+    spans.push(Span { text: text.to_string(), style, link: link.map(str::to_string) });
 }
 
 fn link(after: &str) -> Option<(&str, &str, usize)> {

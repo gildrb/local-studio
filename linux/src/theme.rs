@@ -45,6 +45,7 @@ window, dialog { font-size: 13px; }
 .ls-row-actions button { min-height: 22px; min-width: 22px; padding: 0 4px; }
 .ls-assistant label { font-size: 13.5px; }
 .ls-assistant .heading { font-weight: 700; }
+.ls-markdown, .ls-markdown > text { background: transparent; font-size: 13.5px; }
 .ls-code { background: alpha(currentColor, 0.05); border: 1px solid var(--border-color); border-radius: 8px; padding: 8px 10px; }
 .ls-code label, .ls-mono { font-family: monospace; font-size: 12px; }
 .ls-tool { border-radius: 8px; padding: 2px 6px; min-height: 24px; }
@@ -271,6 +272,21 @@ thread_local! {
 
 pub fn on_colors(listener: impl Fn(&crate::colors::Colors) + 'static) {
     LISTENERS.with(|listeners| listeners.borrow_mut().push(Box::new(listener)));
+}
+
+pub fn code_font() -> String {
+    let size = SETTINGS.with(|last| last.borrow().as_ref().map_or(12, |settings| settings.code_font_size.clamp(9, 24)));
+    format!("{} {size}px", code_family())
+}
+
+pub fn code_family() -> String {
+    SETTINGS.with(|last| {
+        last.borrow()
+            .as_ref()
+            .map(|settings| settings.code_font.trim().replace(['"', ';', '{', '}', ','], ""))
+            .filter(|family| !family.is_empty())
+            .unwrap_or_else(|| "monospace".to_string())
+    })
 }
 
 pub fn preview(theme: &crate::themes::Theme) {

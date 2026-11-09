@@ -25,6 +25,7 @@ mod header;
 mod highlight;
 mod images;
 mod keyboard;
+mod markdown;
 mod numbers;
 mod options;
 mod pages;

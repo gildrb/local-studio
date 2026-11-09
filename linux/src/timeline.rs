@@ -7,7 +7,8 @@ use gtk::{gio, glib};
 use local_studio_core::{Block, FileChange, Item, ItemKind, TranscriptOp};
 
 use crate::app::App;
-use crate::format::{self, Markdown};
+use crate::format;
+use crate::markdown::Views;
 
 const THINKING_KEY: u64 = 1 << 63;
 const DETAIL_LIMIT: usize = 6_000;
@@ -26,6 +27,7 @@ pub struct Timeline {
     width: Rc<Cell<i32>>,
     cursor: Rc<Cell<Option<u64>>>,
     ring: Rc<Cell<bool>>,
+    views: Rc<RefCell<Views>>,
 }
 
 impl Timeline {
@@ -62,6 +64,8 @@ impl Timeline {
         let cursor: Rc<Cell<Option<u64>>> = Rc::default();
         let ring: Rc<Cell<bool>> = Rc::default();
         let (bind_cursor, bind_ring) = (Rc::clone(&cursor), Rc::clone(&ring));
+        let views: Rc<RefCell<Views>> = Rc::default();
+        let bind_views = Rc::clone(&views);
         let keyboard = app.clone();
         factory.connect_bind(move |_, object| {
             let Some(item) = object.downcast_ref::<gtk::ListItem>() else { return };
@@ -69,7 +73,7 @@ impl Timeline {
             let Some(entry) = item.item().and_downcast::<glib::BoxedAnyObject>() else { return };
             let entry = entry.borrow::<Item>();
             clamp.set_maximum_size(bind_width.get());
-            let widget = item_widget(&app, &entry, &bind_expanded.borrow());
+            let widget = item_widget(&app, &entry, &bind_expanded.borrow(), &bind_views);
             if bind_ring.get() && bind_cursor.get() == Some(entry.id) {
                 widget.add_css_class("ls-focus-ring");
             }
@@ -139,6 +143,7 @@ impl Timeline {
             width,
             cursor,
             ring,
+            views,
         }
     }
 
@@ -249,6 +254,7 @@ impl Timeline {
         self.expanded.borrow_mut().clear();
         self.follow.set(true);
         self.cursor.set(None);
+        self.views.borrow_mut().clear();
     }
 
     pub fn focus_list(&self, window: &adw::ApplicationWindow) {
@@ -433,13 +439,13 @@ impl Timeline {
     }
 }
 
-fn item_widget(app: &Weak<App>, item: &Item, expanded: &HashSet<u64>) -> gtk::Widget {
+fn item_widget(app: &Weak<App>, item: &Item, expanded: &HashSet<u64>, views: &RefCell<Views>) -> gtk::Widget {
     let widget: gtk::Widget = match &item.kind {
         ItemKind::User { text, images, entry, thumbnails } => {
             user_widget(app, text, *images, entry.as_deref(), thumbnails)
         }
         ItemKind::Assistant { blocks, streaming, error, changed_files } => {
-            assistant_widget(app, item.id, blocks, *streaming, error.as_deref(), changed_files, expanded)
+            assistant_widget(app, item.id, blocks, *streaming, error.as_deref(), changed_files, expanded, views)
         }
         ItemKind::Tool { name, kind, summary, arguments, state, output, file_change, started_at, ended_at, .. } => {
             let title = if summary.is_empty() { name.as_str() } else { summary.as_str() };
@@ -597,6 +603,7 @@ fn user_widget(
     column.upcast()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assistant_widget(
     app: &Weak<App>,
     id: u64,
@@ -605,11 +612,12 @@ fn assistant_widget(
     error: Option<&str>,
     changed_files: &[FileChange],
     expanded: &HashSet<u64>,
+    views: &RefCell<Views>,
 ) -> gtk::Widget {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 8);
     column.add_css_class("ls-assistant");
     let mut has_text = false;
-    for block in blocks {
+    for (index, block) in blocks.iter().enumerate() {
         match block {
             Block::Thinking { text } => {
                 if text.trim().is_empty() {
@@ -638,9 +646,10 @@ fn assistant_widget(
                     continue;
                 }
                 has_text = true;
-                for block in format::markdown(text) {
-                    column.append(&markdown_widget(block));
-                }
+                let view = views
+                    .try_borrow_mut()
+                    .map_or_else(|_| crate::markdown::view(text), |mut views| views.view((id, index), text));
+                column.append(&view);
             }
         }
     }
@@ -658,69 +667,6 @@ fn assistant_widget(
         column.append(&changed_files_card(changed_files));
     }
     column.upcast()
-}
-
-pub fn markdown_widget(block: Markdown) -> gtk::Widget {
-    match block {
-        Markdown::Paragraph(markup) => wrapped_label(&markup).upcast(),
-        Markdown::Heading(level, markup) => {
-            let label = wrapped_label(&markup);
-            label.add_css_class("heading");
-            if level <= 2 {
-                label.add_css_class("title-4");
-            }
-            label.upcast()
-        }
-        Markdown::Bullet(marker, markup) => {
-            let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            row.set_margin_start(6);
-            let marker = gtk::Label::new(Some(&marker));
-            marker.set_valign(gtk::Align::Start);
-            marker.add_css_class("dim-label");
-            row.append(&marker);
-            row.append(&wrapped_label(&markup));
-            row.upcast()
-        }
-        Markdown::Quote(markup) => {
-            let label = wrapped_label(&markup);
-            label.add_css_class("dim-label");
-            label.set_margin_start(12);
-            label.upcast()
-        }
-        Markdown::Code(language, code) => {
-            let frame = gtk::Box::new(gtk::Orientation::Vertical, 4);
-            frame.add_css_class("ls-code");
-            if let Some(language) = &language {
-                let label = gtk::Label::new(Some(language.as_str()));
-                label.add_css_class("ls-meta");
-                label.set_xalign(0.0);
-                frame.append(&label);
-            }
-            let label = gtk::Label::new(None);
-            let syntax = crate::colors::current().syntax;
-            let weak = label.downgrade();
-            let ready = move |segments: crate::highlight::Segments| {
-                if let Some(label) = weak.upgrade() {
-                    label.set_markup(&crate::highlight::markup(&segments, &crate::colors::current().syntax));
-                }
-            };
-            match crate::highlight::segments(&code, language.as_deref(), None, ready) {
-                Some(segments) => label.set_markup(&crate::highlight::markup(&segments, &syntax)),
-                None => label.set_markup(&crate::highlight::plain(&code, &syntax)),
-            }
-            label.set_xalign(0.0);
-            label.set_selectable(true);
-            label.add_css_class("ls-mono");
-            let scroller = gtk::ScrolledWindow::builder()
-                .vscrollbar_policy(gtk::PolicyType::Never)
-                .propagate_natural_height(true)
-                .child(&label)
-                .build();
-            frame.append(&scroller);
-            frame.upcast()
-        }
-        Markdown::Rule => gtk::Separator::new(gtk::Orientation::Horizontal).upcast(),
-    }
 }
 
 fn changed_files_card(files: &[FileChange]) -> gtk::Widget {

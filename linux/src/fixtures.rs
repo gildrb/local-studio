@@ -24,7 +24,7 @@ pub fn scenes() -> Vec<&'static str> {
     all
 }
 
-pub const SCENES: [&str; 58] = [
+pub const SCENES: [&str; 59] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -83,6 +83,7 @@ pub const SCENES: [&str; 58] = [
     "53-theme-gildrb-light",
     "54-gildrb-file-preview-light",
     "55-gildrb-diff-split",
+    "58-markdown",
 ];
 
 pub const FOCUSED: &str = "t-sidebar";
