@@ -144,7 +144,6 @@ impl App {
             let sidebar = Sidebar::new(weak.clone());
             let editors = Editors::detect();
             let header = Header::build(&editors.menu());
-            crate::flows::new_thread_in_on_shift(weak, header.new_thread());
             let timeline = Timeline::new(weak.clone());
             let composer = Composer::new(weak.clone());
             let panel = Panel::new(weak.clone());

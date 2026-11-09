@@ -6,7 +6,6 @@ use crate::state::{Page, State};
 pub struct Header {
     pub bar: adw::HeaderBar,
     toggle: gtk::ToggleButton,
-    new_thread: gtk::Button,
     back: gtk::Button,
     crumb: gtk::MenuButton,
     project: gtk::Label,
@@ -31,13 +30,7 @@ impl Header {
             .icon_name("sidebar-show-symbolic")
             .tooltip_text("Toggle Sidebar (Ctrl+B)")
             .build();
-        let new_thread = gtk::Button::builder()
-            .icon_name("list-add-symbolic")
-            .tooltip_text("New Thread (Ctrl+N)")
-            .action_name("win.new-thread")
-            .build();
         bar.pack_start(&toggle);
-        bar.pack_start(&new_thread);
         let back = gtk::Button::builder()
             .icon_name("go-previous-symbolic")
             .tooltip_text("Back to Threads")
@@ -120,7 +113,6 @@ impl Header {
         Self {
             bar,
             toggle,
-            new_thread,
             back,
             crumb,
             project,
@@ -143,15 +135,17 @@ impl Header {
         self.badge.set_label(&running.to_string());
     }
 
-    pub fn new_thread(&self) -> &gtk::Button {
-        &self.new_thread
-    }
-
     pub fn bind_split(&self, split: &adw::OverlaySplitView) {
         split.bind_property("show-sidebar", &self.toggle, "active").bidirectional().sync_create().build();
-        for widget in [self.toggle.upcast_ref::<gtk::Widget>(), self.new_thread.upcast_ref()] {
-            split.bind_property("show-sidebar", widget, "visible").invert_boolean().sync_create().build();
-        }
+        split.bind_property("show-sidebar", &self.toggle, "visible").invert_boolean().sync_create().build();
+        let title = self.bar.title_widget();
+        let gap = move |split: &adw::OverlaySplitView| {
+            if let Some(title) = &title {
+                title.set_margin_start(if split.shows_sidebar() { 0 } else { 22 });
+            }
+        };
+        gap(split);
+        split.connect_show_sidebar_notify(gap);
     }
 
     fn render_scripts(&self, state: &State, project: Option<&str>, workspace: bool) {
