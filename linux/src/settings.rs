@@ -41,11 +41,8 @@ impl SettingsDialog {
         let state = app.state.borrow();
         let general = general_page(&weak, &state);
         let diagnostics = group(&general, "Diagnostics");
-        let kernel_button = gtk::Button::builder()
-            .action_name("win.install-kernel")
-            .valign(gtk::Align::Center)
-            .visible(false)
-            .build();
+        let kernel_button =
+            gtk::Button::builder().action_name("win.install-kernel").valign(gtk::Align::Center).visible(false).build();
         let kernel = adw::ActionRow::builder().title("Python kernel").subtitle_selectable(true).build();
         kernel.add_suffix(&kernel_button);
         diagnostics.add(&kernel);

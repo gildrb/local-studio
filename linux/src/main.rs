@@ -68,14 +68,14 @@ use gtk::{gio, glib};
 
 use crate::app::App;
 
-const USAGE: &str =
-    "usage: local-studio [--smoke | --smoke-kernel [install|installed] | --smoke-providers | --snapshot <dir> [name-filter]]";
+const USAGE: &str = "usage: local-studio [--smoke | --smoke-kernel [install|installed|offline] | --smoke-providers | --snapshot <dir> [name-filter]]";
 
 #[derive(Clone)]
 enum Mode {
     App,
     Smoke,
     SmokeKernel(bool),
+    SmokeKernelOffline,
     SmokeProviders,
     Snapshot(PathBuf, Option<String>),
 }
@@ -88,6 +88,7 @@ fn parse() -> Result<Mode, String> {
         Some("--smoke-kernel") => match args.next().as_deref() {
             None | Some("install") => Ok(Mode::SmokeKernel(true)),
             Some("installed") => Ok(Mode::SmokeKernel(false)),
+            Some("offline") => Ok(Mode::SmokeKernelOffline),
             Some(other) => Err(format!("unknown kernel expectation {other}\n{USAGE}")),
         },
         Some("--smoke-providers") => Ok(Mode::SmokeProviders),
@@ -109,7 +110,7 @@ fn main() -> glib::ExitCode {
     };
     let flags = match mode {
         Mode::App => gio::ApplicationFlags::default(),
-        Mode::Smoke | Mode::SmokeKernel(_) | Mode::SmokeProviders | Mode::Snapshot(..) => {
+        Mode::Smoke | Mode::SmokeKernel(_) | Mode::SmokeKernelOffline | Mode::SmokeProviders | Mode::Snapshot(..) => {
             gio::ApplicationFlags::NON_UNIQUE
         }
     };
@@ -138,6 +139,11 @@ fn main() -> glib::ExitCode {
             }
             Mode::SmokeKernel(expect_install) => {
                 smoke::start_kernel(&app, Rc::clone(&status), *expect_install);
+                app.start_core();
+                app.window.present();
+            }
+            Mode::SmokeKernelOffline => {
+                smoke::start_kernel_offline(&app, Rc::clone(&status));
                 app.start_core();
                 app.window.present();
             }
