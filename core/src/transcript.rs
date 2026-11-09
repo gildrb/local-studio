@@ -87,7 +87,7 @@ impl Transcript {
                     if custom.display {
                         let (text, _) = user_parts(&custom.content);
                         if !text.trim().is_empty() {
-                            self.push(ItemKind::Notice { level: NoticeLevel::Info, text }, None);
+                            self.push(ItemKind::Notice { level: custom_level(custom), text }, None);
                         }
                     }
                 }
@@ -280,7 +280,7 @@ impl Transcript {
                 if text.trim().is_empty() {
                     Vec::new()
                 } else {
-                    vec![self.push(ItemKind::Notice { level: NoticeLevel::Info, text }, None)]
+                    vec![self.push(ItemKind::Notice { level: custom_level(custom), text }, None)]
                 }
             }
             AgentMessage::Custom(_)
@@ -742,6 +742,14 @@ fn truncate(text: &str, limit: usize) -> String {
     let mut cut: String = text.chars().take(limit).collect();
     cut.push('…');
     cut
+}
+
+fn custom_level(custom: &eukhe_types::session::CustomMessage) -> NoticeLevel {
+    if custom.custom_type == "kernel_unavailable" {
+        NoticeLevel::Warning
+    } else {
+        NoticeLevel::Info
+    }
 }
 
 fn ordered_for_display(messages: &[AgentMessage]) -> Vec<AgentMessage> {
