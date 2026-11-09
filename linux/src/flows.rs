@@ -12,9 +12,10 @@ type AppAction = fn(&Rc<App>);
 type StringAction = fn(&Rc<App>, String);
 
 pub fn install(app: &Rc<App>) {
-    let plain: [(&str, AppAction); 3] = [
+    let plain: [(&str, AppAction); 4] = [
         ("clone-project", clone_project),
         ("provider-settings", |app| app.open_settings(Some("providers"))),
+        ("install-kernel", |app| app.core.run(local_studio_core::Studio::install_kernel)),
         ("cleanup-worktrees", |app| {
             let request = app.core.request();
             app.toast("Cleaning up worktrees…");

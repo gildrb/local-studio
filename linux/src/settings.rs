@@ -3,9 +3,9 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use local_studio_core::{
-    ChatWidth, ColorScheme, DiffColors, DiffLayout, FollowUpBehavior, LinkTarget, MergeMethod, ModelOption,
-    NewThreadWorkspace, NotificationMode, QuitConfirmation, ResponseStreaming, SendShortcut, Settings, TimeFormat,
-    WritingStyle,
+    ChatWidth, ColorScheme, DiffColors, DiffLayout, FollowUpBehavior, KernelState, LinkTarget, MergeMethod,
+    ModelOption, NewThreadWorkspace, NotificationMode, QuitConfirmation, ResponseStreaming, SendShortcut, Settings,
+    TimeFormat, WritingStyle,
 };
 
 use crate::app::App;
@@ -29,6 +29,8 @@ struct Inner {
     archive_page: adw::PreferencesPage,
     archive: RefCell<Vec<adw::PreferencesGroup>>,
     fleet: crate::fleet::Fleet,
+    kernel: adw::ActionRow,
+    kernel_button: gtk::Button,
 }
 
 impl SettingsDialog {
@@ -37,7 +39,17 @@ impl SettingsDialog {
         dialog.set_search_enabled(true);
         let weak = Rc::downgrade(app);
         let state = app.state.borrow();
-        dialog.add(&general_page(&weak, &state));
+        let general = general_page(&weak, &state);
+        let diagnostics = group(&general, "Diagnostics");
+        let kernel_button = gtk::Button::builder()
+            .action_name("win.install-kernel")
+            .valign(gtk::Align::Center)
+            .visible(false)
+            .build();
+        let kernel = adw::ActionRow::builder().title("Python kernel").subtitle_selectable(true).build();
+        kernel.add_suffix(&kernel_button);
+        diagnostics.add(&kernel);
+        dialog.add(&general);
         dialog.add(&appearance_page(&weak));
         let keys_page = page("keybindings", "Keybindings", "input-keyboard-symbolic");
         dialog.add(&keys_page);
@@ -62,6 +74,8 @@ impl SettingsDialog {
                 archive_page,
                 archive: RefCell::new(Vec::new()),
                 fleet,
+                kernel,
+                kernel_button,
             }),
         };
         settings.refresh(app);
@@ -96,6 +110,25 @@ impl SettingsDialog {
         self.refresh_providers(&weak, &state);
         self.refresh_keys(&weak, &state);
         self.refresh_archive(&state);
+        self.refresh_kernel(&state);
+    }
+
+    fn refresh_kernel(&self, state: &State) {
+        let (subtitle, button) = match &state.kernel {
+            Some(KernelState::Installed { python }) => (format!("Installed · {python}"), None),
+            Some(KernelState::Installing { detail }) => {
+                (format!("Installing… {}", detail.as_deref().unwrap_or_default()), None)
+            }
+            Some(KernelState::Missing) => ("Not installed".to_string(), Some("Install")),
+            Some(KernelState::Failed { message }) => (format!("Install failed: {message}"), Some("Retry")),
+            Some(KernelState::Unavailable { reason }) => (reason.clone(), Some("Retry")),
+            Some(KernelState::Checking) | None => ("Checking…".to_string(), None),
+        };
+        self.inner.kernel.set_subtitle(&format::escape(subtitle.trim()));
+        self.inner.kernel_button.set_visible(button.is_some());
+        if let Some(label) = button {
+            self.inner.kernel_button.set_label(label);
+        }
     }
 
     fn refresh_providers(&self, app: &Weak<App>, state: &State) {

@@ -8,6 +8,8 @@ import Observation
 final class StudioStore {
     private(set) var connection: Connection = .connecting
     private(set) var notice: StudioNotice?
+    private(set) var kernel: KernelState?
+    var kernelNoticeHidden = false
 
     let inbox: InboxStore
     let conversation: ConversationStore
@@ -89,6 +91,11 @@ final class StudioStore {
 
     func dismissNotice() {
         notice = nil
+    }
+
+    func installKernel() {
+        kernelNoticeHidden = false
+        core.run { $0.installKernel() }
     }
 
     func receive(_ updates: [Update]) {
@@ -208,6 +215,11 @@ final class StudioStore {
             conversation.setWorktreeSetup(thread: thread, stages: stages, done: done, error: error)
         case .daemon(let socket, let version, let pid):
             pages.setDaemon(socket: socket, version: version, pid: pid)
+        case .kernel(let state):
+            if !state.installing || kernel?.installing != true {
+                kernelNoticeHidden = false
+            }
+            kernel = state
         case .requestDone(let request, let message):
             requests.complete(request, .done(message))
         case .requestFailed(let request, let message):

@@ -12,6 +12,18 @@ extension SnapshotCatalog {
                 view: { store in AnyView(SettingsView(store: store, pane: .general, query: "diff")) }
             ),
             SnapshotEntry(
+                name: "pages-settings-kernel-installed",
+                size: settingsSize,
+                updates: PagesFixtures.base + [.kernel(state: .installed(python: "/Users/demo/.eukhe/kernel-venv/bin/python"))],
+                view: { store in AnyView(SettingsView(store: store, pane: .general, query: "python")) }
+            ),
+            SnapshotEntry(
+                name: "pages-settings-kernel-failed",
+                size: settingsSize,
+                updates: PagesFixtures.base + [.kernel(state: .failed(message: "uv is required to set up the Python kernel; install it with your package manager (`brew install uv`)"))],
+                view: { store in AnyView(SettingsView(store: store, pane: .general, query: "python")) }
+            ),
+            SnapshotEntry(
                 name: "pages-settings-loading",
                 size: settingsSize,
                 updates: [],

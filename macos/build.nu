@@ -53,6 +53,52 @@ def find-daemon [repo: path]: nothing -> any {
     | get 0?
 }
 
+def eukhe-root [daemon: path]: nothing -> any {
+    mut dir = ($daemon | path dirname)
+    loop {
+        if ($dir | path join "eukhe-runtime" "pyproject.toml" | path exists) {
+            return $dir
+        }
+        let parent = ($dir | path dirname)
+        if $parent == $dir {
+            return null
+        }
+        $dir = $parent
+    }
+}
+
+def sign-helper [source: path, target: path] {
+    cp $source $target
+    ^/usr/bin/codesign --force --sign - --timestamp=none $target
+}
+
+def bundle-eukhe [daemon: path, contents: path] {
+    let macos = ($contents | path join "MacOS")
+    sign-helper $daemon ($macos | path join "eukhe-daemon")
+    let cli = ($daemon | path dirname | path join "eukhe")
+    if ($cli | path exists) {
+        sign-helper $cli ($macos | path join "eukhe")
+    } else {
+        print -e $"warning: no eukhe beside ($daemon); the app cannot install the Python kernel"
+    }
+    let root = (eukhe-root $daemon)
+    if $root == null {
+        print -e $"warning: no eukhe-runtime found above ($daemon); the Python kernel cannot be installed"
+        return
+    }
+    let payload = ($contents | path join "Resources" "eukhe")
+    mkdir $payload
+    let excluded = [test uv.lock .venv __pycache__ .pytest_cache .ruff_cache .mypy_cache .git .DS_Store node_modules "*.pyc" "*.egg-info"]
+    let excludes = ($excluded | each { |name| $"--exclude=($name)" })
+    for sidecar in ["eukhe-runtime" "skills"] {
+        let source = ($root | path join $sidecar)
+        if ($source | path exists) {
+            ^rsync -a ...$excludes $"($source)/" $"($payload | path join $sidecar)/"
+            ^ln -s $"../Resources/eukhe/($sidecar)" ($macos | path join $sidecar)
+        }
+    }
+}
+
 def bundle-controller [repo: path, target: path] {
     let source = ($repo | path join "controller")
     if not ($source | path join "src" "main.ts" | path exists) {
@@ -103,9 +149,7 @@ def main [
         if $daemon == null {
             print -e "warning: no eukhe-daemon found (set EUKHE_DAEMON); the app will only attach to a running daemon"
         } else {
-            let helper = ($contents | path join "MacOS" "eukhe-daemon")
-            cp $daemon $helper
-            ^/usr/bin/codesign --force --sign - --timestamp=none $helper
+            bundle-eukhe $daemon $contents
         }
         ^/usr/bin/codesign --force --sign - --timestamp=none $app
         match $action {

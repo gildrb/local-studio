@@ -39,10 +39,13 @@ struct RootView: View {
             PanelToggles(store: store)
         }
         .overlay(alignment: .top) {
-            if let notice = store.notice {
-                ToastView(notice: notice) { store.dismissNotice() }
-                    .padding(.top, Theme.Metrics.titlebarHeight + 6)
+            VStack(spacing: 8) {
+                if let notice = store.notice {
+                    ToastView(notice: notice) { store.dismissNotice() }
+                }
+                KernelNotice(store: store)
             }
+            .padding(.top, Theme.Metrics.titlebarHeight + 6)
         }
         .overlay(alignment: .top) {
             if let page = shell.palette {

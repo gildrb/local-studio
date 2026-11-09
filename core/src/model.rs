@@ -1,5 +1,5 @@
 use crate::workspace::model::{
-    Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, Keybinding, LocalDashboard, LocalEngine,
+    Branch, Device, FileContent, FileDiff, FileEntry, GitStatus, KernelState, Keybinding, LocalDashboard, LocalEngine,
     LocalSnapshot, ProjectScript, ProjectSettings, ProviderModel, ProviderStatus, PullRequest, PullRequestDetail,
     SearchHit, Settings, SetupStage, TerminalFrame, UsageReport,
 };
@@ -451,6 +451,7 @@ pub enum Update {
     ProjectSettings { project: String, settings: ProjectSettings, effective: Settings },
     WorktreeSetup { thread: String, stages: Vec<SetupStage>, done: bool, error: Option<String> },
     Daemon { socket: String, version: Option<String>, pid: Option<u32> },
+    Kernel { state: KernelState },
     RequestDone { request: String, message: String },
     RequestFailed { request: String, message: String },
     Notice { level: NoticeLevel, text: String },

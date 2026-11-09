@@ -221,6 +221,7 @@ impl App {
             content_view.add_top_bar(&header.bar);
             content_view.add_top_bar(&banner);
             content_view.add_top_bar(&banners.notice);
+            content_view.add_top_bar(&banners.kernel);
             content_view.add_top_bar(&banners.provider);
             content_view.set_content(Some(&stack));
             split.set_sidebar(Some(&sidebar_overlay));
@@ -601,6 +602,15 @@ impl App {
             }
             Update::Daemon { socket, version, pid } => {
                 self.state.borrow_mut().daemon = Some(crate::state::DaemonInfo { socket, version, pid });
+                dirty.settings = true;
+            }
+            Update::Kernel { state } => {
+                let fresh = {
+                    let previous = self.state.borrow().kernel.clone();
+                    previous.as_ref().map(std::mem::discriminant) != Some(std::mem::discriminant(&state))
+                };
+                self.banners.render_kernel(Some(&state), fresh);
+                self.state.borrow_mut().kernel = Some(state);
                 dirty.settings = true;
             }
             Update::ProviderModels { request, base_url, models } => {

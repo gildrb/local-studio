@@ -58,6 +58,11 @@ private struct GeneralSettingsForm: View {
                         }
                     }
                 }
+                SettingRow(.pythonKernel) {
+                    LabeledContent(SettingKey.pythonKernel.title) {
+                        KernelStatus(store: store)
+                    }
+                }
             }
             SettingsSection(.legacy) {
                 SettingRow(.contextMeter) {

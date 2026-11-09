@@ -218,6 +218,7 @@ impl Harness {
             | Update::ProjectScripts { .. }
             | Update::ProjectSettings { .. }
             | Update::WorktreeSetup { .. }
+            | Update::Kernel { .. }
             | Update::Daemon { .. } => {}
         }
         Ok(())

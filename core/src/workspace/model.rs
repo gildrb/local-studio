@@ -275,6 +275,17 @@ pub struct SetupStage {
     pub output_tail: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum KernelState {
+    Checking,
+    Missing,
+    Installing { detail: Option<String> },
+    Installed { python: String },
+    Failed { message: String },
+    Unavailable { reason: String },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UsageByModel {
