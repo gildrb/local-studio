@@ -153,6 +153,13 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             app.render_pending();
             app.render(crate::app::Dirty { composer: true, ..crate::app::Dirty::default() });
         }
+        "59-kernel-banner" => {
+            conversation(app, false);
+            app.panel.show("diff");
+            app.panel.diff.set_fixture(&crate::fixtures::diff_files_public(), false);
+            let message = "uv could not download Python (network unreachable)".to_string();
+            app.banners.render_kernel(Some(&local_studio_core::KernelState::Failed { message }), true);
+        }
         _ => crate::scenes_providers::stage(app, scene),
     }
 }
@@ -178,6 +185,7 @@ pub fn reset(app: &App) {
     app.split.set_max_sidebar_width(288.0);
     app.banners.notice.set_revealed(false);
     app.banners.provider.set_revealed(false);
+    app.banners.kernel.set_revealed(false);
 }
 
 fn subagents() -> Vec<Subagent> {

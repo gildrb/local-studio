@@ -163,6 +163,7 @@ impl App {
             conversation.add_named(&timeline.root, Some("timeline"));
             conversation.set_vexpand(true);
             let chat = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            chat.append(&banners.kernel);
             chat.append(&conversation);
             chat.append(&composer.root);
             chat.append(&branches.root);
@@ -221,7 +222,6 @@ impl App {
             content_view.add_top_bar(&header.bar);
             content_view.add_top_bar(&banner);
             content_view.add_top_bar(&banners.notice);
-            content_view.add_top_bar(&banners.kernel);
             content_view.add_top_bar(&banners.provider);
             content_view.set_content(Some(&stack));
             split.set_sidebar(Some(&sidebar_overlay));
