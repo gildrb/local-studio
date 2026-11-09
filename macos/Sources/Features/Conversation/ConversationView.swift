@@ -185,7 +185,7 @@ private struct ConversationColumn: View {
                 .padding(.horizontal, 16)
                 .frame(maxWidth: width)
                 .padding(.horizontal, 4)
-                .padding(.bottom, 14)
+                .padding(.bottom, 8)
             }
         }
     }
