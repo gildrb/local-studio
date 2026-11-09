@@ -17,7 +17,7 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selection) {
                 ForEach(visiblePanes) { pane in
                     Label {
@@ -30,7 +30,7 @@ struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .searchable(text: $query, placement: .sidebar, prompt: "Search Settings")
-            .navigationSplitViewColumnWidth(min: 220, ideal: 230, max: 280)
+            .navigationSplitViewColumnWidth(Self.sidebarWidth)
             .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
@@ -149,6 +149,19 @@ struct SettingsView: View {
         travelling = true
         selection = target
     }
+
+    static let sidebarWidth: CGFloat = {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let rows = SettingsPane.allCases.map { ($0.title as NSString).size(withAttributes: [.font: font]).width + SettingsMetrics.rowChrome }
+        let search = ("Search Settings" as NSString).size(withAttributes: [.font: font]).width + SettingsMetrics.searchChrome
+        return ceil(max(rows.max() ?? 0, search) + SettingsMetrics.breathing)
+    }()
+}
+
+private enum SettingsMetrics {
+    static let rowChrome: CGFloat = 64
+    static let searchChrome: CGFloat = 58
+    static let breathing: CGFloat = 20
 }
 
 struct SettingsForm<Content: View>: View {
@@ -221,6 +234,22 @@ private struct SettingsWindowStyle: NSViewRepresentable {
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
             window.styleMask.insert(.fullSizeContentView)
+            Task { @MainActor [weak window] in
+                guard let root = window?.contentView else { return }
+                Self.pinSidebar(in: root)
+            }
+        }
+
+        private static func pinSidebar(in view: NSView) {
+            if let split = view as? NSSplitView, let controller = split.delegate as? NSSplitViewController, let sidebar = controller.splitViewItems.first {
+                let width = SettingsView.sidebarWidth
+                sidebar.canCollapse = false
+                sidebar.minimumThickness = width
+                sidebar.maximumThickness = width
+                split.setPosition(width, ofDividerAt: 0)
+                return
+            }
+            view.subviews.forEach(pinSidebar)
         }
     }
 }
