@@ -488,12 +488,12 @@ private struct ModelRow: View {
                             .foregroundStyle(Theme.secondaryText.opacity(0.8))
                             .accessibilityHidden(true)
                     }
-                    if selected {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Theme.primary)
-                            .accessibilityHidden(true)
-                    }
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Theme.primary)
+                        .frame(width: 12)
+                        .opacity(selected ? 1 : 0)
+                        .accessibilityHidden(true)
                 }
                 .opacity(hidden ? 0.55 : 1)
                 .contentShape(Rectangle())

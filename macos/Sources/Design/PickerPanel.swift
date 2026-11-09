@@ -303,12 +303,12 @@ private struct PickerRowView: View {
                         .font(.system(size: 11.5))
                         .foregroundStyle(Theme.secondaryText)
                 }
-                if row.checked {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(Theme.primary)
-                        .accessibilityHidden(true)
-                }
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(Theme.primary)
+                    .frame(width: 12)
+                    .opacity(row.checked ? 1 : 0)
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, row.subtitle == nil ? 0 : 5)
