@@ -10,7 +10,7 @@ mod kernel;
 mod links;
 mod local;
 pub mod model;
-mod process;
+pub(crate) mod process;
 mod projects;
 mod providers;
 mod settings;
