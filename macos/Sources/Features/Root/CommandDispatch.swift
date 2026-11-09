@@ -4,6 +4,7 @@ import SwiftUI
 
 extension StudioStore {
     private static let focusClauses = ["terminalFocus", "previewFocus", "modelPickerOpen", "usagePageOpen", "timelineFocus"]
+    private static let editChords: Set<String> = ["cmd+c", "cmd+x", "cmd+v", "cmd+a"]
 
     func binding(_ command: String) -> Keybinding? {
         pages.keybindingIndex.binding(command)
@@ -39,7 +40,7 @@ extension StudioStore {
         guard let binding = binding(command), let chord = binding.shortcut else { return nil }
         if Self.isFocusScoped(binding) {
             let collides = pages.keybindingIndex.sharing(chord).contains { $0.command != command && !Self.isFocusScoped($0) }
-            if collides { return nil }
+            if collides || Self.editChords.contains(chord.lowercased()) { return nil }
             if binding.when?.contains("usagePageOpen") == true, shell.route != .usage { return nil }
             if binding.when?.contains("timelineFocus") == true, shell.region != .timeline || shell.route != .thread { return nil }
         } else {
