@@ -94,6 +94,9 @@ fn spawn(launch: &DaemonLaunch, socket: &Path) -> anyhow::Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .process_group(0);
+    if let Some(path) = crate::workspace::process::joined_path() {
+        command.env("PATH", path);
+    }
     let mut child = command.spawn().with_context(|| format!("start the Eukhe daemon {}", launch.program))?;
     std::thread::Builder::new()
         .name("eukhe-daemon-reaper".to_string())
