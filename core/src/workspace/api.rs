@@ -243,4 +243,8 @@ impl Studio {
     pub fn cleanup_worktrees(&self, request: String) {
         self.workspace.cleanup_worktrees(request);
     }
+
+    pub fn install_kernel(&self) {
+        self.workspace.install_kernel();
+    }
 }

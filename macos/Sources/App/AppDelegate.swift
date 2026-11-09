@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panelSmoke: PanelSmoke?
     private var stress: StressHarness?
     private var providersSmoke: ProvidersSmoke?
+    private var kernelSmoke: KernelSmoke?
     private var keys: KeysHarness?
     private var logoLoad: LogoLoad?
 
@@ -51,7 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.terminate(nil)
             return
         }
-        if ["+smoke", "+smoke-conversation", "+smoke-panels", "+smoke-providers"].contains(where: arguments.contains) {
+        if ["+smoke", "+smoke-conversation", "+smoke-panels", "+smoke-providers", "+smoke-kernel"].contains(where: arguments.contains) {
             store.shell.onboardingDismissed = true
         }
         if arguments.contains("+smoke") {
@@ -86,6 +87,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let smoke = ProvidersSmoke(store: store)
             smoke.start()
             providersSmoke = smoke
+        }
+        if let flag = arguments.firstIndex(of: "+smoke-kernel") {
+            let expectation = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : "install"
+            let smoke = KernelSmoke(store: store, expectInstall: expectation != "installed")
+            smoke.start()
+            kernelSmoke = smoke
         }
         if keysFlag {
             let harness = KeysHarness(store: store)
@@ -130,7 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var automated: Bool {
-        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil || stress != nil || keys != nil
+        smoke != nil || shellSmoke != nil || conversationSmoke != nil || panelSmoke != nil || providersSmoke != nil || kernelSmoke != nil || stress != nil || keys != nil
     }
 
     private static func quitShortcutPressed() -> Bool {

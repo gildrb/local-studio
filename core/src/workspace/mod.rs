@@ -6,6 +6,7 @@ mod files;
 mod forge;
 mod git;
 mod history;
+mod kernel;
 mod links;
 mod local;
 pub mod model;
@@ -85,6 +86,7 @@ struct Inner {
     project_adder: Mutex<Option<ProjectAdder>>,
     text: TextGen,
     usage: Arc<Mutex<usage::Ledger>>,
+    kernel: kernel::Kernel,
 }
 
 #[derive(Clone)]
@@ -146,6 +148,7 @@ impl Workspace {
             project_adder: Mutex::new(None),
             text,
             usage: Arc::default(),
+            kernel: kernel::Kernel::default(),
         });
         let workspace = Self { inner };
         let refresher = workspace.clone();
@@ -208,6 +211,7 @@ impl Workspace {
         self.inner.local.shutdown();
         self.inner.devices.shutdown_all();
         self.inner.setups.stop_all();
+        self.stop_kernel_install();
     }
 
     fn push(&self, update: Update) {

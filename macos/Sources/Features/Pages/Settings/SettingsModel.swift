@@ -161,7 +161,7 @@ enum SettingKey: CaseIterable {
     case confirmUnpin, confirmArchive, confirmDelete, quitShortcut
     case textGenerationModel
     case version
-    case dataFolder
+    case dataFolder, pythonKernel
     case contextMeter
     case colorScheme, themes
     case contrast, glassOpacity, diffColors, chatWidth, openLinks
@@ -188,7 +188,7 @@ enum SettingKey: CaseIterable {
         case .confirmUnpin, .confirmArchive, .confirmDelete, .quitShortcut: .confirmations
         case .textGenerationModel: .textGeneration
         case .version: .about
-        case .dataFolder: .diagnostics
+        case .dataFolder, .pythonKernel: .diagnostics
         case .contextMeter: .legacy
         case .colorScheme, .themes: .theme
         case .contrast, .glassOpacity, .diffColors, .chatWidth, .openLinks: .interface
@@ -247,6 +247,7 @@ enum SettingKey: CaseIterable {
         case .textGenerationModel: "Text generation model"
         case .version: "Version"
         case .dataFolder: "Data folder"
+        case .pythonKernel: "Python kernel"
         case .contextMeter: "Context window indicator"
         case .colorScheme: "Appearance"
         case .themes: "Themes"
@@ -329,6 +330,7 @@ enum SettingKey: CaseIterable {
         case .textGenerationModel: "titles commit messages"
         case .version: "about update"
         case .dataFolder, .dataLocation: "logs finder reveal storage"
+        case .pythonKernel: "ipython runtime venv install uv eukhe"
         case .contextMeter: "legacy tokens"
         case .colorScheme: "dark light system mode"
         case .themes: "theme palette colors import vs code editor"

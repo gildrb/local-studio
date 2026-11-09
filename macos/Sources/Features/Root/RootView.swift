@@ -39,7 +39,11 @@ struct RootView: View {
             PanelToggles(store: store)
         }
         .overlay(alignment: .top) {
-            ToastLayer(store: store)
+            VStack(spacing: 8) {
+                ToastLayer(store: store)
+                KernelNotice(store: store)
+            }
+            .padding(.top, Theme.Metrics.titlebarHeight + 6)
         }
         .overlay(alignment: .top) {
             if let page = shell.palette {
@@ -193,9 +197,6 @@ struct WindowChrome: View {
     }
 }
 
-/// Slides a notice in from the top and back out. The exit animates the still-mounted toast up and out and
-/// unmounts it once the slide has finished: as a removal transition the exit does not show (the `+motion`
-/// strips capture no frames between shown and gone). A notice arriving mid-exit turns the toast back.
 struct ToastLayer: View {
     let store: StudioStore
     @State private var shown: StudioNotice?
@@ -205,7 +206,6 @@ struct ToastLayer: View {
         ZStack {
             if let shown {
                 ToastView(notice: shown) { store.dismissNotice() }
-                    .padding(.top, Theme.Metrics.titlebarHeight + 6)
                     .offset(y: leaving ? -48 : 0)
                     .opacity(leaving ? 0 : 1)
                     .transition(.move(edge: .top).combined(with: .opacity))

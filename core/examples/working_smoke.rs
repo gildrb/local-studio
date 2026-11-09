@@ -183,6 +183,7 @@ fn apply(watch: &mut Watch, update: Update) {
         | Update::ProjectSettings { .. }
         | Update::WorktreeSetup { .. }
         | Update::Daemon { .. }
+        | Update::Kernel { .. }
         | Update::RequestDone { .. }
         | Update::RequestFailed { .. } => {}
     }

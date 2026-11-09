@@ -380,6 +380,7 @@ impl Studio {
             controller_main,
             text.clone(),
         );
+        workspace.start_kernel(daemon::kernel_program(config.launch.as_ref()));
         let settings = workspace.settings();
         let pull_requests = workspace.pull_requests_changed();
         let (commands, receiver) = mpsc::unbounded_channel();

@@ -295,6 +295,7 @@ impl Harness {
             | Update::ArchivedThreads { .. }
             | Update::ThreadSearch { .. }
             | Update::Daemon { .. }
+            | Update::Kernel { .. }
             | Update::Skills { .. }
             | Update::Subagents { .. }
             | Update::MessageImage { .. }

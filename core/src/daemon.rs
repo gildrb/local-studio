@@ -55,6 +55,12 @@ pub(crate) fn agent_dir(launch: Option<&DaemonLaunch>) -> Option<PathBuf> {
         .or_else(eukhe_types::platform::dirs::agent_dir)
 }
 
+pub(crate) fn kernel_program(launch: Option<&DaemonLaunch>) -> Option<PathBuf> {
+    launch
+        .and_then(|launch| Path::new(&launch.program).parent().map(|dir| dir.join("eukhe")))
+        .filter(|program| program.is_file())
+}
+
 pub(crate) async fn connect(socket: &Path, launch: Option<&DaemonLaunch>) -> anyhow::Result<Connection> {
     match DaemonClient::connect(socket).await {
         Ok(connection) => return Ok(connection),

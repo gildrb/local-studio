@@ -1,4 +1,5 @@
 use adw::prelude::*;
+use local_studio_core::KernelState;
 
 use crate::format;
 use crate::state::State;
@@ -6,6 +7,7 @@ use crate::state::State;
 pub struct Banners {
     pub notice: adw::Banner,
     pub provider: adw::Banner,
+    pub kernel: adw::Banner,
 }
 
 impl Banners {
@@ -15,7 +17,36 @@ impl Banners {
         notice.connect_button_clicked(|banner| banner.set_revealed(false));
         let provider =
             adw::Banner::builder().button_label("Open Settings").action_name("win.provider-settings").build();
-        Self { notice, provider }
+        let kernel = adw::Banner::new("");
+        kernel.connect_button_clicked(|banner| {
+            if banner.action_name().is_none() {
+                banner.set_revealed(false);
+            }
+        });
+        Self { notice, provider, kernel }
+    }
+
+    pub fn render_kernel(&self, state: Option<&KernelState>, fresh: bool) {
+        match state {
+            Some(KernelState::Installing { detail }) => {
+                let detail = detail.as_deref().unwrap_or("Downloading Python and the kernel packages.");
+                self.kernel.set_title(&format::escape(&format!("Installing the Python kernel… {detail}")));
+                self.kernel.set_button_label(Some("Hide"));
+                self.kernel.set_action_name(None);
+                self.kernel.remove_css_class("ls-banner-error");
+                if fresh {
+                    self.kernel.set_revealed(true);
+                }
+            }
+            Some(KernelState::Failed { message }) => {
+                self.kernel.set_title(&format::escape(&format!("The Python kernel could not be installed: {message}")));
+                self.kernel.set_button_label(Some("Retry"));
+                self.kernel.set_action_name(Some("win.install-kernel"));
+                self.kernel.add_css_class("ls-banner-error");
+                self.kernel.set_revealed(true);
+            }
+            _ => self.kernel.set_revealed(false),
+        }
     }
 
     pub fn show_notice(&self, text: &str) {

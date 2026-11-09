@@ -281,6 +281,7 @@ impl Harness {
             | Update::WorktreeSetup { .. }
             | Update::DaemonDefault { .. }
             | Update::Daemon { .. }
+            | Update::Kernel { .. }
             | Update::LocalDashboard { .. } => {}
         }
         Ok(())
