@@ -35,6 +35,7 @@ final class ShellState {
     var route = MainRoute.thread
     var sidebarVisible = true
     var sidebarWidth: CGFloat = 272
+    var chromeTrailing = Theme.Metrics.trafficLightsWidth + Theme.Metrics.chromeButton
     var palette: PalettePage?
     var commandHeld = false
     var confirmation: ShellConfirmation?

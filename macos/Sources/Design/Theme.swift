@@ -38,13 +38,14 @@ enum Theme {
 
     enum Metrics {
         static let titlebarHeight: CGFloat = 52
-        static let trafficLightsWidth: CGFloat = 78
+        static let trafficLightsWidth: CGFloat = 92
         static let rowHeight: CGFloat = 32
         static let cardRowHeight: CGFloat = 56
         static let rowRadius: CGFloat = 10
         static let tile: CGFloat = 18
         static let sidebarInset: CGFloat = 8
         static let chromeButton: CGFloat = 28
+        static let chromeGlyphInset: CGFloat = 7
         static let trailingChromeInset: CGFloat = 76
     }
 }
@@ -74,14 +75,16 @@ struct ChromeIconButton: View {
     let symbol: String
     let isOn: Bool
     let badge: Int
+    let fitted: Bool
     let action: () -> Void
     @State private var hovering = false
 
-    init(_ title: String, symbol: String, isOn: Bool = false, badge: Int = 0, action: @escaping () -> Void) {
+    init(_ title: String, symbol: String, isOn: Bool = false, badge: Int = 0, fitted: Bool = false, action: @escaping () -> Void) {
         self.title = title
         self.symbol = symbol
         self.isOn = isOn
         self.badge = badge
+        self.fitted = fitted
         self.action = action
     }
 
@@ -90,7 +93,8 @@ struct ChromeIconButton: View {
             Image(systemName: symbol)
                 .font(.system(size: 15, weight: .light))
                 .foregroundStyle(isOn ? Color.primary : Theme.chromeIcon)
-                .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
+                .padding(.horizontal, fitted ? Theme.Metrics.chromeGlyphInset : 0)
+                .frame(width: fitted ? nil : Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
                 .background(isOn ? Theme.selection : hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .overlay(alignment: .topTrailing) {
                     if badge > 0 {

@@ -64,7 +64,7 @@ struct ThreadHeaderBar: View {
                     store.newThread(in: projectID)
                 } label: {
                     HStack(spacing: 7) {
-                        ProjectTile(project: store.inbox.project(projectID))
+                        ProjectTile(project: store.inbox.project(projectID), size: 15)
                         Text(projectName)
                             .foregroundStyle(Theme.secondaryText)
                             .lineLimit(1)
@@ -119,6 +119,7 @@ struct ThreadHeaderBar: View {
                 .accessibilityHint("Shows thread actions")
                 .accessibilityAction { showThreadMenu(thread) }
                 .accessibilityAction(named: "Rename") { store.shell.headerRenaming = true }
+                .padding(.leading, -5)
             }
         } else if let pending = store.conversation.pending {
             Text(pending.info.title.isEmpty ? "Untitled thread" : pending.info.title)

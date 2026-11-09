@@ -80,7 +80,8 @@ struct RootView: View {
 
     @ViewBuilder private var content: some View {
         let shell = store.shell
-        let leading = shell.sidebarVisible ? 16 : WindowChrome.collapsedInset
+        let collapsed = shell.chromeTrailing + WindowChrome.separation
+        let leading = shell.sidebarVisible ? 16 : collapsed
         if shell.route == .thread {
             let panels = store.panels
             HStack(spacing: 0) {
@@ -100,7 +101,7 @@ struct RootView: View {
                     .frame(maxWidth: .infinity)
                 }
                 if panels.rightPanelOpen {
-                    RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? WindowChrome.collapsedInset : 0)
+                    RightPanelSeam(store: store, leadingInset: panels.rightPanelMaximized && !shell.sidebarVisible ? collapsed : 0)
                         .focusRegionFrame(.rightPanel, in: shell)
                 }
             }
@@ -181,27 +182,73 @@ struct RootView: View {
 }
 
 struct WindowChrome: View {
-    static let collapsedInset: CGFloat = Theme.Metrics.trafficLightsWidth + 3 * Theme.Metrics.chromeButton + 12
+    static let separation: CGFloat = 3 * Theme.Metrics.chromeGlyphInset
 
     let store: StudioStore
 
     var body: some View {
         HStack(spacing: 0) {
-            ChromeIconButton(hint(store.shell.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", "sidebar.toggle"), symbol: "sidebar.leading") {
+            ChromeIconButton(hint(store.shell.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", "sidebar.toggle"), symbol: "sidebar.leading", fitted: true) {
                 store.toggleSidebar()
             }
-            ChromeIconButton(hint("New Thread", "chat.new"), symbol: "plus") {
-                store.newThreadCommand(currentProject: NSEvent.modifierFlags.contains(.shift))
-            }
-            .disabled(store.inbox.projects.isEmpty && store.connection != .ready)
-            ChromeIconButton(hint("Command Palette", "commandPalette.toggle"), symbol: "command") {
-                store.shell.palette = store.shell.palette == nil ? .root : nil
+            .background(ChromeTrailingProbe { trailing in
+                if store.shell.chromeTrailing != trailing {
+                    store.shell.chromeTrailing = trailing
+                }
+            })
+            if store.shell.sidebarVisible {
+                ChromeIconButton(hint("New Thread", "chat.new"), symbol: "plus", fitted: true) {
+                    store.newThreadCommand(currentProject: NSEvent.modifierFlags.contains(.shift))
+                }
+                .disabled(store.inbox.projects.isEmpty && store.connection != .ready)
+                ChromeIconButton(hint("Command Palette", "commandPalette.toggle"), symbol: "command", fitted: true) {
+                    store.shell.palette = store.shell.palette == nil ? .root : nil
+                }
             }
         }
     }
 
     private func hint(_ title: String, _ command: String) -> String {
         store.shortcutText(command).map { "\(title) (\($0))" } ?? title
+    }
+}
+
+private struct ChromeTrailingProbe: NSViewRepresentable {
+    let report: (CGFloat) -> Void
+
+    func makeNSView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.report = report
+        return view
+    }
+
+    func updateNSView(_ view: ProbeView, context: Context) {
+        view.report = report
+    }
+
+    final class ProbeView: NSView {
+        var report: ((CGFloat) -> Void)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            publish()
+        }
+
+        override func layout() {
+            super.layout()
+            publish()
+        }
+
+        override func setFrameOrigin(_ newOrigin: NSPoint) {
+            super.setFrameOrigin(newOrigin)
+            publish()
+        }
+
+        private func publish() {
+            guard window != nil else { return }
+            let trailing = convert(bounds, to: nil).maxX.rounded()
+            Task { @MainActor [report] in report?(trailing) }
+        }
     }
 }
 
