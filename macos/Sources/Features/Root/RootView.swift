@@ -39,13 +39,6 @@ struct RootView: View {
             PanelToggles(store: store)
         }
         .overlay(alignment: .top) {
-            VStack(spacing: 8) {
-                ToastLayer(store: store)
-                KernelNotice(store: store)
-            }
-            .padding(.top, Theme.Metrics.titlebarHeight + 6)
-        }
-        .overlay(alignment: .top) {
             if let page = shell.palette {
                 ZStack(alignment: .top) {
                     Color.black.opacity(0.001)
@@ -103,6 +96,7 @@ struct RootView: View {
                         }
                     }
                     .overlay { PreviewMiniPlayerView(store: store) }
+                    .overlay(alignment: .top) { notices }
                     .frame(maxWidth: .infinity)
                 }
                 if panels.rightPanelOpen {
@@ -110,9 +104,23 @@ struct RootView: View {
                         .focusRegionFrame(.rightPanel, in: shell)
                 }
             }
+            .overlay(alignment: .top) {
+                if panels.rightPanelOpen && panels.rightPanelMaximized {
+                    notices
+                }
+            }
         } else {
             PageSeam(store: store, route: shell.route, leadingInset: leading - 16)
+                .overlay(alignment: .top) { notices }
         }
+    }
+
+    private var notices: some View {
+        VStack(spacing: 8) {
+            ToastLayer(store: store)
+            KernelNotice(store: store)
+        }
+        .padding(.top, Theme.Metrics.titlebarHeight + 6)
     }
 
     private var resize: some Gesture {
