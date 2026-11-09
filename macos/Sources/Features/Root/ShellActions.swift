@@ -195,7 +195,7 @@ extension StudioStore {
     }
 
     func undoOrSendUndo() {
-        if let responder = NSApp.keyWindow?.firstResponder, responder is NSText {
+        if let responder = NSApp.keyWindow?.firstResponder, responder.capturesKeys {
             NSApp.sendAction(Selector(("undo:")), to: nil, from: nil)
         } else {
             inbox.performUndo()

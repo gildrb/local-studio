@@ -9,103 +9,8 @@ struct MarkdownView: View {
     var secondary = false
 
     var body: some View {
-        let document = MarkdownCache.document(for: text)
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(document.blocks) { block in
-                MarkdownBlockView(block: block, size: size, secondary: secondary)
-                    .padding(.top, block.spacing)
-            }
-        }
-        .tint(Theme.primary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-}
-
-private struct MarkdownBlockView: View {
-    let block: MarkdownBlock
-    let size: CGFloat
-    let secondary: Bool
-
-    var body: some View {
-        switch block.kind {
-        case .paragraph(let content, let depth, let marker, let quote):
-            paragraph(content, depth: depth, marker: marker)
-                .padding(.leading, quote > 0 ? 12 : 0)
-                .overlay(alignment: .leading) {
-                    if quote > 0 {
-                        Capsule().fill(Theme.input).frame(width: 2.5)
-                    }
-                }
-                .foregroundStyle(secondary || quote > 0 ? Theme.secondaryText : Color.primary)
-        case .heading(let level, let content):
-            Text(content)
-                .font(.system(size: headingSize(level), weight: .semibold))
-                .selectableText()
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, level <= 2 ? 8 : 4)
-        case .code(let language, let code):
-            CodeBlockView(language: language, code: code)
-        case .rule:
-            Rectangle().fill(Theme.hairline).frame(height: 1).padding(.vertical, 4)
-        case .table(let rows):
-            MarkdownTableView(rows: rows, size: size)
-        }
-    }
-
-    private func paragraph(_ content: AttributedString, depth: Int, marker: String?) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if depth > 0 {
-                Text(marker ?? "")
-                    .foregroundStyle(Theme.secondaryText)
-                    .monospacedDigit()
-                    .frame(minWidth: 14, alignment: .trailing)
-            }
-            Text(content)
-                .selectableText()
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(3)
-        }
-        .font(.system(size: size))
-        .padding(.leading, CGFloat(max(depth - 1, 0)) * 20)
-    }
-
-    private func headingSize(_ level: Int) -> CGFloat {
-        switch level {
-        case 1: size + 6
-        case 2: size + 3.5
-        case 3: size + 1.5
-        default: size
-        }
-    }
-}
-
-private struct MarkdownTableView: View {
-    let rows: [[AttributedString]]
-    let size: CGFloat
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                ForEach(rows.indices, id: \.self) { index in
-                    GridRow {
-                        ForEach(rows[index].indices, id: \.self) { column in
-                            Text(rows[index][column])
-                                .font(.system(size: size - 0.5, weight: index == 0 ? .semibold : .regular))
-                                .selectableText()
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .frame(maxWidth: 320, alignment: .leading)
-                        }
-                    }
-                    .background(index == 0 ? Theme.message : Color.clear)
-                    if index < rows.count - 1 {
-                        Rectangle().fill(Theme.hairline).frame(height: 1).gridCellUnsizedAxes(.horizontal)
-                    }
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline))
-        }
+        MarkdownText(rendering: MarkdownRenderer.rendering(MarkdownSource(text: text, size: size, secondary: secondary)))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -117,16 +22,7 @@ struct CodeBlockView: View {
     var body: some View {
         let key = HighlightKey(text: code, language: language, path: nil)
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 6) {
-                Text(language?.isEmpty == false ? language ?? "" : "text")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(Theme.secondaryText)
-                Spacer(minLength: 8)
-                CopyButton(text: code, size: 12)
-            }
-            .padding(.leading, 12)
-            .padding(.trailing, 4)
-            .frame(height: 30)
+            CodeBlockHeader(language: language, code: code)
             Rectangle().fill(Theme.hairline).frame(height: 1)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(rendered(key))

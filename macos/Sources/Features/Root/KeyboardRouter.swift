@@ -53,7 +53,7 @@ extension StudioStore {
     }
 
     func routeKey(_ input: NavInput, responder: NSResponder?) -> Bool {
-        if responder is NSText || responder is TerminalSurfaceView { return false }
+        if responder?.capturesKeys == true || responder is TerminalSurfaceView { return false }
         guard shell.route == .thread else { return false }
         switch shell.region {
         case .sidebar: return sidebarKey(input)

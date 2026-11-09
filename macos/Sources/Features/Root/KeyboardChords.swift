@@ -8,7 +8,7 @@ extension StudioStore {
         guard let spec = ShortcutFormat.record(event) else { return false }
         let flags = event.modifierFlags.intersection([.command, .control])
         let function = ShortcutFormat.parse(spec).key.range(of: "^f[0-9]+$", options: .regularExpression) != nil
-        if responder is NSText || responder is TerminalSurfaceView, flags.isEmpty, !function {
+        if responder?.capturesKeys == true || responder is TerminalSurfaceView, flags.isEmpty, !function {
             return false
         }
         guard let command = chordCommand(spec, responder: responder) ?? ShortcutFormat.recordShifted(event).flatMap({ chordCommand($0, responder: responder) }) else {
@@ -42,11 +42,11 @@ extension StudioStore {
     private func holds(_ name: String, responder: NSResponder?) -> Bool {
         switch name {
         case "terminalFocus": responder is TerminalSurfaceView
-        case "previewFocus": shell.route == .thread && shell.region == .rightPanel && !(responder is NSText)
+        case "previewFocus": shell.route == .thread && shell.region == .rightPanel && responder?.capturesKeys != true
         case "modelPickerOpen": conversation.modelPickerPresented
         case "usagePageOpen": shell.route == .usage
-        case "timelineFocus": shell.route == .thread && shell.region == .timeline && !(responder is NSText)
-        case "editableFocus": responder is NSText
+        case "timelineFocus": shell.route == .thread && shell.region == .timeline && responder?.capturesKeys != true
+        case "editableFocus": responder?.capturesKeys == true
         default: true
         }
     }

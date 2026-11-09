@@ -96,6 +96,12 @@ final class SyntaxHighlighter {
         return attributed
     }
 
+    func cachedSegments(_ key: HighlightKey) -> [CodeSegment]? {
+        if let entry = entries[key] { return entry.segments }
+        guard warmed, key.text.utf8.count <= Self.inlineLimit else { return nil }
+        return store(key, LocalStudioKit.highlight(code: key.text, language: key.language, path: key.path))
+    }
+
     func segments(_ key: HighlightKey) async -> [CodeSegment] {
         if let entry = entries[key] { return entry.segments }
         if let task = inflight[key] { return await task.value }
