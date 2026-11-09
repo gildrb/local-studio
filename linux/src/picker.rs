@@ -499,11 +499,10 @@ impl Inner {
             label.add_css_class("ls-picker-detail");
             widget.append(&label);
         }
-        if row.checked {
-            let check = gtk::Image::from_icon_name("object-select-symbolic");
-            check.add_css_class("ls-picker-check");
-            widget.append(&check);
-        }
+        let check = gtk::Image::from_icon_name("object-select-symbolic");
+        check.add_css_class("ls-picker-check");
+        check.set_opacity(if row.checked { 1.0 } else { 0.0 });
+        widget.append(&check);
         if row.removable {
             widget.append(&self.remove_button(&row.id));
         }

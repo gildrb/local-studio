@@ -4,7 +4,7 @@ use adw::prelude::*;
 use local_studio_core::{Branch, GitStatus, Update};
 
 use crate::app::{App, Dirty};
-use crate::fixtures::{base, conversation, project_id};
+use crate::fixtures::{base, conversation, project_id, FOCUSED};
 
 pub const SCENES: [&str; 5] = ["picker-access", "picker-thinking", "picker-branches", "picker-project", "picker-stash"];
 
@@ -16,6 +16,11 @@ pub fn stage(app: &Rc<App>, scene: &str) {
         }
         "picker-thinking" => {
             conversation(app, false);
+            let info = app.state.borrow().info.clone();
+            if let Some(mut info) = info {
+                info.thinking_level = "medium".to_string();
+                app.apply(vec![Update::Thread { thread: FOCUSED.to_string(), info }]);
+            }
             app.composer.open_picker("thinking");
         }
         "picker-branches" => branches(app),
