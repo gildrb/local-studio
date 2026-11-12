@@ -55,7 +55,7 @@ private struct ThumbnailTile: View {
                         .scaledToFill()
                 } else {
                     Image(systemName: "photo")
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.control, .secondary)
                         .accessibilityHidden(true)
                 }
             }
@@ -108,6 +108,7 @@ struct ImageGalleryView: View {
             HStack(spacing: 8) {
                 Button("Previous", systemImage: "chevron.left") { step(-1) }
                     .labelStyle(.iconOnly)
+                    .help("Previous image")
                     .disabled(index == 0)
                     .keyboardShortcut(.leftArrow, modifiers: [])
                 Text("\(index + 1) of \(gallery.thumbnails.count)")
@@ -116,6 +117,7 @@ struct ImageGalleryView: View {
                     .foregroundStyle(Theme.secondaryText)
                 Button("Next", systemImage: "chevron.right") { step(1) }
                     .labelStyle(.iconOnly)
+                    .help("Next image")
                     .disabled(index >= gallery.thumbnails.count - 1)
                     .keyboardShortcut(.rightArrow, modifiers: [])
                 Spacer()

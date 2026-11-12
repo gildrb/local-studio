@@ -51,12 +51,12 @@ enum PanelSurfaceKind: String, CaseIterable, Identifiable {
         case .browser: "globe"
         case .terminal: "terminal"
         case .files: "folder"
-        case .diff: "plus.forwardslash.minus"
+        case .diff: "plusminus"
         case .pullRequest: "arrow.triangle.pull"
-        case .pullRequests: "arrow.triangle.branch"
-        case .agents: "person.2"
+        case .pullRequests: "arrow.triangle.pull"
+        case .agents: "person.2.fill"
         case .device: "iphone"
-        case .file: "doc.text"
+        case .file: "doc"
         }
     }
 

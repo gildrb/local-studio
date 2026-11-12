@@ -45,6 +45,7 @@ struct ProjectScriptsControl: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: symbol(preferred))
+                            .icon(.inline)
                             .accessibilityHidden(true)
                         Text(preferred.name)
                             .lineLimit(1)
@@ -59,7 +60,8 @@ struct ProjectScriptsControl: View {
                     Button("Add Action…") { store.openProjectSettings(project) }
                     Button("Import from local-studio.json") { importScripts() }
                 } label: {
-                    Image(systemName: "play")
+                    Image(systemName: "play.fill")
+                        .icon(.control)
                         .accessibilityHidden(true)
                 }
                 .help("Project actions")
@@ -77,7 +79,7 @@ struct ProjectScriptsControl: View {
     }
 
     private func symbol(_ script: ProjectScript) -> String {
-        guard let icon = script.icon, NSImage(systemSymbolName: icon, accessibilityDescription: nil) != nil else { return "play" }
+        guard let icon = script.icon, NSImage(systemSymbolName: icon, accessibilityDescription: nil) != nil else { return "play.fill" }
         return icon
     }
 

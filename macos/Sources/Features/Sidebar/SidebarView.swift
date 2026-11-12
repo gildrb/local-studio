@@ -192,8 +192,7 @@ struct SidebarSearchField: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(Theme.secondaryText)
+                .icon(.inline, .secondary)
                 .accessibilityHidden(true)
             TextField("Search", text: $text)
                 .textFieldStyle(.plain)
@@ -206,10 +205,7 @@ struct SidebarSearchField: View {
                 .onKeyPress(.escape) { onKey(.escape) ? .handled : .ignored }
                 .onChange(of: text) { _ = onKey(.changed) }
             if !text.isEmpty {
-                Button("Clear Search", systemImage: "xmark.circle.fill") { text = "" }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .foregroundStyle(Theme.secondaryText)
+                CloseIconButton(title: "Clear Search") { text = "" }
             }
         }
         .padding(.horizontal, 9)
@@ -371,8 +367,7 @@ struct NoProjectsSidebar: View {
     var body: some View {
         VStack(spacing: 10) {
             Image(systemName: "folder")
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.display, .secondary)
                 .accessibilityHidden(true)
             Text("No projects yet")
                 .font(.system(size: 13, weight: .medium))
@@ -403,11 +398,7 @@ struct UndoNotice: View {
                 .buttonStyle(.plain)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.primary)
-            Button("Dismiss", systemImage: "xmark") { store.inbox.dismissUndo() }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Theme.secondaryText)
+            CloseIconButton(title: "Dismiss") { store.inbox.dismissUndo() }
         }
         .padding(.horizontal, 12)
         .frame(height: 34)
@@ -434,9 +425,9 @@ private struct SidebarFooter: View {
                 Button {
                     store.goBack()
                 } label: {
-                    Label("Back", systemImage: "chevron.left")
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(Theme.chromeIcon)
+                    IconLabel("Back", symbol: "chevron.left")
+                        .font(.system(size: 12.5, weight: .medium))
+                        .foregroundStyle(Theme.text)
                         .padding(.horizontal, 8)
                         .frame(height: Theme.Metrics.chromeButton)
                         .contentShape(Rectangle())
@@ -445,9 +436,9 @@ private struct SidebarFooter: View {
                 .help("Back to threads")
                 Spacer()
             } else {
-                ChromeIconButton("Settings", symbol: "slider.horizontal.3") { openSettings() }
+                ChromeIconButton("Settings", symbol: "gearshape") { openSettings() }
                 ChromeIconButton("Usage", symbol: "chart.bar") { store.show(.usage) }
-                ChromeIconButton("Pull Requests", symbol: "arrow.trianglehead.pull") { store.show(.pullRequests) }
+                ChromeIconButton("Pull Requests", symbol: "arrow.triangle.pull") { store.show(.pullRequests) }
                 Spacer()
                 ChromeIconButton("Local", symbol: "server.rack") { store.show(.local) }
             }
@@ -467,8 +458,9 @@ private struct AddProjectMenu: View {
             Button("Clone Repository…") { store.shell.cloneShown = true }
         } label: {
             Image(systemName: "folder")
-                .font(.system(size: 15, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.toolbar, .primary)
+                .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
+                .contentShape(Rectangle())
                 .accessibilityHidden(true)
         } primaryAction: {
             store.addProjectInteractively()

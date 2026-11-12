@@ -109,7 +109,7 @@ struct ProjectMenu: View {
                 section: "Projects"
             ) { select(project.id) }
         } + [
-            PickerRow(id: "no-project", title: "No project", symbol: "circle.slash", checked: current == nil, section: "Projects") { select(nil) },
+            PickerRow(id: "no-project", title: "No project", symbol: "minus", checked: current == nil, section: "Projects") { select(nil) },
             PickerRow(id: "add-project", title: "Add Project…", symbol: "plus", action: add),
         ]
     }
@@ -574,7 +574,7 @@ private struct MinimapStep: View {
     let action: () -> Void
 
     var body: some View {
-        MessageActionButton(title, symbol: symbol, size: 10, action: action)
+        MessageActionButton(title, symbol: symbol, size: .inline, action: action)
             .disabled(!enabled)
             .opacity(enabled ? 1 : 0.35)
     }
@@ -620,7 +620,7 @@ private struct ScrollToEndPill: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.down")
-                    .font(.system(size: 11, weight: .medium))
+                    .icon(.inline)
                     .accessibilityHidden(true)
                 Text("Scroll to end")
             }

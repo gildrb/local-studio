@@ -20,7 +20,7 @@ struct ProjectFilterButton: View {
                 .help("Filtered by \(project.name)")
                 .accessibilityLabel("Filter Projects")
             } else {
-                ChromeIconButton("Filter Projects", symbol: "line.3.horizontal.decrease.circle") { open.toggle() }
+                ChromeIconButton("Filter Projects", symbol: "line.3.horizontal.decrease") { open.toggle() }
             }
         }
         .popover(isPresented: $open, arrowEdge: .bottom) {
@@ -112,8 +112,8 @@ private struct ProjectFilterRow: View {
                     }
                 } else {
                     Image(systemName: "square.grid.2x2")
-                        .font(.system(size: 12, weight: .light))
-                        .frame(width: 16)
+                        .icon(.inline)
+                        .frame(width: 18)
                         .accessibilityHidden(true)
                     Text("All projects")
                         .font(.system(size: 13))
@@ -121,7 +121,7 @@ private struct ProjectFilterRow: View {
                 Spacer(minLength: 4)
                 if checked || (project == nil && store.inbox.projectFilter == nil) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .medium))
+                        .icon(.inline)
                         .foregroundStyle(Theme.primary)
                         .accessibilityLabel("Selected")
                 }

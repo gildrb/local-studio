@@ -8,8 +8,8 @@ struct StartFailureCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 12, weight: .light))
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .icon(.inline)
                     .foregroundStyle(Theme.diffRemoved)
                     .accessibilityHidden(true)
                 Text("Couldn’t start this thread")

@@ -303,6 +303,7 @@ struct ToastView: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: symbol)
+                .icon(.control)
                 .foregroundStyle(tint)
                 .accessibilityHidden(true)
             Text(notice.text)
@@ -310,11 +311,7 @@ struct ToastView: View {
                 .textSelection(.enabled)
                 .lineLimit(4)
             Spacer(minLength: 8)
-            Button("Dismiss", systemImage: "xmark", action: dismiss)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(Theme.secondaryText)
+            CloseIconButton(title: "Dismiss", action: dismiss)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -332,9 +329,9 @@ struct ToastView: View {
 
     private var symbol: String {
         switch notice.level {
-        case .info: "info.circle"
-        case .warning: "exclamationmark.triangle"
-        case .error: "exclamationmark.circle"
+        case .info: "info.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
         }
     }
 

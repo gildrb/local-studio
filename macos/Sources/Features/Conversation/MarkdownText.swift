@@ -736,7 +736,7 @@ struct CodeBlockHeader: View, Equatable {
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.secondaryText)
             Spacer(minLength: 8)
-            CopyButton(text: code, size: 12)
+            CopyButton(text: code)
         }
         .padding(.leading, 12)
         .padding(.trailing, 4)

@@ -10,20 +10,19 @@ struct FilesSurfaceView: View {
         VStack(spacing: 0) {
             PanelToolbar {
                 Image(systemName: "folder")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
+                    .icon(.inline, .secondary)
                     .accessibilityHidden(true)
                 Text((model.project as NSString).lastPathComponent)
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1)
                 Spacer()
-                PanelIconButton("Reveal in Finder", symbol: "arrow.up.right.circle") {
+                PanelIconButton("Reveal in Finder", symbol: "arrow.up.right") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.project)])
                 }
                 PanelIconButton("Refresh", symbol: "arrow.clockwise") { model.refresh() }
             }
             if let failure = model.failure {
-                PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t list files.", detail: failure, actionTitle: "Try Again") { model.refresh() }
+                PanelMessage(symbol: "exclamationmark.triangle.fill", title: "Couldn’t list files.", detail: failure, actionTitle: "Try Again") { model.refresh() }
             } else if model.rootLoading {
                 PanelMessage.loading("Loading files…")
             } else if model.rows.isEmpty {
@@ -53,18 +52,16 @@ private struct FileRowView: View {
             Group {
                 if row.entry.directory {
                     Image(systemName: row.expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.inline, .secondary)
                 } else {
                     Color.clear
                 }
             }
-            .frame(width: 12)
+            .frame(width: 16)
             .accessibilityHidden(true)
             Image(systemName: row.entry.directory ? "folder" : "doc")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
-                .frame(width: 16)
+                .icon(.inline, .secondary)
+                .frame(width: 18)
                 .accessibilityHidden(true)
             Text(row.entry.name)
                 .font(.system(size: 13))
@@ -112,9 +109,8 @@ struct FilePreviewView: View {
     var body: some View {
         VStack(spacing: 0) {
             PanelToolbar {
-                Image(systemName: "doc.text")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
+                Image(systemName: "doc")
+                    .icon(.inline, .secondary)
                     .accessibilityHidden(true)
                 PathLabel(relative: model.relative)
                 Spacer(minLength: 4)
@@ -123,11 +119,11 @@ struct FilePreviewView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(Theme.secondaryText)
                 }
-                PanelIconButton("Copy Path", symbol: "square.on.square") {
+                PanelIconButton("Copy Path", symbol: "doc.on.doc") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(absolute.path, forType: .string)
                 }
-                PanelIconButton("Open in Default App", symbol: "arrow.up.right.circle") {
+                PanelIconButton("Open in Default App", symbol: "arrow.up.right") {
                     NSWorkspace.shared.open(absolute)
                 }
                 PanelIconButton("Reload", symbol: "arrow.clockwise") { model.load() }
@@ -145,7 +141,7 @@ struct FilePreviewView: View {
         case .idle, .loading:
             PanelMessage.loading("Loading \((model.relative as NSString).lastPathComponent)…")
         case .failed(let message):
-            PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t open this file.", detail: message, actionTitle: "Try Again") { model.load() }
+            PanelMessage(symbol: "exclamationmark.triangle.fill", title: "Couldn’t open this file.", detail: message, actionTitle: "Try Again") { model.load() }
         case .loaded:
             switch model.content {
             case .text:

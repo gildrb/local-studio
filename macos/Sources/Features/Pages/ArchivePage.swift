@@ -102,11 +102,15 @@ private struct ArchiveRow: View {
                 Button("Delete…", role: .destructive, action: delete)
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .light))
+                    .icon(.control, .primary)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help("More actions")
             .accessibilityLabel("More actions for \(thread.title)")
         }
         .contextMenu {

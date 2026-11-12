@@ -17,7 +17,7 @@ struct AttachmentStrip: View {
                                     .scaledToFill()
                             } else {
                                 Image(systemName: "photo")
-                                    .foregroundStyle(Theme.secondaryText)
+                                    .icon(.control, .secondary)
                                     .accessibilityHidden(true)
                             }
                         }
@@ -59,8 +59,7 @@ private struct AttachmentChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: symbol)
-                .font(.system(size: 11.5, weight: .light))
-                .foregroundStyle(Theme.secondaryText)
+                .icon(.inline, .secondary)
                 .accessibilityHidden(true)
             Text(title)
                 .font(.system(size: 12))
@@ -70,14 +69,16 @@ private struct AttachmentChip: View {
                 .fixedSize(horizontal: true, vertical: false)
             Button(action: remove) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Theme.secondaryText)
+                    .icon(.inline, .primary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Remove")
             .accessibilityLabel("Remove \(title)")
         }
-        .padding(.horizontal, 9)
+        .padding(.leading, 9)
+        .padding(.trailing, 2)
         .frame(height: 26)
         .background(Theme.message, in: Capsule())
         .help(help)
@@ -91,11 +92,12 @@ private struct RemoveBadge: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: "xmark")
-                .font(.system(size: 8, weight: .bold))
-                .foregroundStyle(Color.primary)
-                .frame(width: 18, height: 18)
+                .icon(.inline, .primary)
+                .frame(width: 22, height: 22)
                 .background(Theme.card, in: Circle())
                 .overlay(Circle().strokeBorder(Theme.input))
+                .frame(width: 24, height: 24)
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help(title)
@@ -145,7 +147,7 @@ struct StashMenu: View, Equatable {
             PickerRow(
                 id: prompt.id.uuidString,
                 title: prompt.title,
-                symbol: "text.bubble",
+                symbol: "bubble.left",
                 subtitle: prompt.created.formatted(.relative(presentation: .named)),
                 section: "Stashed Prompts"
             ) { restore(prompt) }

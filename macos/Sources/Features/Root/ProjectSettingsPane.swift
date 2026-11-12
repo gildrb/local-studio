@@ -119,8 +119,8 @@ struct ProjectIconPicker: View {
     @State private var emoji = ""
 
     private static let symbols = [
-        "folder", "shippingbox", "hammer", "wrench.and.screwdriver", "terminal", "globe", "server.rack", "cpu",
-        "doc.text", "book", "graduationcap", "flask", "leaf", "flame", "bolt", "star",
+        "folder", "shippingbox", "hammer", "wrench", "terminal", "globe", "server.rack", "cpu",
+        "doc", "book", "graduationcap", "flask", "leaf", "flame", "bolt", "star",
         "heart", "camera", "music.note", "gamecontroller", "paintbrush", "chart.bar", "cart", "lock",
     ]
 
@@ -132,7 +132,7 @@ struct ProjectIconPicker: View {
                         choose(symbol)
                     } label: {
                         Image(systemName: symbol)
-                            .font(.system(size: 14, weight: .light))
+                            .icon(.control)
                             .frame(width: 30, height: 30)
                             .background(current == symbol ? Theme.selection : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             .contentShape(Rectangle())

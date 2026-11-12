@@ -64,12 +64,11 @@ struct CodeBlockView: View {
 
 struct CopyButton: View {
     let text: String
-    var size: CGFloat = 13
     @State private var copies = 0
 
     var body: some View {
         let copied = copies > 0
-        MessageActionButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc", size: size) {
+        MessageActionButton(copied ? "Copied" : "Copy", symbol: copied ? "checkmark" : "doc.on.doc") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             copies += 1
@@ -87,11 +86,11 @@ struct CopyButton: View {
 struct MessageActionButton: View {
     let title: String
     let symbol: String
-    let size: CGFloat
+    let size: IconSize
     let action: () -> Void
     @State private var hovering = false
 
-    init(_ title: String, symbol: String, size: CGFloat = 13, action: @escaping () -> Void) {
+    init(_ title: String, symbol: String, size: IconSize = .control, action: @escaping () -> Void) {
         self.title = title
         self.symbol = symbol
         self.size = size
@@ -102,9 +101,9 @@ struct MessageActionButton: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .contentTransition(.symbolEffect(.replace))
-                .font(.system(size: size, weight: .light))
-                .foregroundStyle(hovering ? Color.primary : Theme.secondaryText)
-                .frame(width: 24, height: 24)
+                .icon(size)
+                .foregroundStyle(hovering ? Color.primary : Theme.text)
+                .frame(width: 26, height: 26)
                 .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .contentShape(Rectangle())
         }

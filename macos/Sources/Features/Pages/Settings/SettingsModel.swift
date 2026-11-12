@@ -498,8 +498,10 @@ struct SettingsPaneIcon: View {
             .frame(width: size, height: size)
             .overlay {
                 Image(systemName: pane.symbol)
-                    .font(.system(size: size * 0.55, weight: .medium))
+                    .font(.system(size: size * 0.6, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
                     .foregroundStyle(.white)
+                    .accessibilityHidden(true)
             }
     }
 }
@@ -516,8 +518,8 @@ struct SettingsNote: View {
                 .fixedSize(horizontal: false, vertical: true)
         } icon: {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.inline, .secondary)
+                .accessibilityHidden(true)
         }
     }
 }

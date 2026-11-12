@@ -43,15 +43,15 @@ struct ComposerControls: View {
                     .accessibilityHidden(compact)
             }
             if conversation.busy {
-                RoundActionButton(title: "Stop generation", symbol: "stop.fill", size: 9, fill: .red, enabled: true) {
+                RoundActionButton(title: "Stop generation", label: compact ? nil : "Stop", symbol: "stop.fill", fill: .red, enabled: true) {
                     conversation.abort()
                 }
                 .keyboardShortcut(".", modifiers: .command)
             }
             RoundActionButton(
                 title: sendTitle(busy: conversation.busy, steers: settings?.followUpBehavior == .steer),
+                label: compact ? nil : sendLabel(busy: conversation.busy, steers: settings?.followUpBehavior == .steer),
                 symbol: "arrow.up",
-                size: 12,
                 fill: Theme.primary,
                 enabled: canSend,
                 action: send
@@ -77,6 +77,11 @@ struct ComposerControls: View {
         return steers ? "Steer the running turn (⌥↩ queues)" : "Queue message (⌥↩ steers)"
     }
 
+    private func sendLabel(busy: Bool, steers: Bool) -> String {
+        guard busy else { return "Send" }
+        return steers ? "Steer" : "Queue"
+    }
+
     private func attach() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -100,8 +105,7 @@ struct ComposerIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 14, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.control, .primary)
                 .frame(width: 28, height: 28)
                 .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 .contentShape(Rectangle())
@@ -122,18 +126,17 @@ struct ComposerChip: View {
         HStack(spacing: 5) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 12, weight: .light))
+                    .icon(.inline)
                     .accessibilityHidden(true)
             }
             Text(title)
                 .lineLimit(1)
             Image(systemName: "chevron.down")
-                .font(.system(size: 8, weight: .medium))
-                .opacity(0.7)
+                .icon(.inline)
                 .accessibilityHidden(true)
         }
         .font(.system(size: 12.5))
-        .foregroundStyle(hovering ? Color.primary : Theme.secondaryText)
+        .foregroundStyle(hovering ? Color.primary : Theme.text)
         .padding(.horizontal, 8)
         .frame(height: 28)
         .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -143,20 +146,28 @@ struct ComposerChip: View {
 
 private struct RoundActionButton: View {
     let title: String
+    let label: String?
     let symbol: String
-    let size: CGFloat
     let fill: Color
     let enabled: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: size, weight: .semibold))
-                .foregroundStyle(enabled ? Color.white : Theme.secondaryText)
-                .frame(width: 28, height: 28)
-                .background(enabled ? fill : Theme.input, in: Circle())
-                .contentShape(Circle())
+            HStack(spacing: 5) {
+                Image(systemName: symbol)
+                    .icon(.inline)
+                if let label {
+                    Text(label)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .lineLimit(1)
+                }
+            }
+            .foregroundStyle(enabled ? Color.white : Theme.secondaryText)
+            .padding(.horizontal, label == nil ? 0 : 11)
+            .frame(minWidth: 28, minHeight: 28)
+            .background(enabled ? fill : Theme.input, in: Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -224,8 +235,7 @@ struct ModelPickerPanel: View {
             if configured.count > 8 {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.inline, .secondary)
                         .accessibilityHidden(true)
                     TextField("Search models", text: $query)
                         .textFieldStyle(.plain)
@@ -429,9 +439,8 @@ private struct AddProviderRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
-                    .frame(width: 16)
+                    .icon(.inline, .primary)
+                    .frame(width: 18)
                     .accessibilityHidden(true)
                 Text("Add Provider…")
                     .font(.system(size: 13))
@@ -489,9 +498,9 @@ private struct ModelRow: View {
                             .accessibilityHidden(true)
                     }
                     Image(systemName: "checkmark")
-                        .font(.system(size: 11, weight: .medium))
+                        .icon(.inline)
                         .foregroundStyle(Theme.primary)
-                        .frame(width: 12)
+                        .frame(width: 16)
                         .opacity(selected ? 1 : 0)
                         .accessibilityHidden(true)
                 }
@@ -504,9 +513,8 @@ private struct ModelRow: View {
             if hidden {
                 Button(action: toggleHidden) {
                     Image(systemName: "eye")
-                        .font(.system(size: 11.5, weight: .light))
-                        .foregroundStyle(Theme.secondaryText)
-                        .frame(width: 20, height: 20)
+                        .icon(.inline, .primary)
+                        .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -515,9 +523,8 @@ private struct ModelRow: View {
             } else {
                 Button(action: toggleFavorite) {
                     Image(systemName: favorite ? "star.fill" : "star")
-                        .font(.system(size: 11.5, weight: .light))
-                        .foregroundStyle(favorite ? Color.primary.opacity(0.8) : Theme.secondaryText)
-                        .frame(width: 20, height: 20)
+                        .icon(.inline, .primary)
+                        .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -635,7 +642,7 @@ private struct GoalChip: View, Equatable {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "flag")
-                        .font(.system(size: 11.5, weight: .light))
+                        .icon(.inline)
                         .accessibilityHidden(true)
                     Text(goal.active ? "Goal" : goal.status.capitalized)
                         .lineLimit(1)
@@ -644,7 +651,7 @@ private struct GoalChip: View, Equatable {
                         .foregroundStyle(Theme.secondaryText.opacity(0.8))
                 }
                 .font(.system(size: 12.5))
-                .foregroundStyle(hovering || presented ? Color.primary : Theme.secondaryText)
+                .foregroundStyle(hovering || presented ? Color.primary : Theme.text)
                 .padding(.horizontal, 8)
                 .frame(height: 28)
                 .background(hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -771,13 +778,13 @@ private struct ContextMeter: View {
             } label: {
                 HStack(spacing: 5) {
                     ZStack {
-                        Circle().stroke(Theme.chromeIcon.opacity(0.22), lineWidth: 2)
+                        Circle().stroke(Theme.text.opacity(0.25), lineWidth: 2.5)
                         Circle()
                             .trim(from: 0, to: fraction)
-                            .stroke(fraction > 0.9 ? Color.red : Theme.chromeIcon, style: StrokeStyle(lineWidth: 2))
+                            .stroke(fraction > 0.9 ? Color.red : Theme.text, style: StrokeStyle(lineWidth: 2.5))
                             .rotationEffect(.degrees(-90))
                     }
-                    .frame(width: 13, height: 13)
+                    .frame(width: 14, height: 14)
                     Text("\(Int((fraction * 100).rounded()))%")
                         .font(.system(size: 11.5))
                         .monospacedDigit()
@@ -824,7 +831,7 @@ struct ThreadContextStrip: View {
             let row = store.inbox.thread(thread)
             strip {
                 if let branch = conversation.info?.branch ?? row?.branch {
-                    Label(branch, systemImage: "arrow.triangle.branch")
+                    IconLabel(branch, symbol: "arrow.triangle.branch")
                         .padding(.horizontal, 8)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Branch: \(branch)")
@@ -838,12 +845,12 @@ struct ThreadContextStrip: View {
             let options = conversation.newThread
             strip {
                 if options.fanOutModels(available: conversation.models).count >= 2 {
-                    Label("One new worktree per model", systemImage: "arrow.triangle.branch")
+                    IconLabel("One new worktree per model", symbol: "arrow.triangle.branch")
                         .padding(.horizontal, 8)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Workspace: one new worktree per model")
                 } else if let branch = options.existingBranch, options.existingWorktree != nil {
-                    Label("Worktree · \(branch)", systemImage: "lock")
+                    IconLabel("Worktree · \(branch)", symbol: "lock")
                         .padding(.horizontal, 8)
                         .help(options.existingWorktree ?? "")
                         .accessibilityElement(children: .ignore)

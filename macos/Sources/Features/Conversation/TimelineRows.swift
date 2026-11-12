@@ -145,7 +145,7 @@ private struct UserBubble: View {
                 .background(Theme.message, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
             if images > 0, thumbnails.isEmpty {
-                Label(images == 1 ? "1 image" : "\(images) images", systemImage: "photo")
+                IconLabel(images == 1 ? "1 image" : "\(images) images", symbol: "photo")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
                     .padding(.horizontal, 8)
@@ -167,7 +167,7 @@ private struct UserBubble: View {
             if let anchor {
                 UserMessageEditButton(anchor: anchor, store: store)
             }
-            CopyButton(text: text, size: 12)
+            CopyButton(text: text)
         }
     }
 
@@ -202,7 +202,7 @@ private struct UserMessageEditButton: View {
 
     var body: some View {
         if !store.conversation.busy {
-            MessageActionButton("Edit from here", symbol: "arrow.uturn.backward", size: 12) {
+            MessageActionButton("Edit from here", symbol: "arrow.uturn.backward") {
                 store.conversation.editFromHere(entry: anchor)
             }
         }
@@ -276,7 +276,9 @@ private struct AssistantMessage: View {
                 Label {
                     Text(error).selectableText()
                 } icon: {
-                    Image(systemName: "exclamationmark.triangle").accessibilityHidden(true)
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .icon(.inline)
+                        .accessibilityHidden(true)
                 }
                 .font(.system(size: 12.5))
                 .foregroundStyle(.red)
@@ -293,7 +295,7 @@ private struct AssistantMessage: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .hoverActions(alignment: .bottomLeading, hovering: $hovering) {
             if !streaming, !answer.isEmpty {
-                CopyButton(text: answer, size: 12)
+                CopyButton(text: answer)
                 if let createdAt {
                     TimestampText(millis: createdAt)
                         .padding(.leading, 4)
@@ -385,8 +387,7 @@ private struct ThinkingBlock: View {
                             .truncationMode(.tail)
                     }
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.inline, .secondary)
                         .accessibilityHidden(true)
                 }
                 .font(.system(size: 12.5))
@@ -428,8 +429,8 @@ private struct ToolGroupView: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 12, weight: .light))
-                            .frame(width: 16)
+                            .icon(.inline)
+                            .frame(width: 20)
                             .accessibilityHidden(true)
                         Text(hidden == 1 ? "1 earlier tool call" : "\(hidden) earlier tool calls")
                         Spacer(minLength: 0)
@@ -465,9 +466,8 @@ private struct ToolRow: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: kind.symbol)
-                            .font(.system(size: 12, weight: .light))
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(width: 16)
+                            .icon(.inline, .secondary)
+                            .frame(width: 20)
                             .accessibilityHidden(true)
                         Text(summary.isEmpty ? name : summary)
                             .foregroundStyle(hovering || expanded ? Color.primary : Theme.secondaryText)
@@ -483,9 +483,8 @@ private struct ToolRow: View {
                         Spacer(minLength: 8)
                         ToolStateGlyph(state: state)
                         Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(width: 10)
+                            .icon(.inline, .secondary)
+                            .frame(width: 14)
                             .opacity(hovering || expanded ? 1 : 0)
                             .accessibilityHidden(true)
                     }
@@ -525,23 +524,23 @@ private struct ToolStateGlyph: View {
         case .running:
             LogoMark(tint: Theme.secondaryText)
                 .frame(width: 12, height: 12)
-                .frame(width: 14)
+                .frame(width: 18)
                 .help("Running")
                 .accessibilityLabel("Running")
         case .succeeded:
-            glyph("checkmark", Theme.secondaryText.opacity(0.7), "Succeeded")
+            glyph("checkmark", Theme.secondaryText, "Succeeded")
         case .failed:
             glyph("xmark", .red, "Failed")
         case .aborted:
-            glyph("minus.circle", Theme.secondaryText, "Stopped")
+            glyph("minus", Theme.secondaryText, "Stopped")
         }
     }
 
     private func glyph(_ symbol: String, _ color: Color, _ help: String) -> some View {
         Image(systemName: symbol)
-            .font(.system(size: 11, weight: .light))
+            .icon(.inline)
             .foregroundStyle(color)
-            .frame(width: 14)
+            .frame(width: 18)
             .help(help)
             .accessibilityLabel(help)
     }
@@ -675,8 +674,7 @@ private struct TurnFoldRow: View {
                     Text("Worked for \(WorkDuration(milliseconds: duration).text)")
                         .foregroundStyle(hovering ? Color.primary : Theme.secondaryText)
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.inline, .secondary)
                         .accessibilityHidden(true)
                     Rectangle()
                         .fill(Theme.hairline)
@@ -769,9 +767,8 @@ private struct ChangedFileRow: View {
         let directory = url.deletingLastPathComponent().relativePath
         return HStack(spacing: 8) {
             Image(systemName: "doc")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(Theme.secondaryText)
-                .frame(width: 16)
+                .icon(.inline, .secondary)
+                .frame(width: 20)
                 .accessibilityHidden(true)
             Text(url.lastPathComponent)
                 .font(.system(size: 12.5))
@@ -800,7 +797,7 @@ private struct NoticeRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: level.symbol)
-                .font(.system(size: 12, weight: .light))
+                .icon(.inline)
                 .accessibilityHidden(true)
             Text(text)
                 .selectableText()
@@ -824,7 +821,7 @@ private struct CompactionDivider: View {
             } label: {
                 HStack(spacing: 10) {
                     Rectangle().fill(Theme.hairline).frame(height: 1)
-                    Label("Context compacted from \(TokenCount(tokensBefore).text) tokens", systemImage: "arrow.down.right.and.arrow.up.left")
+                    IconLabel("Context compacted from \(TokenCount(tokensBefore).text) tokens", symbol: "arrow.down.right.and.arrow.up.left")
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.secondaryText)
                         .fixedSize()
@@ -921,7 +918,7 @@ struct QueuedBubble: View {
                         .strokeBorder(Theme.input, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 )
             HStack(spacing: 2) {
-                Label(status, systemImage: "clock")
+                IconLabel(status, symbol: "clock")
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
                     .help(message.steering ? "Sends after the next tool call" : "Sends when the turn ends")
@@ -929,12 +926,12 @@ struct QueuedBubble: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(status)
                 if !message.steering, !message.sending {
-                    MessageActionButton("Send now", symbol: "arrow.up", size: 12) {
+                    MessageActionButton("Send now", symbol: "arrow.up") {
                         store.conversation.sendNow(message)
                     }
                 }
                 if !message.sending {
-                    MessageActionButton("Cancel and return to the composer", symbol: "xmark", size: 12) {
+                    MessageActionButton("Cancel and return to the composer", symbol: "xmark") {
                         store.conversation.cancelQueued(message)
                     }
                 }
@@ -970,9 +967,9 @@ extension ToolKind {
 extension NoticeLevel {
     var symbol: String {
         switch self {
-        case .info: "info.circle"
-        case .warning: "exclamationmark.triangle"
-        case .error: "xmark.octagon"
+        case .info: "info.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
         }
     }
 

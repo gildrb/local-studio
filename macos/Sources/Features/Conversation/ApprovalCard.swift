@@ -9,8 +9,8 @@ struct ApprovalCard: View {
         if let approval = approvals.first {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
-                    Image(systemName: "hand.raised")
-                        .font(.system(size: 12, weight: .light))
+                    Image(systemName: "hand.raised.fill")
+                        .icon(.inline)
                         .accessibilityHidden(true)
                     Text(Self.kind(approval))
                         .font(.system(size: 12.5, weight: .semibold))
@@ -62,9 +62,8 @@ struct ApprovalCard: View {
                         }
                     } label: {
                         Image(systemName: "ellipsis")
-                            .font(.system(size: 13, weight: .light))
-                            .foregroundStyle(Theme.chromeIcon)
-                            .frame(width: 26, height: 26)
+                            .icon(.control, .primary)
+                            .frame(width: 28, height: 28)
                             .contentShape(Rectangle())
                     }
                     .menuStyle(.button)

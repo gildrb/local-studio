@@ -52,8 +52,7 @@ struct ThreadHeaderBar: View {
         if store.shell.route != .thread {
             HStack(spacing: 7) {
                 Image(systemName: store.shell.route.symbol)
-                    .font(.system(size: 13, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
+                    .icon(.control, .secondary)
                     .accessibilityHidden(true)
                 Text(store.shell.route.title)
                     .font(.system(size: 13, weight: .medium))
@@ -100,8 +99,7 @@ struct ThreadHeaderBar: View {
                         .fontWeight(.medium)
                         .lineLimit(1)
                     Image(systemName: "chevron.down")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.inline, .secondary)
                         .opacity(hoveringTitle ? 1 : 0)
                         .accessibilityHidden(true)
                 }

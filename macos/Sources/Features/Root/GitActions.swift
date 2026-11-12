@@ -27,12 +27,12 @@ enum GitPrimaryAction: Equatable {
 
     var symbol: String {
         switch self {
-        case .commit: "checkmark.circle"
-        case .pull: "arrow.down.circle"
+        case .commit: "checkmark"
+        case .pull: "arrow.down"
         case .sync: "arrow.triangle.2.circlepath"
-        case .publish: "icloud.and.arrow.up"
-        case .push: "arrow.up.circle"
-        case .createPullRequest, .viewPullRequest: "arrow.trianglehead.pull"
+        case .publish: "arrow.up"
+        case .push: "arrow.up"
+        case .createPullRequest, .viewPullRequest: "arrow.triangle.pull"
         case .upToDate: "checkmark"
         }
     }
@@ -106,6 +106,7 @@ struct GitActionsButton: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: action.symbol)
+                        .icon(.inline)
                         .accessibilityHidden(true)
                     Text(action.title)
                 }

@@ -53,8 +53,10 @@ struct SettingsView: View {
                     ToolbarItem(placement: .navigation) {
                         ControlGroup {
                             Button("Back", systemImage: "chevron.left", action: goBack)
+                                .help("Back")
                                 .disabled(backStack.isEmpty)
                             Button("Forward", systemImage: "chevron.right", action: goForward)
+                                .help("Forward")
                                 .disabled(forwardStack.isEmpty)
                         }
                         .controlGroupStyle(.navigation)

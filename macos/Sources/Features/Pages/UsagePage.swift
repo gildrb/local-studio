@@ -54,7 +54,7 @@ struct UsagePage: View {
                 UsageDashboard(report: report, metric: mode == .cost ? .cost : .tokens, period: pages.usagePeriod) { pages.loadUsage($0) }
             }
         } else if let error = pages.usageError {
-            PageEmptyState(symbol: "exclamationmark.triangle", title: "Couldn’t load usage", message: error)
+            PageEmptyState(symbol: "exclamationmark.triangle.fill", title: "Couldn’t load usage", message: error)
                 .frame(minHeight: 360)
         } else {
             PageEmptyState.loading("Loading usage…")

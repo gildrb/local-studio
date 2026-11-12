@@ -216,9 +216,8 @@ private struct SuggestionRow: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: suggestion.symbol)
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.secondaryText)
-                    .frame(width: 16)
+                    .icon(.inline, .secondary)
+                    .frame(width: 18)
                     .accessibilityHidden(true)
                 Text(suggestion.title)
                     .font(.system(size: 13))

@@ -162,7 +162,7 @@ private struct DashboardFigureView: View {
                 .foregroundStyle(Theme.secondaryText)
                 .lineLimit(1)
         case .warning, .danger:
-            Label(figure.hint ?? "", systemImage: "exclamationmark.triangle")
+            IconLabel(figure.hint ?? "", symbol: "exclamationmark.triangle.fill")
                 .font(.system(size: 13))
                 .foregroundStyle(figure.tone == .danger ? Theme.danger : Theme.warning)
                 .lineLimit(1)

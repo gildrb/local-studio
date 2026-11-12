@@ -17,7 +17,7 @@ struct StatusBadge: View {
                         .accessibilityHidden(true)
                 } else {
                     Image(systemName: glyph.symbol)
-                        .font(.system(size: 11, weight: .regular))
+                        .icon(.inline)
                         .symbolEffect(.bounce.up, options: .nonRepeating, value: attention)
                         .motion(Motion.confirm, value: attention)
                         .accessibilityHidden(true)
@@ -68,11 +68,11 @@ struct StatusBadge: View {
     static func glyph(_ status: ThreadStatus) -> (symbol: String, title: String, tint: Color)? {
         switch status {
         case .idle: nil
-        case .working: ("circle.dotted", "Working", Theme.working)
+        case .working: ("hourglass", "Working", Theme.working)
         case .monitoring: ("eye", "Monitoring", Theme.working)
-        case .approval: ("exclamationmark.shield", "Approval", Theme.warning)
-        case .failed: ("exclamationmark.circle", "Failed", Theme.danger)
-        case .done: ("checkmark.circle", "Done", Theme.success)
+        case .approval: ("hand.raised.fill", "Approval", Theme.warning)
+        case .failed: ("xmark", "Failed", Theme.danger)
+        case .done: ("checkmark", "Done", Theme.success)
         case .woke: ("alarm", "Woke", Theme.woke)
         }
     }
@@ -100,10 +100,9 @@ struct RowActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.control, .primary)
                 .accessibilityHidden(true)
-                .frame(width: 20, height: 20)
+                .frame(width: 24, height: 24)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -121,15 +120,16 @@ struct RowSnoozeMenu: View {
             MenuNodes(nodes: ThreadActions.snoozeMenu(store, ids))
         } label: {
             Image(systemName: "clock")
-                .font(.system(size: 12, weight: .regular))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.control, .primary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
                 .accessibilityHidden(true)
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .frame(width: 20, height: 20)
+        .frame(width: 24, height: 24)
         .help("Snooze")
         .accessibilityLabel("Snooze")
     }
@@ -233,9 +233,8 @@ struct InboxRowView: View, Equatable {
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if row.pinned {
-                    Image(systemName: "pin")
-                        .font(.system(size: 10))
-                        .foregroundStyle(Theme.tertiaryText)
+                    Image(systemName: "pin.fill")
+                        .icon(.inline, .secondary)
                         .accessibilityHidden(true)
                 }
                 trailing
@@ -260,9 +259,8 @@ struct InboxRowView: View, Equatable {
             }
             titleText(weight: .regular)
             if row.pinned {
-                Image(systemName: "pin")
-                    .font(.system(size: 10))
-                    .foregroundStyle(Theme.tertiaryText)
+                Image(systemName: "pin.fill")
+                    .icon(.inline, .secondary)
                     .accessibilityHidden(true)
             }
             Spacer(minLength: 4)
@@ -278,7 +276,7 @@ struct InboxRowView: View, Equatable {
                     .frame(height: 17)
                     .background(Theme.woke.opacity(0.14), in: Capsule())
             } else if row.shelf == .snoozed, let until = row.snoozedUntil {
-                Label(RelativeAge.countdown(millis: until, now: now), systemImage: "clock")
+                IconLabel(RelativeAge.countdown(millis: until, now: now), symbol: "clock")
                     .labelStyle(.titleAndIcon)
                     .font(.system(size: 11.5))
                     .monospacedDigit()
@@ -345,7 +343,7 @@ struct InboxRowView: View, Equatable {
         HStack(spacing: 6) {
             if let branch = row.branch {
                 Image(systemName: row.worktree == nil ? "arrow.triangle.branch" : "folder")
-                    .font(.system(size: 9.5))
+                    .icon(.inline)
                     .accessibilityHidden(true)
                 Text(branch)
                     .lineLimit(1)
@@ -355,7 +353,7 @@ struct InboxRowView: View, Equatable {
             if let position = fanOut {
                 HStack(spacing: 2) {
                     Image(systemName: "square.stack")
-                        .font(.system(size: 9.5))
+                        .icon(.inline)
                         .accessibilityHidden(true)
                     Text("\(position.index)/\(position.count)")
                         .monospacedDigit()
@@ -379,7 +377,7 @@ struct InboxRowView: View, Equatable {
         }
         .font(.system(size: 11))
         .foregroundStyle(Theme.tertiaryText)
-        .frame(height: 15)
+        .frame(height: 20)
     }
 
     private var hasMeta: Bool {
@@ -485,10 +483,9 @@ struct DraftRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "pencil")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
-                .frame(width: 14)
+            Image(systemName: "plus")
+                .icon(.control, .primary)
+                .frame(width: 18)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text("New thread")
@@ -520,8 +517,8 @@ struct ShelfHeader: View {
         Button(action: toggle) {
             HStack(spacing: 6) {
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .frame(width: 10)
+                    .icon(.inline)
+                    .frame(width: 14)
                     .accessibilityHidden(true)
                 Text(shelf.title)
                     .font(.system(size: 11.5, weight: .semibold))
@@ -588,22 +585,30 @@ struct PullRequestBadge: View {
     var body: some View {
         Button(action: open) {
             HStack(spacing: 3) {
-                Image(systemName: "arrow.trianglehead.pull")
-                    .font(.system(size: 9))
+                Image(systemName: symbol)
+                    .icon(.inline)
                     .accessibilityHidden(true)
                 Text("#\(pull.number)")
                     .font(.system(size: 10.5, weight: .medium))
                     .monospacedDigit()
             }
             .foregroundStyle(tint)
-            .padding(.horizontal, 5)
-            .frame(height: 15)
+            .padding(.horizontal, 6)
+            .frame(height: 20)
             .background(tint.opacity(0.14), in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .help("\(pull.title) · \(pull.state.capitalized)")
         .accessibilityLabel("Pull request \(pull.number), \(pull.state.lowercased())")
+    }
+
+    private var symbol: String {
+        switch pull.state.uppercased() {
+        case "MERGED": "arrow.triangle.merge"
+        case "CLOSED": "xmark"
+        default: "arrow.triangle.pull"
+        }
     }
 
     private var tint: Color {

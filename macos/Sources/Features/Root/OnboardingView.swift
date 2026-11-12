@@ -54,13 +54,13 @@ struct OnboardingView: View {
             }
         case .daemon:
             OnboardingPage(symbol: "server.rack", title: "Connect to Eukhe", detail: "Local Studio starts the Eukhe daemon bundled with the app and talks to it over a local socket.") {
-                StatusLine(tint: daemonTint, text: daemonText)
+                StatusLine(tint: daemonTint, symbol: daemonSymbol, text: daemonText)
             }
         case .providers:
             OnboardingPage(symbol: "cpu", title: "Model providers", detail: providerDetail) {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(onboardingProviders, id: \.id) { provider in
-                        StatusLine(tint: provider.configured ? Theme.success : Theme.tertiaryText, text: "\(provider.name) · \(provider.modelCount) model\(provider.modelCount == 1 ? "" : "s")")
+                        StatusLine(tint: provider.configured ? Theme.success : Theme.tertiaryText, symbol: provider.configured ? "checkmark" : "minus", text: "\(provider.name) · \(provider.modelCount) model\(provider.modelCount == 1 ? "" : "s")")
                     }
                     if configuredProviders == 0 {
                         Text("Paste an API key or add an OpenAI-compatible endpoint in Settings → Providers, or run `eukhe` in Terminal and use `/login` for a subscription, then check again.")
@@ -101,7 +101,7 @@ struct OnboardingView: View {
                 }
             }
         case .done:
-            OnboardingPage(symbol: "checkmark.circle", title: "You're ready", detail: "Start a thread with ⌘N, find anything with ⌘K, and hold ⌘ to jump between threads.") {
+            OnboardingPage(symbol: "checkmark", title: "You're ready", detail: "Start a thread with ⌘N, find anything with ⌘K, and hold ⌘ to jump between threads.") {
                 EmptyView()
             }
         }
@@ -165,6 +165,14 @@ struct OnboardingView: View {
         }
     }
 
+    private var daemonSymbol: String {
+        switch store.connection {
+        case .ready: "checkmark"
+        case .connecting: "hourglass"
+        case .lost: "xmark"
+        }
+    }
+
     private var daemonText: String {
         switch store.connection {
         case .ready: "Connected to the Eukhe daemon"
@@ -212,8 +220,7 @@ private struct OnboardingPage<Extra: View>: View {
             Group {
                 if let symbol {
                     Image(systemName: symbol)
-                        .font(.system(size: 30, weight: .light))
-                        .foregroundStyle(Theme.chromeIcon)
+                        .icon(.display, .primary)
                 } else {
                     Image(nsImage: NSApp.applicationIconImage)
                         .resizable()
@@ -237,14 +244,23 @@ private struct OnboardingPage<Extra: View>: View {
 
 private struct StatusLine: View {
     let tint: Color
+    let symbol: String
     let text: String
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
 
     var body: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(tint)
-                .frame(width: 7, height: 7)
-                .accessibilityHidden(true)
+            Group {
+                if differentiate {
+                    Image(systemName: symbol)
+                        .icon(.inline, .primary)
+                } else {
+                    Circle()
+                        .fill(tint)
+                        .frame(width: 7, height: 7)
+                }
+            }
+            .accessibilityHidden(true)
             Text(text)
                 .font(.system(size: 13))
         }

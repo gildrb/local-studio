@@ -115,8 +115,7 @@ struct PickerPanel: View {
     private func searchField(_ text: Binding<String>, proxy: ScrollViewProxy) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(Theme.secondaryText)
+                .icon(.inline, .secondary)
                 .accessibilityHidden(true)
             TextField(prompt, text: text)
                 .textFieldStyle(.plain)
@@ -291,9 +290,9 @@ private struct PickerRowView: View {
             HStack(alignment: row.subtitle == nil ? .center : .firstTextBaseline, spacing: 8) {
                 if let symbol = row.symbol {
                     Image(systemName: symbol)
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(row.destructive ? Theme.danger : Theme.secondaryText)
-                        .frame(width: 16)
+                        .icon(.inline)
+                        .foregroundStyle(row.destructive ? Theme.danger : Theme.text)
+                        .frame(width: 18)
                         .accessibilityHidden(true)
                 }
                 labels
@@ -304,9 +303,9 @@ private struct PickerRowView: View {
                         .foregroundStyle(Theme.secondaryText)
                 }
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .icon(.inline)
                     .foregroundStyle(Theme.primary)
-                    .frame(width: 12)
+                    .frame(width: 16)
                     .opacity(row.checked ? 1 : 0)
                     .accessibilityHidden(true)
             }
