@@ -28,6 +28,7 @@ pub fn check_scratch_agent(agent: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[must_use]
 pub fn stored_keys_empty(agent: &Path) -> bool {
     std::fs::read(agent.join("auth.json"))
         .ok()
