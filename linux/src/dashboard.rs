@@ -111,6 +111,7 @@ impl View {
         left.append(&error);
         left.append(&grid);
         let summary = TokenSummary::build(&[]);
+        summary.move_since();
         let heatmap = Heatmap::build();
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.append(&parts::columns(&left, &summary));
@@ -339,6 +340,7 @@ pub struct LocalPage {
     pub root: gtk::ScrolledWindow,
     app: Weak<App>,
     online: gtk::Label,
+    since: gtk::Label,
     notice: gtk::Label,
     tabs: gtk::Box,
     tab_buttons: RefCell<Vec<(String, gtk::ToggleButton)>>,
@@ -362,8 +364,10 @@ pub struct LocalPage {
 impl LocalPage {
     pub fn new(app: Weak<App>) -> Self {
         let online = label("", &["dim-label", "ls-dash-label"]);
+        let since = label("", &["dim-label", "ls-dash-label"]);
+        since.set_visible(false);
         let tabs = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        let bar = top_bar(&app, &tabs, &online);
+        let bar = top_bar(&app, &tabs, &since, &online);
         let notice = label("", &["warning", "ls-dash-label"]);
         notice.set_wrap(true);
         notice.set_selectable(true);
@@ -410,6 +414,7 @@ impl LocalPage {
             root,
             app,
             online,
+            since,
             notice,
             tabs,
             tab_buttons: RefCell::new(Vec::new()),
@@ -501,6 +506,11 @@ impl LocalPage {
         let controllers = state.local.as_ref().map_or(&[][..], |snapshot| snapshot.controllers.as_slice());
         let current = self.current(controllers);
         self.render_bar(state, controllers, current);
+        let dashboard = current
+            .filter(|controller| controller.reachable && controller.has_controller)
+            .map(|controller| state.dashboard.as_ref().filter(|dashboard| dashboard.controller == controller.target));
+        self.since.set_visible(dashboard.is_some());
+        self.since.set_label(&parts::since_text(dashboard.flatten().map(|dashboard| &dashboard.tokens)));
         match current {
             None => self.render_empty(state),
             Some(controller) if !controller.has_controller => {
@@ -701,7 +711,7 @@ impl LocalPage {
     }
 }
 
-fn top_bar(app: &Weak<App>, tabs: &gtk::Box, online: &gtk::Label) -> gtk::Box {
+fn top_bar(app: &Weak<App>, tabs: &gtk::Box, since: &gtk::Label, online: &gtk::Label) -> gtk::Box {
     let scroller = gtk::ScrolledWindow::builder()
         .hscrollbar_policy(gtk::PolicyType::Automatic)
         .vscrollbar_policy(gtk::PolicyType::Never)
@@ -729,9 +739,11 @@ fn top_bar(app: &Weak<App>, tabs: &gtk::Box, online: &gtk::Label) -> gtk::Box {
             app.open_settings(Some("local"));
         }
     });
+    since.set_valign(gtk::Align::Center);
     online.set_valign(gtk::Align::Center);
     let bar = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     bar.append(&scroller);
+    bar.append(since);
     bar.append(online);
     bar.append(&refresh);
     bar.append(&manage);

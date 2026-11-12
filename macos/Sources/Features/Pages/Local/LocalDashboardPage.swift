@@ -74,7 +74,17 @@ struct LocalPage: View {
                     .textSelection(.enabled)
                     .padding(.bottom, 10)
             }
-            LocalMachineTabs(controllers: snapshot.controllers, selected: current?.url) { selected = $0 }
+            HStack(spacing: 6) {
+                LocalMachineTabs(controllers: snapshot.controllers, selected: current?.url) { selected = $0 }
+                Spacer(minLength: 12)
+                if let current, current.hasController, current.reachable {
+                    Text(TokenSummary.since(dashboard(current)?.tokens))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.leading, -7)
             if let current {
                 if !current.hasController {
                     LocalEngineMachine(controller: current, select: { selected = $0 }, addController: { store.openSettings(.local) })
@@ -82,7 +92,7 @@ struct LocalPage: View {
                 } else if current.reachable {
                     LocalMachineDashboard(
                         controller: current,
-                        dashboard: pages.localDashboard.flatMap { $0.controller == current.target ? $0 : nil },
+                        dashboard: dashboard(current),
                         pages: pages,
                         select: { selected = $0 }
                     )
@@ -98,6 +108,10 @@ struct LocalPage: View {
             PageEmptyState(symbol: "server.rack", title: "Contacting the Local controller…")
                 .frame(minHeight: 360)
         }
+    }
+
+    private func dashboard(_ controller: LocalController) -> LocalDashboard? {
+        pages.localDashboard.flatMap { $0.controller == controller.target ? $0 : nil }
     }
 }
 
@@ -242,8 +256,13 @@ private struct LocalMachineDashboard: View {
                     .fill(Theme.hairline)
                     .frame(width: 1)
                     .padding(.horizontal, 44)
-                TokenSummary(tokens: dashboard?.tokens, empty: "Counted from engine metrics as models serve requests.")
-                    .frame(width: 244, alignment: .leading)
+                TokenSummary(
+                    tokens: dashboard?.tokens,
+                    empty: "Counted from engine metrics as models serve requests.",
+                    titled: false
+                )
+                .padding(.top, 32)
+                .frame(width: 244, alignment: .leading)
             }
             Rectangle()
                 .fill(Theme.hairline)
