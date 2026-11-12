@@ -1,18 +1,25 @@
+import AppKit
 import LocalStudioKit
 import SwiftUI
 
 enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
-    case project
     case general
     case appearance
     case keybindings
     case snapshots
     case providers
-    case sourceControl
-    case storage
     case local
     case connections
+    case project
+    case sourceControl
+    case storage
     case archive
+
+    static let groups: [[SettingsPane]] = [
+        [.general, .appearance, .keybindings, .snapshots],
+        [.providers, .local, .connections],
+        [.project, .sourceControl, .storage, .archive],
+    ]
 
     var id: String { rawValue }
 
@@ -34,33 +41,43 @@ enum SettingsPane: String, CaseIterable, Identifiable, Hashable {
 
     var symbol: String {
         switch self {
-        case .project: "folder"
-        case .general: "gearshape"
+        case .project: "folder.fill"
+        case .general: "gearshape.fill"
         case .appearance: "circle.lefthalf.filled"
-        case .keybindings: "keyboard"
-        case .snapshots: "camera"
-        case .providers: "sparkles"
+        case .keybindings: "keyboard.fill"
+        case .snapshots: "camera.fill"
+        case .providers: "key.horizontal.fill"
         case .sourceControl: "arrow.triangle.branch"
-        case .storage: "internaldrive"
+        case .storage: "internaldrive.fill"
         case .local: "server.rack"
-        case .connections: "link"
-        case .archive: "archivebox"
+        case .connections: "network"
+        case .archive: "archivebox.fill"
         }
     }
 
-    var tint: Color {
+    var tile: NSColor {
         switch self {
-        case .project: .blue
-        case .general: .gray
-        case .appearance: .indigo
-        case .keybindings: .gray
-        case .snapshots: .pink
-        case .providers: .purple
-        case .sourceControl: .orange
-        case .storage: .gray
-        case .local: .green
-        case .connections: .blue
-        case .archive: .brown
+        case .appearance: .black
+        case .providers, .connections: .systemBlue
+        case .local: .systemPurple
+        case .sourceControl: .systemOrange
+        case .general, .keybindings, .snapshots, .project, .storage, .archive: .systemGray
+        }
+    }
+
+    var summary: String {
+        switch self {
+        case .project: "Name, icon, checkout, defaults and scripts for each project."
+        case .general: "Defaults for new threads, how threads are organized, confirmations and diagnostics."
+        case .appearance: "Theme, interface and typography."
+        case .keybindings: "Keyboard shortcuts for every command."
+        case .snapshots: "Capture the window of another app and attach it to the composer."
+        case .providers: "API keys, sign-in, custom endpoints and the models you can choose."
+        case .sourceControl: "Background Git sync and how commits and pull requests are written."
+        case .storage: "Worktree cleanup and the data Local Studio keeps."
+        case .local: "The Local controller on this Mac and the machines in your fleet."
+        case .connections: "The Eukhe agent daemon that runs every thread."
+        case .archive: "Archived threads, grouped by project."
         }
     }
 }
@@ -384,10 +401,19 @@ struct SettingsQueryKey: EnvironmentKey {
     static let defaultValue = ""
 }
 
+struct SettingsPaneKey: EnvironmentKey {
+    static let defaultValue: SettingsPane? = nil
+}
+
 extension EnvironmentValues {
     var settingsQuery: String {
         get { self[SettingsQueryKey.self] }
         set { self[SettingsQueryKey.self] = newValue }
+    }
+
+    var settingsPane: SettingsPane? {
+        get { self[SettingsPaneKey.self] }
+        set { self[SettingsPaneKey.self] = newValue }
     }
 }
 
@@ -485,24 +511,6 @@ struct CommitTextField: View {
     private func save() {
         guard draft != value else { return }
         commit(draft)
-    }
-}
-
-struct SettingsPaneIcon: View {
-    let pane: SettingsPane
-    var size: CGFloat = 20
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.26, style: .continuous)
-            .fill(pane.tint.gradient)
-            .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: pane.symbol)
-                    .font(.system(size: size * 0.6, weight: .semibold))
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(.white)
-                    .accessibilityHidden(true)
-            }
     }
 }
 

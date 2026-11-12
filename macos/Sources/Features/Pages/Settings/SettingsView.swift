@@ -19,13 +19,17 @@ struct SettingsView: View {
     var body: some View {
         NavigationSplitView(columnVisibility: .constant(.all)) {
             List(selection: $selection) {
-                ForEach(visiblePanes) { pane in
-                    Label {
-                        Text(pane.title)
-                    } icon: {
-                        SettingsPaneIcon(pane: pane)
+                ForEach(visibleGroups, id: \.self) { group in
+                    Section {
+                        ForEach(group) { pane in
+                            Label {
+                                Text(pane.title)
+                            } icon: {
+                                SettingsTile(symbol: pane.symbol, color: pane.tile)
+                            }
+                            .tag(pane)
+                        }
                     }
-                    .tag(pane)
                 }
             }
             .listStyle(.sidebar)
@@ -34,16 +38,15 @@ struct SettingsView: View {
             .toolbar(removing: .sidebarToggle)
         } detail: {
             detail
+                .themeRoot()
                 .environment(\.settingsQuery, detailQuery)
+                .environment(\.settingsPane, selection ?? .general)
                 .scrollEdgeEffectHidden(true, for: .top)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Theme.canvas)
                 .overlay(alignment: .top) {
                     Theme.canvas
                         .frame(height: 52)
-                        .overlay(alignment: .bottom) {
-                            Rectangle().fill(Theme.hairline).frame(height: 1)
-                        }
                         .ignoresSafeArea(edges: .top)
                         .allowsHitTesting(false)
                 }
@@ -61,19 +64,11 @@ struct SettingsView: View {
                         }
                         .controlGroupStyle(.navigation)
                     }
-                    ToolbarItem(placement: .navigation) {
-                        Text(selection?.title ?? "Settings")
-                            .font(.system(size: 15, weight: .semibold))
-                            .fixedSize()
-                            .padding(.horizontal, 6)
-                    }
-                    .sharedBackgroundVisibility(.hidden)
                 }
         }
         .navigationSplitViewStyle(.balanced)
-        .themeRoot()
         .background(SettingsWindowStyle())
-        .frame(minWidth: 720, minHeight: 480)
+        .frame(minWidth: 760, minHeight: 480)
         .transaction { $0.disablesAnimations = true }
         .onChange(of: selection) { previous, _ in
             guard !travelling else {
@@ -122,6 +117,10 @@ struct SettingsView: View {
         SettingsPane.allCases.filter(matches)
     }
 
+    private var visibleGroups: [[SettingsPane]] {
+        SettingsPane.groups.map { $0.filter(matches) }.filter { !$0.isEmpty }
+    }
+
     private var detailQuery: String {
         guard let selection, !selection.title.localizedCaseInsensitiveContains(query) else { return "" }
         return query
@@ -152,30 +151,47 @@ struct SettingsView: View {
         selection = target
     }
 
-    static let sidebarWidth: CGFloat = {
-        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
-        let rows = SettingsPane.allCases.map { ($0.title as NSString).size(withAttributes: [.font: font]).width + SettingsMetrics.rowChrome }
-        let search = ("Search Settings" as NSString).size(withAttributes: [.font: font]).width + SettingsMetrics.searchChrome
-        return ceil(max(rows.max() ?? 0, search) + SettingsMetrics.breathing)
-    }()
-}
-
-private enum SettingsMetrics {
-    static let rowChrome: CGFloat = 64
-    static let searchChrome: CGFloat = 58
-    static let breathing: CGFloat = 20
+    static let sidebarWidth: CGFloat = 220
 }
 
 struct SettingsForm<Content: View>: View {
     @ViewBuilder let content: Content
+    @Environment(\.settingsPane) private var pane
+    @Environment(\.settingsQuery) private var query
 
     var body: some View {
         Form {
+            if let pane, query.isEmpty {
+                Section {
+                    SettingsHeader(pane: pane)
+                }
+            }
             content
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
         .background(Theme.canvas)
+    }
+}
+
+struct SettingsHeader: View {
+    let pane: SettingsPane
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SettingsTile(symbol: pane.symbol, color: pane.tile, size: 48)
+            Text(pane.title)
+                .font(.title.bold())
+                .padding(.top, 10)
+            Text(pane.summary)
+                .foregroundStyle(Theme.secondaryText)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .accessibilityElement(children: .combine)
     }
 }
 

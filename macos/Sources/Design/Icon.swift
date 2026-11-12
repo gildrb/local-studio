@@ -1,6 +1,7 @@
 import SwiftUI
 
 enum IconSize {
+    case tile
     case inline
     case control
     case toolbar
@@ -8,24 +9,25 @@ enum IconSize {
 
     var points: CGFloat {
         switch self {
+        case .tile: 12
         case .inline: 12.5
-        case .control: 15
-        case .toolbar: 16
+        case .control: 14
+        case .toolbar: 15
         case .display: 26
         }
     }
 
     var weight: Font.Weight {
         switch self {
-        case .inline: .semibold
-        case .control, .toolbar, .display: .medium
+        case .tile: .semibold
+        case .inline, .control, .toolbar, .display: .regular
         }
     }
 
     var heavyWeight: Font.Weight {
         switch self {
-        case .inline: .bold
-        case .control, .toolbar, .display: .semibold
+        case .tile: .bold
+        case .inline, .control, .toolbar, .display: .medium
         }
     }
 }
