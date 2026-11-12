@@ -57,7 +57,7 @@ struct LocalPage: View {
     @ViewBuilder private var content: some View {
         if let error = pages.localActionError {
             HStack(spacing: 8) {
-                Label(error, systemImage: "exclamationmark.triangle")
+                IconLabel(error, symbol: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.danger)
                     .textSelection(.enabled)
                 Spacer()
@@ -68,7 +68,7 @@ struct LocalPage: View {
         }
         if let snapshot = pages.local, !snapshot.controllers.isEmpty {
             if let error = snapshot.error {
-                Label(error, systemImage: "exclamationmark.triangle")
+                IconLabel(error, symbol: "exclamationmark.triangle.fill")
                     .font(.system(size: 12.5))
                     .foregroundStyle(Theme.warning)
                     .textSelection(.enabled)
@@ -102,7 +102,7 @@ struct LocalPage: View {
                 }
             }
         } else if let error = pages.local?.error ?? pages.localError {
-            PageEmptyState(symbol: "bolt.horizontal.circle", title: "No Local controller answers", message: error)
+            PageEmptyState(symbol: "exclamationmark.triangle.fill", title: "No Local controller answers", message: error)
                 .frame(minHeight: 360)
         } else {
             PageEmptyState(symbol: "server.rack", title: "Contacting the Local controller…")
@@ -129,14 +129,31 @@ extension LocalMachineStatus {
 
 struct MachineDot: View {
     let status: LocalMachineStatus
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
 
     var body: some View {
+        if differentiate {
+            Image(systemName: symbol)
+                .icon(.inline, .primary)
+                .accessibilityHidden(true)
+        } else {
+            switch status {
+            case .serving: Circle().fill(Theme.success).frame(width: 7, height: 7)
+            case .loading: Circle().fill(Theme.warning).frame(width: 7, height: 7)
+            case .engineUnreachable: Circle().strokeBorder(Theme.warning, lineWidth: 1.5).frame(width: 7, height: 7)
+            case .noModel: Circle().fill(Theme.tertiaryText).frame(width: 7, height: 7)
+            case .offline: Circle().strokeBorder(Theme.secondaryText, lineWidth: 1.5).frame(width: 7, height: 7)
+            }
+        }
+    }
+
+    private var symbol: String {
         switch status {
-        case .serving: Circle().fill(Theme.success).frame(width: 7, height: 7)
-        case .loading: Circle().fill(Theme.warning).frame(width: 7, height: 7)
-        case .engineUnreachable: Circle().strokeBorder(Theme.warning, lineWidth: 1.5).frame(width: 7, height: 7)
-        case .noModel: Circle().fill(Theme.tertiaryText).frame(width: 7, height: 7)
-        case .offline: Circle().strokeBorder(Theme.secondaryText, lineWidth: 1.5).frame(width: 7, height: 7)
+        case .serving: "checkmark"
+        case .loading: "hourglass"
+        case .engineUnreachable: "exclamationmark"
+        case .noModel: "minus"
+        case .offline: "xmark"
         }
     }
 }
@@ -169,9 +186,8 @@ private struct LocalOfflineMachine: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Image(systemName: "circle.slash")
-                .font(.system(size: 17))
-                .foregroundStyle(Theme.text)
+            Image(systemName: "xmark")
+                .icon(.toolbar, .primary)
                 .frame(width: 40, height: 40)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.hairline) }
@@ -222,7 +238,7 @@ private struct LocalMachineDashboard: View {
                     header
                         .padding(.top, 34)
                     if let error = dashboard?.error {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                        IconLabel(error, symbol: "exclamationmark.triangle.fill")
                             .font(.system(size: 12.5))
                             .foregroundStyle(Theme.warning)
                             .padding(.top, 14)
@@ -319,14 +335,14 @@ private struct LocalMachineDashboard: View {
         let loading = pages.isPending(.load(target))
         HStack(spacing: 10) {
             Button { switching = true } label: {
-                Label(loading ? "Switching…" : endpoint == nil ? "Load model…" : "Switch model…", systemImage: "arrow.triangle.2.circlepath")
+                IconLabel(loading ? "Switching…" : endpoint == nil ? "Load model…" : "Switch model…", symbol: "arrow.left.arrow.right")
             }
             .buttonStyle(DashboardButtonStyle(bordered: true))
             .disabled(loading)
             if let endpoint, let model {
                 let unloading = pages.isPending(.unload(target, endpoint.port))
                 Button { stopping = true } label: {
-                    Label(unloading ? "Stopping…" : "Stop model…", systemImage: "stop")
+                    IconLabel(unloading ? "Stopping…" : "Stop model…", symbol: "stop.fill")
                 }
                 .buttonStyle(DashboardButtonStyle())
                 .disabled(unloading)

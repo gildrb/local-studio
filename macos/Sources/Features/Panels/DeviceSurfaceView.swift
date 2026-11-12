@@ -23,8 +23,8 @@ struct DeviceSurfaceView: View {
             }
             if let status = model.status {
                 HStack(spacing: 6) {
-                    Image(systemName: model.actionFailed ? "exclamationmark.triangle" : "checkmark.circle")
-                        .font(.system(size: 11, weight: .light))
+                    Image(systemName: model.actionFailed ? "exclamationmark.triangle.fill" : "checkmark")
+                        .icon(.inline)
                         .foregroundStyle(model.actionFailed ? Theme.diffRemoved : Theme.secondaryText)
                         .accessibilityHidden(true)
                     Text(status)
@@ -56,7 +56,7 @@ struct DeviceSurfaceView: View {
         case .loading where model.devices.isEmpty:
             PanelMessage.loading("Looking for devices…")
         case .failed(let message) where model.devices.isEmpty:
-            PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t list devices.", detail: message, actionTitle: "Try Again") { model.load() }
+            PanelMessage(symbol: "exclamationmark.triangle.fill", title: "Couldn’t list devices.", detail: message, actionTitle: "Try Again") { model.load() }
         default:
             if model.devices.isEmpty {
                 PanelMessage(
@@ -114,9 +114,8 @@ private struct DeviceRow: View {
     var body: some View {
         let booted = device.state == "Booted"
         HStack(spacing: 10) {
-            Image(systemName: device.platform == .iosSimulator ? "iphone" : "candybarphone")
-                .font(.system(size: 15, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+            Image(systemName: "iphone")
+                .icon(.control, .secondary)
                 .frame(width: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {

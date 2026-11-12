@@ -198,9 +198,9 @@ private struct ScriptRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: script.icon.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) == nil ? nil : $0 } ?? "play")
-                .font(.system(size: 13, weight: .light))
-                .frame(width: 18)
+            Image(systemName: script.icon.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) == nil ? nil : $0 } ?? "play.fill")
+                .icon(.inline)
+                .frame(width: 20)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(script.name)
@@ -273,8 +273,8 @@ struct ScriptEditorSheet: View {
                     .font(.system(size: 12.5, design: .monospaced))
                 LabeledContent("Icon") {
                     HStack(spacing: 8) {
-                        Image(systemName: draft.icon ?? "play")
-                            .font(.system(size: 14, weight: .light))
+                        Image(systemName: draft.icon ?? "play.fill")
+                            .icon(.control)
                             .accessibilityHidden(true)
                         Button("Choose…") { iconPicker = true }
                             .popover(isPresented: $iconPicker, arrowEdge: .bottom) {

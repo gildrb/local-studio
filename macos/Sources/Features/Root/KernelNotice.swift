@@ -22,6 +22,7 @@ struct KernelNotice: View {
         if !store.kernelNoticeHidden, let content {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: content.symbol)
+                    .icon(.control)
                     .foregroundStyle(content.tint)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
@@ -40,11 +41,7 @@ struct KernelNotice: View {
                 if content.failed {
                     Button("Retry") { store.installKernel() }
                 }
-                Button("Hide", systemImage: "xmark") { store.kernelNoticeHidden = true }
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Theme.secondaryText)
+                CloseIconButton(title: "Hide") { store.kernelNoticeHidden = true }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -60,11 +57,11 @@ struct KernelNotice: View {
         switch store.kernel {
         case .installing(let detail):
             KernelNoticeContent(
-                symbol: "arrow.down.circle", tint: Theme.primary, title: "Installing the Python kernel…",
+                symbol: "arrow.down", tint: Theme.primary, title: "Installing the Python kernel…",
                 detail: detail ?? "Downloading Python and the kernel packages. Threads keep working meanwhile.", failed: false
             )
         case .failed(let message):
-            KernelNoticeContent(symbol: "exclamationmark.circle", tint: Theme.danger, title: "The Python kernel could not be installed", detail: message, failed: true)
+            KernelNoticeContent(symbol: "exclamationmark.triangle.fill", tint: Theme.danger, title: "The Python kernel could not be installed", detail: message, failed: true)
         default:
             nil
         }

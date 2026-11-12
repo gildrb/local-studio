@@ -79,7 +79,7 @@ struct PullRequestsPage: View {
         if store.inbox.projects.isEmpty {
             PageEmptyState(symbol: "arrow.triangle.pull", title: "No projects yet", message: "Add a project to see its pull requests.")
         } else if let error = pages.pullsError {
-            PageEmptyState(symbol: "exclamationmark.triangle", title: "Couldn’t load pull requests", message: error)
+            PageEmptyState(symbol: "exclamationmark.triangle.fill", title: "Couldn’t load pull requests", message: error)
         } else if let pulls {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
@@ -170,7 +170,6 @@ private struct PullRow: View {
                             .truncationMode(.middle)
                         Spacer(minLength: 4)
                         ChecksGlyph(checks: pull.checks)
-                            .font(.system(size: 11, weight: .light))
                     }
                     .font(.system(size: 11.5))
                     .foregroundStyle(Theme.secondaryText)
@@ -287,7 +286,7 @@ private struct PullDetailView: View {
             case .checks: PullChecks(checks: detail.checks)
             }
         } else if let error {
-            PageEmptyState(symbol: "exclamationmark.triangle", title: "Couldn’t load the pull request", message: error)
+            PageEmptyState(symbol: "exclamationmark.triangle.fill", title: "Couldn’t load the pull request", message: error)
         } else {
             PageEmptyState.loading("Loading #\(pull.number)…")
         }
@@ -295,7 +294,7 @@ private struct PullDetailView: View {
 
     @ViewBuilder private func code(_ detail: PullRequestDetail) -> some View {
         if detail.files.isEmpty {
-            PageEmptyState(symbol: "checkmark.circle", title: "No file changes in this pull request.")
+            PageEmptyState(symbol: "checkmark", title: "No file changes in this pull request.")
         } else if let diff {
             let settings = store.pages.settings
             DiffList(model: diff, palette: PanelPalette.diff(settings?.diffColors), fontSize: CGFloat(settings?.codeFontSize ?? 12), panels: store.panels)
@@ -403,9 +402,9 @@ private struct PullTimeline: View {
                     HStack(alignment: .top, spacing: 10) {
                         VStack(spacing: 0) {
                             Image(systemName: symbol(event.kind))
-                                .font(.system(size: 12, weight: .light))
+                                .icon(.inline)
                                 .foregroundStyle(tint(event.kind))
-                                .frame(width: 22, height: 22)
+                                .frame(width: 24, height: 24)
                                 .background(Theme.input, in: Circle())
                             if index + 1 < detail.timeline.count {
                                 Rectangle().fill(Theme.hairline).frame(width: 1).frame(maxHeight: .infinity)
@@ -459,8 +458,8 @@ private struct PullTimeline: View {
     private func symbol(_ kind: String) -> String {
         switch kind {
         case "opened": "arrow.triangle.pull"
-        case "commit": "circle.circle"
-        case "comment": "text.bubble"
+        case "commit": "circle"
+        case "comment": "bubble.left"
         case "review": "eye"
         case "merged": "arrow.triangle.merge"
         case "closed": "xmark"
@@ -473,7 +472,7 @@ private struct PullTimeline: View {
         case "merged": Theme.primary
         case "closed": Theme.diffRemoved
         case "opened": Theme.diffAdded
-        default: Theme.chromeIcon
+        default: Theme.text
         }
     }
 }
@@ -515,7 +514,7 @@ private struct PullChecks: View {
 
     var body: some View {
         if checks.isEmpty {
-            PageEmptyState(symbol: "checkmark.circle", title: "No checks", message: "This pull request has no status checks or check runs.")
+            PageEmptyState(symbol: "checkmark", title: "No checks", message: "This pull request has no status checks or check runs.")
         } else {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
@@ -525,10 +524,9 @@ private struct PullChecks: View {
                     PageCard {
                         VStack(spacing: 0) {
                             ForEach(Array(checks.enumerated()), id: \.offset) { index, check in
-                                if index > 0 { Divider().padding(.leading, 38) }
+                                if index > 0 { Divider().padding(.leading, 40) }
                                 HStack(spacing: 10) {
                                     ChecksGlyph(checks: Self.outcome(check.state))
-                                        .font(.system(size: 13, weight: .light))
                                         .frame(width: 18)
                                     Text(check.name)
                                         .font(.system(size: 12.5))

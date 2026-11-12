@@ -100,8 +100,8 @@ struct PullRequestActionBar: View {
             .controlSize(.small)
             if let message = state.message {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: state.failed ? "exclamationmark.triangle" : "checkmark.circle")
-                        .font(.system(size: 11, weight: .light))
+                    Image(systemName: state.failed ? "exclamationmark.triangle.fill" : "checkmark")
+                        .icon(.inline)
                         .foregroundStyle(state.failed ? Theme.diffRemoved : Theme.diffAdded)
                         .accessibilityHidden(true)
                     Text(message)

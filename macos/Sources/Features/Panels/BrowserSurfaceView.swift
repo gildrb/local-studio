@@ -154,7 +154,7 @@ struct BrowserSurfaceView: View {
                     .padding(.horizontal, 9)
                     .frame(height: 26)
                     .background(Theme.input.opacity(0.7), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                PanelIconButton("Float Preview", symbol: "pip.enter", enabled: model.current != nil) {
+                PanelIconButton("Float Preview", symbol: "pip", enabled: model.current != nil) {
                     panels.float(model)
                 }
                 PanelMenuButton(title: "Browser Options", symbol: "ellipsis") {
@@ -190,7 +190,7 @@ struct BrowserContent: View {
                 .opacity(model.current == nil ? 0 : 1)
             if let failure = model.failure {
                 Theme.canvas
-                PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t open this page.", detail: failure, actionTitle: "Try Again") { model.reload() }
+                PanelMessage(symbol: "exclamationmark.triangle.fill", title: "Couldn’t open this page.", detail: failure, actionTitle: "Try Again") { model.reload() }
             } else if model.current == nil, model.loading {
                 PanelMessage.loading("Loading \(model.address)…")
             } else if model.current == nil {
@@ -222,8 +222,7 @@ struct PreviewMiniPlayerView: View {
                 VStack(spacing: 0) {
                     HStack(spacing: 4) {
                         Image(systemName: "globe")
-                            .font(.system(size: 11, weight: .light))
-                            .foregroundStyle(Theme.chromeIcon)
+                            .icon(.inline, .secondary)
                             .accessibilityHidden(true)
                         Text(model.tabTitle)
                             .font(.system(size: 11.5))

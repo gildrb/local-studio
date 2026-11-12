@@ -80,6 +80,7 @@ struct ChromeIconButton: View {
     let fitted: Bool
     let action: () -> Void
     @State private var hovering = false
+    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiate
 
     init(_ title: String, symbol: String, isOn: Bool = false, badge: Int = 0, fitted: Bool = false, action: @escaping () -> Void) {
         self.title = title
@@ -93,11 +94,15 @@ struct ChromeIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 15, weight: .light))
-                .foregroundStyle(isOn ? Color.primary : Theme.chromeIcon)
+                .icon(.toolbar, .primary)
                 .padding(.horizontal, fitted ? Theme.Metrics.chromeGlyphInset : 0)
                 .frame(width: fitted ? nil : Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
                 .background(isOn ? Theme.selection : hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .overlay {
+                    if isOn, differentiate {
+                        RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Theme.text, lineWidth: 1.5)
+                    }
+                }
                 .overlay(alignment: .topTrailing) {
                     if badge > 0 {
                         Text("\(badge)")

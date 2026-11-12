@@ -28,7 +28,7 @@ struct PullRequestsSurfaceView: View {
             case .loading where model.pulls.isEmpty:
                 PanelMessage.loading("Loading pull requests…")
             case .failed(let message) where model.pulls.isEmpty:
-                PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t load pull requests.", detail: message, actionTitle: "Try Again") { model.load() }
+                PanelMessage(symbol: "exclamationmark.triangle.fill", title: "Couldn’t load pull requests.", detail: message, actionTitle: "Try Again") { model.load() }
             default:
                 if model.pulls.isEmpty {
                     PanelMessage(symbol: "arrow.triangle.pull", title: "No pull requests for this repository.")
@@ -133,13 +133,13 @@ struct PullRequestDetailView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Image(systemName: "arrow.right")
-                        .font(.system(size: 9, weight: .light))
+                        .icon(.inline)
                         .accessibilityLabel("into")
                     Text(pull.base)
                         .font(.system(size: 11.5, design: .monospaced))
                     Spacer(minLength: 4)
                     PanelIconButton("Copy Link", symbol: "link") { copy(pull.url) }
-                    PanelIconButton("Open in Browser", symbol: "arrow.up.right.circle") { open(pull.url) }
+                    PanelIconButton("Open in Browser", symbol: "arrow.up.right") { open(pull.url) }
                 }
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.secondaryText)
@@ -180,7 +180,7 @@ struct PullRequestDetailView: View {
         case .idle, .loading:
             PanelMessage.loading("Loading pull request…")
         case .failed(let message):
-            PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t load this pull request.", detail: message, actionTitle: "Try Again") { model.load() }
+            PanelMessage(symbol: "exclamationmark.triangle.fill", title: "Couldn’t load this pull request.", detail: message, actionTitle: "Try Again") { model.load() }
         case .loaded:
             if let detail = model.detail {
                 switch model.tab {
@@ -188,7 +188,7 @@ struct PullRequestDetailView: View {
                     PullRequestSummary(detail: detail)
                 case .code:
                     if detail.files.isEmpty {
-                        PanelMessage(symbol: "plus.forwardslash.minus", title: "No file changes in this pull request.")
+                        PanelMessage(symbol: "plusminus", title: "No file changes in this pull request.")
                     } else {
                         VStack(spacing: 0) {
                             PanelToolbar {
@@ -324,9 +324,9 @@ private struct PullRequestTimeline: View {
                     ForEach(Array(events.enumerated()), id: \.offset) { _, event in
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             Image(systemName: symbol(event.kind))
-                                .font(.system(size: 12, weight: .light))
+                                .icon(.inline)
                                 .foregroundStyle(tint(event.kind))
-                                .frame(width: 16)
+                                .frame(width: 20)
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 HStack(spacing: 4) {
@@ -365,10 +365,10 @@ private struct PullRequestTimeline: View {
         switch kind {
         case "opened": "arrow.triangle.pull"
         case "commit": "circle"
-        case "comment": "text.bubble"
+        case "comment": "bubble.left"
         case "review": "eye"
         case "merged": "arrow.triangle.merge"
-        case "closed": "xmark.circle"
+        case "closed": "xmark"
         default: "circle"
         }
     }
@@ -400,7 +400,7 @@ private struct PullRequestChecks: View {
 
     var body: some View {
         if checks.isEmpty {
-            PanelMessage(symbol: "checkmark.circle", title: "No checks reported for this pull request.")
+            PanelMessage(symbol: "checkmark", title: "No checks reported for this pull request.")
         } else {
             ScrollView {
                 LazyVStack(spacing: 2) {
@@ -422,9 +422,9 @@ private struct CheckRow: View {
         let style = CheckStyle(check.state)
         HStack(spacing: 9) {
             Image(systemName: style.symbol)
-                .font(.system(size: 13, weight: .light))
+                .icon(.inline)
                 .foregroundStyle(style.tint)
-                .frame(width: 18)
+                .frame(width: 20)
                 .accessibilityHidden(true)
             Text(check.name)
                 .font(.system(size: 13))
@@ -434,7 +434,7 @@ private struct CheckRow: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(Theme.secondaryText)
             if let url = check.url {
-                PanelIconButton("Open \(check.name)", symbol: "arrow.up.right.circle") { open(url) }
+                PanelIconButton("Open \(check.name)", symbol: "arrow.up.right") { open(url) }
             }
         }
         .padding(.horizontal, 10)
@@ -453,11 +453,11 @@ private struct CheckStyle {
     init(_ state: String) {
         switch state {
         case "success":
-            (symbol, tint, label) = ("checkmark.circle", Theme.diffAdded, "Passed")
+            (symbol, tint, label) = ("checkmark", Theme.diffAdded, "Passed")
         case "failure", "error", "timed_out", "cancelled", "action_required", "startup_failure":
-            (symbol, tint, label) = ("xmark.circle", Theme.diffRemoved, state == "cancelled" ? "Cancelled" : "Failed")
+            (symbol, tint, label) = ("xmark", Theme.diffRemoved, state == "cancelled" ? "Cancelled" : "Failed")
         case "neutral", "skipped", "stale":
-            (symbol, tint, label) = ("minus.circle", Theme.secondaryText, state == "skipped" ? "Skipped" : "Neutral")
+            (symbol, tint, label) = ("minus", Theme.secondaryText, state == "skipped" ? "Skipped" : "Neutral")
         default:
             (symbol, tint, label) = ("clock", Theme.secondaryText, state.isEmpty ? "Pending" : state.replacingOccurrences(of: "_", with: " ").capitalized)
         }
@@ -470,13 +470,13 @@ struct PullStateGlyph: View {
     var body: some View {
         let (symbol, tint): (String, Color) = switch state.uppercased() {
         case "MERGED": ("arrow.triangle.merge", Theme.primary)
-        case "CLOSED": ("xmark.circle", Theme.diffRemoved)
+        case "CLOSED": ("xmark", Theme.diffRemoved)
         default: ("arrow.triangle.pull", Theme.diffAdded)
         }
         Image(systemName: symbol)
-            .font(.system(size: 13, weight: .light))
+            .icon(.inline)
             .foregroundStyle(tint)
-            .frame(width: 18)
+            .frame(width: 20)
             .help(stateLabel(state))
             .accessibilityLabel(stateLabel(state))
     }
@@ -488,9 +488,9 @@ struct ChecksGlyph: View {
     var body: some View {
         switch checks {
         case "passing":
-            glyph("checkmark.circle", Theme.diffAdded)
+            glyph("checkmark", Theme.diffAdded)
         case "failing":
-            glyph("xmark.circle", Theme.diffRemoved)
+            glyph("xmark", Theme.diffRemoved)
         case "pending":
             glyph("clock", Theme.secondaryText)
         default:
@@ -500,6 +500,7 @@ struct ChecksGlyph: View {
 
     private func glyph(_ symbol: String, _ tint: Color) -> some View {
         Image(systemName: symbol)
+            .icon(.inline)
             .foregroundStyle(tint)
             .help(checksLabel(checks))
             .accessibilityLabel(checksLabel(checks))

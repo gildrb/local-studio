@@ -8,6 +8,7 @@ use local_studio_core::{ImageAttachment, ItemKind, PullRequest, SearchHit, Slash
 
 use crate::app::{App, Target};
 use crate::format;
+use crate::icons;
 
 const MENU_LIMIT: usize = 8;
 
@@ -79,8 +80,7 @@ impl Extras {
             .child(&chip_row)
             .build();
         chips.set_visible(false);
-        let attach = gtk::Button::builder().icon_name("mail-attachment-symbolic").tooltip_text("Attach Files").build();
-        attach.add_css_class("flat");
+        let attach = icons::flat(icons::ATTACH, "Attach Files");
         let weak = app.clone();
         attach.connect_clicked(move |_| {
             if let Some(app) = weak.upgrade() {
@@ -522,7 +522,7 @@ impl Extras {
             let chip = gtk::Box::new(gtk::Orientation::Horizontal, 4);
             chip.add_css_class("ls-chip");
             chip.set_valign(gtk::Align::Center);
-            chip.append(&gtk::Image::from_icon_name("text-x-generic-symbolic"));
+            chip.append(&icons::image(icons::FILE));
             let label = gtk::Label::new(Some(file));
             label.set_ellipsize(gtk::pango::EllipsizeMode::Start);
             label.set_max_width_chars(36);
@@ -535,7 +535,7 @@ impl Extras {
             chip.add_css_class("ls-chip");
             chip.set_valign(gtk::Align::Center);
             chip.set_tooltip_text(Some(text));
-            chip.append(&gtk::Image::from_icon_name("utilities-terminal-symbolic"));
+            chip.append(&icons::image(icons::TERMINAL));
             chip.append(&gtk::Label::new(Some(&format!("{label} · {} lines", text.lines().count()))));
             chip.append(&self.remove_button(Chip::Context, index));
             self.chip_row.append(&chip);
@@ -544,8 +544,7 @@ impl Extras {
     }
 
     fn remove_button(&self, kind: Chip, index: usize) -> gtk::Button {
-        let button = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Remove").build();
-        button.add_css_class("flat");
+        let button = icons::flat(icons::CLOSE, "Remove");
         button.add_css_class("circular");
         button.add_css_class("ls-chip-remove");
         button.set_halign(gtk::Align::End);

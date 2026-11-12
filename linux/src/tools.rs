@@ -5,6 +5,7 @@ use adw::prelude::*;
 
 use crate::app::App;
 use crate::format;
+use crate::icons;
 use crate::picker::{Picker, Row, Spec};
 use crate::prefs;
 use crate::state::State;
@@ -197,14 +198,14 @@ impl Tools {
             .map(|(index, entry)| {
                 let lines = entry.lines().count();
                 Row::new(format!("{PROMPT}{index}"), entry.lines().next().unwrap_or_default())
-                    .icon("text-x-generic-symbolic")
+                    .icon(icons::FILE)
                     .subtitle(if lines == 1 { "1 line".to_string() } else { format!("{lines} lines") })
                     .section("Stashed Prompts")
                     .removable()
             })
             .collect();
-        rows.push(Row::new(STASH_CURRENT, "Stash Current Prompt").icon("document-save-symbolic").enabled(can_stash));
-        rows.push(Row::new(CLEAR_STASH, "Clear Stash").icon("user-trash-symbolic").destructive());
+        rows.push(Row::new(STASH_CURRENT, "Stash Current Prompt").icon(icons::SAVE).enabled(can_stash));
+        rows.push(Row::new(CLEAR_STASH, "Clear Stash").icon(icons::DELETE).destructive());
         self.stash.set_rows(rows);
     }
 
@@ -230,7 +231,8 @@ fn stash_picker(app: &Weak<App>) -> Picker {
             }
         }
     });
-    picker.set_icon(Some("document-save-symbolic"));
+    picker.set_icon(Some(icons::SAVE));
+    icons::describe(&picker.button, spec.tooltip);
     let weak = app.clone();
     picker.connect_remove(move |id| {
         if let (Some(app), Some(index)) = (weak.upgrade(), prompt_index(id)) {

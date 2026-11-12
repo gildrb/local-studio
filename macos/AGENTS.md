@@ -15,6 +15,26 @@
   - `LocalStudio +snapshot <dir> [name-filter]`: renders every `SnapshotCatalog` entry offscreen in dark and light from `Update` fixtures. Look at the PNGs.
   - `LOCAL_STUDIO_SNAPSHOT_LIVE=1` adds `pages-local-live` (the first reachable Local controller) and the `pages-usage-live*` entries: they start the core against the daemon on `$EUKHE_DAEMON_SOCKET`, load the real usage report from its saved sessions and render the Usage page (30 days tokens and cost, 24 hours, 7 days, gildrb). Point the daemon's agent dir at a scratch copy of the sessions.
 - Structure: `App/` (scenes, commands, smokes), `Design/` (Theme tokens, shared controls), `Features/<Area>/`, `Generated/` (build output, ignored). `StudioStore` routes every core `Update` to one feature store.
-- UI rules: native controls (grouped `Form`, `Picker(.menu)`, `Menu`, `Toggle`); `Theme` tokens only (dashboards palette); simple light-weight SF Symbols; no animation on repeatable actions and no looping animations; window chrome never moves.
+- UI rules: native controls (grouped `Form`, `Picker(.menu)`, `Menu`, `Toggle`); `Theme` tokens only (dashboards palette); no animation on repeatable actions and no looping animations; window chrome never moves.
+- Icons: style every SF Symbol with `.icon(_:_:)` from `Design/Icon.swift`, never `.font(.system(size:weight:))`. The scale matches first-party macOS 26 apps (Finder, Mail, Notes, Music, System Settings: regular-weight glyphs, 15-16 pt boxes in 36-38 pt toolbar buttons, 32 pt sidebar rows, 13 pt labels):
+
+  | Size | Points | Weight | Use |
+  |---|---|---|---|
+  | `.toolbar` | 15 | regular | window and sidebar chrome |
+  | `.control` | 14 | regular | icon buttons in rows and bars |
+  | `.inline` | 12.5 | regular | row glyphs, chevrons, labels (`IconLabel` for label + icon) |
+  | `.tile` | fitted to 65 % of the tile | semibold | white glyph in `SettingsTile` |
+  | `.display` | 26 | regular | empty states |
+
+  Every icon in one row or toolbar uses the same size and weight. Tone `.primary` for interactive icons, `.secondary` only for decoration; monochrome. Increase Contrast or Bold Text step the weight up one step and turn secondary icons primary. Plain or `.fill` symbols with the fewest strokes, no `.circle`/`.square` frames, badges or slashes; one meaning, one symbol. Icon-only buttons get `.help` and an accessibility label and a hit target of at least 24×24 pt; state never shows by colour alone (`accessibilityDifferentiateWithoutColor`).
+- Settings window follows System Settings:
+
+  | Element | Metric |
+  |---|---|
+  | Sidebar | native `List(.sidebar)` + `.searchable(placement: .sidebar)`, 220 pt fixed, 32 pt rows, 13 pt system label, system accent selection; `themeRoot()` applies to the detail column only |
+  | Sidebar icon | `SettingsTile` 20 pt, continuous radius 25 %, white filled glyph fitted to a 13 pt box, aspect kept (System Settings glyphs measure 12-15 pt) |
+  | Groups | `SettingsPane.groups`, separated by the list's section gap, no titles |
+  | Tile colour | grey by default, black for Appearance, a system colour only where the meaning is familiar (blue accounts and network, orange source control, purple local models); colour is decoration, symbol and label carry the meaning |
+  | Detail | grouped `Form` (`SettingsForm`) opening with `SettingsHeader`: 48 pt tile, 22 pt bold title, 13 pt secondary summary, centred; hidden while searching |
 - Builds stay warning-free under strict concurrency checking.
 - Never stop processes this app did not spawn.

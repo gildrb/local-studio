@@ -294,7 +294,7 @@ struct UsageLimits: View {
                 .foregroundStyle(Theme.secondaryText)
             if limits.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("No provider limits are known", systemImage: "hourglass")
+                    IconLabel("No provider limits are known", symbol: "hourglass", size: .control)
                         .font(.system(size: 15, weight: .medium))
                     Text("A limit shows up here when a provider parks a session after it runs out of quota, with the time the session resumes. The agent daemon reports no other rate-limit windows.")
                         .font(.system(size: 13))

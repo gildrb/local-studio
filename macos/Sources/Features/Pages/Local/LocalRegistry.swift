@@ -150,10 +150,11 @@ private struct VariantRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: variant.fits ? "checkmark.circle" : "circle.dashed")
-                .font(.system(size: 12, weight: .light))
-                .foregroundStyle(variant.fits ? Color.green : Theme.chromeIcon)
+            Image(systemName: variant.fits ? "checkmark" : "xmark")
+                .icon(.inline)
+                .foregroundStyle(variant.fits ? Color.green : Theme.secondaryText)
                 .help(variant.fits ? "Fits this machine" : "Does not fit this machine")
+                .accessibilityLabel(variant.fits ? "Fits this machine" : "Does not fit this machine")
             Text(Self.summarize(variant))
                 .font(.system(size: 12))
                 .lineLimit(1)
@@ -269,7 +270,7 @@ struct SharePanel: View {
                             .lineLimit(6)
                     }
                     ForEach(share.blockers + share.issues, id: \.self) { issue in
-                        Label(issue, systemImage: "exclamationmark.triangle")
+                        IconLabel(issue, symbol: "exclamationmark.triangle.fill")
                             .font(.system(size: 12))
                             .foregroundStyle(.red)
                     }

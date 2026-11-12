@@ -22,7 +22,7 @@ enum MainRoute: Hashable {
         case .thread: "bubble.left"
         case .usage: "chart.bar"
         case .local: "server.rack"
-        case .pullRequests: "arrow.trianglehead.pull"
+        case .pullRequests: "arrow.triangle.pull"
         case .archive: "archivebox"
         }
     }

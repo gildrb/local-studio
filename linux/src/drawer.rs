@@ -6,6 +6,7 @@ use gtk::{gdk, gio, pango};
 use local_studio_core::{TerminalFrame, TerminalSize};
 
 use crate::app::{App, Target};
+use crate::icons;
 use crate::terminal::{Input, Sink, TerminalView};
 
 const CONTEXT_LINES: u32 = 40;
@@ -54,14 +55,17 @@ impl Drawer {
         title.set_xalign(0.0);
         bar.append(&title);
         for (icon, tooltip, action) in [
-            ("list-add-symbolic", "New Terminal (Ctrl+Shift+T)", "win.terminal-new"),
-            ("view-dual-symbolic", "Split Side by Side (Ctrl+Shift+D)", "win.terminal-split"),
-            ("view-continuous-symbolic", "Split Stacked (Ctrl+Shift+E)", "win.terminal-split-vertical"),
-            ("window-close-symbolic", "Close Terminal (Ctrl+Shift+W)", "win.terminal-close"),
-            ("pan-down-symbolic", "Hide Terminal (Ctrl+J)", "win.toggle-terminal"),
+            (icons::ADD, "New Terminal (Ctrl+Shift+T)", "win.terminal-new"),
+            (icons::SPLIT, "Split Side by Side (Ctrl+Shift+D)", "win.terminal-split"),
+            (icons::SPLIT, "Split Stacked (Ctrl+Shift+E)", "win.terminal-split-vertical"),
+            (icons::CLOSE, "Close Terminal (Ctrl+Shift+W)", "win.terminal-close"),
+            (icons::EXPANDED, "Hide Terminal (Ctrl+J)", "win.toggle-terminal"),
         ] {
-            let button = gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).action_name(action).build();
-            button.add_css_class("flat");
+            let button = icons::flat(icon, tooltip);
+            button.set_action_name(Some(action));
+            if action == "win.terminal-split-vertical" {
+                button.add_css_class(icons::STACKED);
+            }
             bar.append(&button);
         }
         let empty = gtk::Box::new(gtk::Orientation::Vertical, 8);

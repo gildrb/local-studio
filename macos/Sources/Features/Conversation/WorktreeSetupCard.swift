@@ -12,8 +12,7 @@ struct WorktreeSetupCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.secondaryText)
+                    .icon(.inline, .secondary)
                     .accessibilityHidden(true)
                 Text(title)
                     .font(.system(size: 12.5, weight: .medium))
@@ -69,11 +68,11 @@ private struct StageRow: View {
                         .frame(width: 12, height: 12)
                 } else {
                     Image(systemName: symbol)
-                        .font(.system(size: 11, weight: .light))
+                        .icon(.inline)
                         .foregroundStyle(stage.state == .failed ? Color.red : Theme.secondaryText)
                 }
             }
-            .frame(width: 14)
+            .frame(width: 18)
             .accessibilityHidden(true)
             Text(stage.name)
                 .font(.system(size: 12.5))
@@ -101,7 +100,7 @@ private struct StageRow: View {
     private var symbol: String {
         switch stage.state {
         case .pending: "clock"
-        case .running: "circle.dotted"
+        case .running: "hourglass"
         case .done: "checkmark"
         case .failed: "xmark"
         case .skipped: "minus"

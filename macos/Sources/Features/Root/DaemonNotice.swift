@@ -8,6 +8,7 @@ struct DaemonNotice: View {
         if let mismatch = store.daemonMismatch {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle")
+                    .icon(.control)
                     .foregroundStyle(Theme.danger)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {

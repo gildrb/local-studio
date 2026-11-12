@@ -102,7 +102,7 @@ private struct TerminalGroupTab: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: group.sessions.count > 1 ? (group.axis == .sideBySide ? "rectangle.split.2x1" : "rectangle.split.1x2") : "terminal")
-                .font(.system(size: 11, weight: .light))
+                .icon(.inline)
                 .accessibilityHidden(true)
             Text(group.title)
                 .font(.system(size: 12))
@@ -110,8 +110,8 @@ private struct TerminalGroupTab: View {
                 .frame(maxWidth: 150, alignment: .leading)
             Button(action: close) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8.5, weight: .medium))
-                    .frame(width: 14, height: 14)
+                    .icon(.inline)
+                    .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -119,9 +119,9 @@ private struct TerminalGroupTab: View {
             .help("Close \(group.title)")
             .accessibilityLabel("Close \(group.title)")
         }
-        .foregroundStyle(active ? Color.primary : Theme.secondaryText)
+        .foregroundStyle(active ? Color.primary : Theme.text)
         .padding(.leading, 8)
-        .padding(.trailing, 4)
+        .padding(.trailing, 0)
         .frame(height: 24)
         .rowSurface(selected: active, hovering: hovering)
         .contentShape(Rectangle())
@@ -139,7 +139,7 @@ private struct TerminalToolbarButtons: View {
     let focused: TerminalSession?
 
     var body: some View {
-        PanelIconButton("Add to Chat", symbol: "text.bubble", enabled: focused != nil) {
+        PanelIconButton("Add to Chat", symbol: "bubble.left", enabled: focused != nil) {
             if let focused {
                 actions.attach(focused)
             }
@@ -189,8 +189,7 @@ struct TerminalGroupSurfaceView: View {
         VStack(spacing: 0) {
             PanelToolbar {
                 Image(systemName: "terminal")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
+                    .icon(.inline, .secondary)
                     .accessibilityHidden(true)
                 Text(group.title)
                     .font(.system(size: 12.5, weight: .medium))
@@ -257,8 +256,8 @@ struct TerminalPaneView: View {
             .padding(.top, 4)
             if let message = session.status.message {
                 HStack(spacing: 6) {
-                    Image(systemName: session.status == .closed ? "xmark.circle" : "stop.circle")
-                        .font(.system(size: 11, weight: .light))
+                    Image(systemName: session.status == .closed ? "xmark" : "stop.fill")
+                        .icon(.inline)
                         .accessibilityHidden(true)
                     Text(statusText(message))
                         .font(.system(size: 11.5))

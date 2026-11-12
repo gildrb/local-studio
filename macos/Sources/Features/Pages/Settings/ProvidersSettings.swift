@@ -28,12 +28,12 @@ struct ProvidersSettings: View {
             if !pages.providerErrors.isEmpty || pages.providerActionError != nil {
                 Section {
                     ForEach(pages.providerErrors, id: \.self) { error in
-                        Label(error, systemImage: "exclamationmark.triangle")
+                        IconLabel(error, symbol: "exclamationmark.triangle.fill")
                             .foregroundStyle(Theme.warning)
                     }
                     if let error = pages.providerActionError {
                         HStack(alignment: .firstTextBaseline) {
-                            Label(error, systemImage: "xmark.octagon")
+                            IconLabel(error, symbol: "xmark.octagon.fill")
                                 .foregroundStyle(Theme.danger)
                             Spacer()
                             Button("Dismiss") { pages.dismissProviderActionError() }
@@ -311,19 +311,21 @@ private struct EndpointRow: View {
             HStack(spacing: 6) {
                 Button(action: refresh) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Theme.chromeIcon)
+                        .icon(.control, .primary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("Refresh models from the endpoint")
                 .accessibilityLabel("Refresh \(provider.name) models")
                 Button("Edit…", action: edit)
                 Button(action: remove) {
                     Image(systemName: "trash")
-                        .font(.system(size: 12, weight: .light))
-                        .foregroundStyle(Theme.chromeIcon)
+                        .icon(.control, .primary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-                .buttonStyle(.borderless)
+                .buttonStyle(.plain)
                 .help("Remove the endpoint")
                 .accessibilityLabel("Remove \(provider.name)")
             }
@@ -422,20 +424,23 @@ private struct ModelRow: View {
                 hide(!hidden)
             } label: {
                 Image(systemName: hidden ? "eye.slash" : "eye")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
+                    .icon(.control, .primary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .help(hidden ? "Show in the model picker" : "Hide from the model picker")
             .accessibilityLabel(hidden ? "Show \(model.name) in the model picker" : "Hide \(model.name) from the model picker")
             Button {
                 toggle(!favorite)
             } label: {
                 Image(systemName: favorite ? "star.fill" : "star")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(favorite ? Color.yellow : Theme.chromeIcon)
+                    .icon(.control)
+                    .foregroundStyle(favorite ? Color.yellow : Theme.text)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .help(favorite ? "Remove from favorites" : "Add to favorites")
             .accessibilityLabel(favorite ? "Remove \(model.name) from favorites" : "Add \(model.name) to favorites")
         }

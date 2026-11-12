@@ -7,6 +7,7 @@ use local_studio_core::{LocalController, LocalElsewhere, LocalEndpoint, LocalEng
 
 use crate::app::App;
 use crate::dashboard_parts::{self as parts, label};
+use crate::icons;
 use crate::numbers;
 
 pub fn status_class(status: LocalMachineStatus) -> &'static str {
@@ -163,7 +164,7 @@ impl EngineView {
         text.append(&note);
         text.append(&add);
         let note_box = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        note_box.append(&gtk::Image::from_icon_name("computer-symbolic"));
+        note_box.append(&icons::image(icons::COMPUTER));
         note_box.append(&text);
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.append(&titles);

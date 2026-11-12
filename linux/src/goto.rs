@@ -7,6 +7,7 @@ use local_studio_core::SearchHit;
 
 use crate::app::{App, Target};
 use crate::format;
+use crate::icons;
 
 pub struct GotoFile {
     pub dialog: adw::Dialog,
@@ -111,7 +112,7 @@ impl GotoFile {
                 .subtitle(format::escape(&hit.relative))
                 .activatable(true)
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("text-x-generic-symbolic"));
+            row.add_prefix(&icons::image(icons::FILE));
             self.list.append(&row);
         }
         if let Some(first) = self.list.row_at_index(0) {

@@ -67,8 +67,8 @@ struct PageEmptyState: View {
         VStack(spacing: 8) {
             if let symbol {
                 Image(systemName: symbol)
-                    .font(.system(size: 24, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
+                    .icon(.display, .secondary)
+                    .accessibilityHidden(true)
             } else {
                 LogoMark(style: .coin)
                     .frame(width: 30, height: 30)

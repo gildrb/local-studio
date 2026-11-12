@@ -81,8 +81,7 @@ struct CommandPalette: View {
                     .help("Back to all commands")
                 } else {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14, weight: .light))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.control, .secondary)
                         .accessibilityHidden(true)
                 }
                 PaletteField(placeholder: placeholder, text: query) { text in
@@ -227,13 +226,13 @@ struct CommandPalette: View {
                 store.shell.palette = nil
                 store.addProjectInteractively()
             },
-            PaletteItem(id: "clone", group: group, title: "Clone Repository…", icon: .symbol("arrow.down.circle")) {
+            PaletteItem(id: "clone", group: group, title: "Clone Repository…", icon: .symbol("arrow.down")) {
                 store.shell.palette = nil
                 store.shell.cloneShown = true
             },
             PaletteItem(id: "file", group: group, title: "Go to File…", icon: .symbol("doc"), shortcut: store.shortcutText("filePicker.toggle")) { go(.goToFile) },
             PaletteItem(id: "search", group: group, title: "Search Project…", icon: .symbol("magnifyingglass"), shortcut: store.shortcutText("projectSearch.toggle")) { go(.searchProject) },
-            PaletteItem(id: "settings", group: group, title: "Open Settings", icon: .symbol("slider.horizontal.3"), shortcut: "⌘,") {
+            PaletteItem(id: "settings", group: group, title: "Open Settings", icon: .symbol("gearshape"), shortcut: "⌘,") {
                 store.shell.palette = nil
                 openSettings()
             },
@@ -252,7 +251,7 @@ struct CommandPalette: View {
             PaletteItem(id: "appearance", group: group, title: "Change Appearance…", icon: .symbol("circle.lefthalf.filled"), shortcut: store.shortcutText("appearance.cycle")) { go(.appearance) },
             PaletteItem(id: "usage", group: group, title: "Show Usage", icon: .symbol("chart.bar"), shortcut: store.shortcutText("usage.open")) { store.show(.usage) },
             PaletteItem(id: "local", group: group, title: "Show Local Models", icon: .symbol("server.rack")) { store.show(.local) },
-            PaletteItem(id: "pulls", group: group, title: "Show Pull Requests", icon: .symbol("arrow.trianglehead.pull")) { store.show(.pullRequests) },
+            PaletteItem(id: "pulls", group: group, title: "Show Pull Requests", icon: .symbol("arrow.triangle.pull")) { store.show(.pullRequests) },
             PaletteItem(id: "archive", group: group, title: "Show Archived Threads", icon: .symbol("archivebox")) { store.show(.archive) },
         ]
         if let row = store.focusedRow {
@@ -295,7 +294,7 @@ struct CommandPalette: View {
             }
         }
         if needle.isEmpty || "No project".localizedCaseInsensitiveContains(needle) {
-            result.append(PaletteItem(id: "none", group: "Other", title: "No project", icon: .symbol("circle.dashed")) { store.newThread(in: nil) })
+            result.append(PaletteItem(id: "none", group: "Other", title: "No project", icon: .symbol("minus")) { store.newThread(in: nil) })
         }
         return result
     }
@@ -457,7 +456,7 @@ private struct PaletteRow: View {
             Spacer(minLength: 8)
             if item.checked {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 11, weight: .medium))
+                    .icon(.inline)
                     .foregroundStyle(selected ? Theme.menuSelectionText : Theme.primary)
                     .accessibilityLabel("Selected")
             }
@@ -481,21 +480,21 @@ private struct PaletteRow: View {
         switch item.icon {
         case .symbol(let name):
             Image(systemName: name)
-                .font(.system(size: 13, weight: .light))
-                .foregroundStyle(selected ? Theme.menuSelectionText : Theme.chromeIcon)
+                .icon(.inline)
+                .foregroundStyle(selected ? Theme.menuSelectionText : Theme.secondaryText)
                 .accessibilityHidden(true)
         case .project(let project):
             ProjectTile(project: project, size: 16)
         case .status(let row):
             if let glyph = StatusBadge.glyph(row.status) {
                 Image(systemName: glyph.symbol)
-                    .font(.system(size: 12))
+                    .icon(.inline)
                     .foregroundStyle(selected ? Theme.menuSelectionText : glyph.tint)
                     .accessibilityLabel(glyph.title)
             } else {
                 Image(systemName: "bubble.left")
-                    .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(selected ? Theme.menuSelectionText : Theme.chromeIcon)
+                    .icon(.inline)
+                    .foregroundStyle(selected ? Theme.menuSelectionText : Theme.secondaryText)
                     .accessibilityHidden(true)
             }
         }

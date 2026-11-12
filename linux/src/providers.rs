@@ -10,6 +10,7 @@ use local_studio_core::{
 
 use crate::app::{App, Dirty, Target};
 use crate::format;
+use crate::icons;
 use crate::state::State;
 
 const APIS: [ProviderApi; 3] = [ProviderApi::OpenAiCompatible, ProviderApi::OpenAiResponses, ProviderApi::Anthropic];
@@ -172,13 +173,13 @@ fn errors_group(app: &Weak<App>, state: &State) -> adw::PreferencesGroup {
     for error in &state.provider_errors {
         let row = adw::ActionRow::builder().title(format::escape(error)).build();
         row.add_css_class("ls-provider-warning");
-        row.add_prefix(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
+        row.add_prefix(&icons::image(icons::WARNING));
         group.add(&row);
     }
     if let Some(error) = &state.provider_error {
         let row = adw::ActionRow::builder().title(format::escape(error)).build();
         row.add_css_class("ls-provider-error");
-        row.add_prefix(&gtk::Image::from_icon_name("dialog-error-symbolic"));
+        row.add_prefix(&icons::image(icons::ERROR));
         let dismiss = gtk::Button::builder().label("Dismiss").valign(gtk::Align::Center).build();
         dismiss.add_css_class("flat");
         let weak = app.clone();
@@ -290,11 +291,7 @@ fn endpoints_group(app: &Weak<App>, state: &State) -> adw::PreferencesGroup {
         let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         buttons.set_valign(gtk::Align::Center);
         buttons.set_sensitive(!pending);
-        let refresh = gtk::Button::builder()
-            .icon_name("view-refresh-symbolic")
-            .tooltip_text("Refresh models from the endpoint")
-            .build();
-        refresh.add_css_class("flat");
+        let refresh = icons::flat(icons::REFRESH, "Refresh models from the endpoint");
         let (weak, id) = (app.clone(), provider.id.clone());
         refresh.connect_clicked(move |_| {
             let Some(app) = weak.upgrade() else { return };
@@ -310,9 +307,7 @@ fn endpoints_group(app: &Weak<App>, state: &State) -> adw::PreferencesGroup {
                 present(&app, Some(editing.clone()));
             }
         });
-        let remove =
-            gtk::Button::builder().icon_name("user-trash-symbolic").tooltip_text("Remove the endpoint").build();
-        remove.add_css_class("flat");
+        let remove = icons::flat(icons::DELETE, "Remove the endpoint");
         let (weak, target) = (app.clone(), provider.clone());
         remove.connect_clicked(move |_| {
             if let Some(app) = weak.upgrade() {
@@ -400,7 +395,7 @@ pub fn signin_group() -> adw::PreferencesGroup {
         .title("Sign in from a terminal")
         .subtitle("Subscriptions such as ChatGPT, Claude or GitHub Copilot sign in from a terminal: run eukhe and use /login, then Refresh Providers.")
         .build();
-    row.add_prefix(&gtk::Image::from_icon_name("utilities-terminal-symbolic"));
+    row.add_prefix(&icons::image(icons::TERMINAL));
     let open = gtk::Button::builder()
         .label("Open Terminal")
         .valign(gtk::Align::Center)

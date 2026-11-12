@@ -5,6 +5,7 @@ use adw::prelude::*;
 use local_studio_core::SetupStageState;
 
 use crate::app::App;
+use crate::icons;
 use crate::state::State;
 
 pub struct SetupCard {
@@ -77,15 +78,13 @@ impl SetupCard {
         for stage in &setup.stages {
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             let (icon, class) = match stage.state {
-                SetupStageState::Pending => ("content-loading-symbolic", "dim-label"),
-                SetupStageState::Running => ("media-playback-start-symbolic", "accent"),
-                SetupStageState::Done => ("object-select-symbolic", "success"),
-                SetupStageState::Failed => ("dialog-error-symbolic", "error"),
-                SetupStageState::Skipped => ("action-unavailable-symbolic", "dim-label"),
+                SetupStageState::Pending => (icons::TIME, "dim-label"),
+                SetupStageState::Running => (icons::WORKING, "accent"),
+                SetupStageState::Done => (icons::DONE, "success"),
+                SetupStageState::Failed => (icons::ERROR, "error"),
+                SetupStageState::Skipped => (icons::NONE, "dim-label"),
             };
-            let image = gtk::Image::from_icon_name(icon);
-            image.add_css_class(class);
-            row.append(&image);
+            row.append(&icons::styled(icon, class));
             let name = gtk::Label::new(Some(&stage.name));
             name.set_xalign(0.0);
             row.append(&name);

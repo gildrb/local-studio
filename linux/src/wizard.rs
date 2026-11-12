@@ -5,6 +5,7 @@ use local_studio_core::Connection;
 
 use crate::app::App;
 use crate::format;
+use crate::icons;
 
 #[allow(clippy::too_many_lines)]
 pub fn present(app: &Rc<App>) {
@@ -13,7 +14,7 @@ pub fn present(app: &Rc<App>) {
     let state = app.state.borrow();
     let connected = matches!(state.connection, Some(Connection::Ready));
     carousel.append(&page(
-        "computer-symbolic",
+        icons::COMPUTER,
         "Welcome to Local Studio",
         "Local Studio runs coding agents on your machines. Threads live in the Eukhe daemon, so they keep working while this window is closed.",
         &status_row(
@@ -50,7 +51,7 @@ pub fn present(app: &Rc<App>) {
     let add_provider = adw::ButtonRow::builder().title("Add Provider…").action_name("win.provider-settings").build();
     providers.add(&add_provider);
     carousel.append(&page(
-        "application-x-addon-symbolic",
+        icons::PROVIDERS,
         "Model providers",
         "Local Studio uses the providers Eukhe is signed in to, plus the models your Local fleet serves.",
         &providers,
@@ -74,7 +75,7 @@ pub fn present(app: &Rc<App>) {
     names.set_wrap(true);
     projects.append(&names);
     carousel.append(&page(
-        "folder-symbolic",
+        icons::FOLDER,
         "Add a project",
         "Threads start in a project folder. Git projects get branch, diff and pull request tools.",
         &projects,
@@ -92,7 +93,7 @@ pub fn present(app: &Rc<App>) {
         .build();
     defaults.add(&access);
     defaults.add(&notify);
-    carousel.append(&page("emblem-system-symbolic", "A few defaults", "Change these any time in Settings.", &defaults));
+    carousel.append(&page(icons::SETTINGS, "A few defaults", "Change these any time in Settings.", &defaults));
     drop(state);
     let dots = adw::CarouselIndicatorDots::builder().carousel(&carousel).build();
     let back = gtk::Button::with_label("Back");
@@ -181,7 +182,7 @@ fn page(icon: &str, title: &str, body: &str, content: &impl IsA<gtk::Widget>) ->
     column.set_margin_top(12);
     column.set_hexpand(true);
     let image = gtk::Image::from_icon_name(icon);
-    image.set_pixel_size(48);
+    image.set_pixel_size(icons::HERO);
     image.add_css_class("dim-label");
     let heading = gtk::Label::new(Some(title));
     heading.add_css_class("title-2");

@@ -98,15 +98,15 @@ struct DiffSurfaceView: View {
     @ViewBuilder
     private func content(_ settings: LocalStudioKit.Settings?) -> some View {
         if !panels.isGit(model.project) {
-            PanelMessage(symbol: "plus.forwardslash.minus", title: "This project is not a git repository.")
+            PanelMessage(symbol: "plusminus", title: "This project is not a git repository.")
         } else if case .failed(let message) = model.phase, model.files.isEmpty {
-            PanelMessage(symbol: "exclamationmark.triangle", title: "Couldn’t load the diff.", detail: message, actionTitle: "Try Again") { model.load() }
+            PanelMessage(symbol: "exclamationmark.triangle.fill", title: "Couldn’t load the diff.", detail: message, actionTitle: "Try Again") { model.load() }
         } else if model.files.isEmpty {
             switch model.phase {
             case .idle, .loading:
                 PanelMessage.loading("Loading changes…")
             case .loaded, .failed:
-                PanelMessage(symbol: "checkmark.circle", title: model.emptyMessage)
+                PanelMessage(symbol: "checkmark", title: model.emptyMessage)
             }
         } else {
             DiffList(model: model, palette: PanelPalette.diff(settings?.diffColors), fontSize: CGFloat(settings?.codeFontSize ?? 12), panels: panels)
@@ -189,9 +189,8 @@ private struct DiffFileHeaderView: View {
         VStack(spacing: 0) {
             HStack(spacing: 7) {
                 Image(systemName: header.collapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .foregroundStyle(Theme.secondaryText)
-                    .frame(width: 12)
+                    .icon(.inline, .secondary)
+                    .frame(width: 16)
                     .accessibilityHidden(true)
                 Text(statusLetter)
                     .font(.system(size: 10.5, weight: .semibold, design: .monospaced))

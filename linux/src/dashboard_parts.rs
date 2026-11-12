@@ -3,6 +3,7 @@ use gtk::pango;
 use local_studio_core::TokenHistory;
 
 use crate::dashboard_charts::Sparkline;
+use crate::icons;
 use crate::numbers;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -89,7 +90,7 @@ impl FigureView {
         line.append(&value);
         line.append(&unit);
         root.append(&line);
-        let icon = gtk::Image::from_icon_name("dialog-warning-symbolic");
+        let icon = icons::image(icons::WARNING);
         icon.set_visible(false);
         let hint = label(" ", &["ls-dash-label"]);
         hint.set_ellipsize(pango::EllipsizeMode::End);

@@ -14,6 +14,7 @@ use crate::dashboard_charts::{Heatmap, Sparkline};
 use crate::dashboard_engines::{self as engines, ElsewhereLink, EngineView};
 use crate::dashboard_parts::{self as parts, label, Figure, FigureView, Hero, TokenSummary, Tone};
 use crate::format;
+use crate::icons;
 use crate::numbers;
 use crate::state::{Page, State};
 
@@ -62,8 +63,7 @@ impl View {
         titles.append(&model);
         titles.append(&detail);
         titles.append(&elsewhere.button);
-        let switch =
-            adw::ButtonContent::builder().icon_name("media-playlist-repeat-symbolic").label("Switch model…").build();
+        let switch = adw::ButtonContent::builder().icon_name(icons::SWITCH).label("Switch model…").build();
         let switch_button = parts::button(&switch, true);
         let weak = app.clone();
         switch_button.connect_clicked(move |_| {
@@ -71,7 +71,7 @@ impl View {
                 app.local.open_switch(&app);
             }
         });
-        let stop = adw::ButtonContent::builder().icon_name("media-playback-stop-symbolic").label("Stop model…").build();
+        let stop = adw::ButtonContent::builder().icon_name(icons::STOP).label("Stop model…").build();
         let stop_button = parts::button(&stop, false);
         let weak = app.clone();
         stop_button.connect_clicked(move |_| {
@@ -90,7 +90,7 @@ impl View {
         let error = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         error.add_css_class("warning");
         error.set_margin_top(14);
-        error.append(&gtk::Image::from_icon_name("dialog-warning-symbolic"));
+        error.append(&icons::image(icons::WARNING));
         error.append(&error_label);
         error.set_visible(false);
         let decode = Hero::build("Decode", "tok/s");
@@ -375,12 +375,10 @@ impl LocalPage {
         notice.set_visible(false);
         let view = View::build(&app);
         let engines = EngineView::build(&app);
-        let empty = adw::StatusPage::builder()
-            .icon_name("network-server-symbolic")
-            .title("Contacting the Local controller…")
-            .build();
+        let empty =
+            adw::StatusPage::builder().icon_name(icons::SERVER).title("Contacting the Local controller…").build();
         empty.set_size_request(-1, 360);
-        let offline = adw::StatusPage::builder().icon_name("network-offline-symbolic").build();
+        let offline = adw::StatusPage::builder().icon_name(icons::OFFLINE).build();
         offline.set_size_request(-1, 420);
         let stack = gtk::Stack::new();
         stack.set_vhomogeneous(false);
@@ -617,11 +615,11 @@ impl LocalPage {
         let error =
             state.local.as_ref().and_then(|snapshot| snapshot.error.clone()).or_else(|| self.failure.borrow().clone());
         if let Some(error) = error {
-            self.empty.set_icon_name(Some("network-error-symbolic"));
+            self.empty.set_icon_name(Some(icons::UNREACHABLE));
             self.empty.set_title("No Local controller answers");
             self.empty.set_description(Some(&format::escape(&error)));
         } else {
-            self.empty.set_icon_name(Some("network-server-symbolic"));
+            self.empty.set_icon_name(Some(icons::SERVER));
             self.empty.set_title("Contacting the Local controller…");
             self.empty.set_description(None);
         }
@@ -718,12 +716,8 @@ fn top_bar(app: &Weak<App>, tabs: &gtk::Box, since: &gtk::Label, online: &gtk::L
         .hexpand(true)
         .child(tabs)
         .build();
-    let refresh = gtk::Button::builder()
-        .icon_name("view-refresh-symbolic")
-        .tooltip_text("Refresh")
-        .valign(gtk::Align::Center)
-        .build();
-    refresh.add_css_class("flat");
+    let refresh = icons::flat(icons::REFRESH, "Refresh");
+    refresh.set_valign(gtk::Align::Center);
     let weak = app.clone();
     refresh.connect_clicked(move |_| {
         if let Some(app) = weak.upgrade() {

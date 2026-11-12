@@ -47,7 +47,8 @@ struct LocalFleetSections: View {
                         .foregroundStyle(.red)
                         .textSelection(.enabled)
                 } icon: {
-                    Image(systemName: "exclamationmark.triangle")
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .icon(.inline)
                         .foregroundStyle(.red)
                 }
                 if pages.localActionError != nil {
@@ -179,10 +180,11 @@ private struct MachineRow: View {
                                 ui.editing = controller.name
                             } label: {
                                 Image(systemName: pages.isPending(.rename(controller.target)) ? "clock" : "pencil")
-                                    .font(.system(size: 11, weight: .light))
-                                    .foregroundStyle(Theme.chromeIcon)
+                                    .icon(.control, .primary)
+                                    .frame(width: 24, height: 24)
+                                    .contentShape(Rectangle())
                             }
-                            .buttonStyle(.borderless)
+                            .buttonStyle(.plain)
                             .help("Rename \(controller.name)")
                             .accessibilityLabel("Rename \(controller.name)")
                         }

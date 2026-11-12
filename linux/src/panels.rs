@@ -6,16 +6,17 @@ use gtk::{gdk, gio, glib};
 
 use crate::app::App;
 use crate::diffview::DiffView;
+use crate::icons;
 use crate::surfaces::{AgentsSurface, BrowserSurface, DevicesSurface, FilesSurface, PullsSurface};
 
 pub const SURFACES: [(&str, &str, &str, char); 7] = [
-    ("browser", "Browser", "web-browser-symbolic", 'b'),
-    ("terminal", "Terminal", "utilities-terminal-symbolic", 't'),
-    ("files", "Files", "folder-symbolic", 'f'),
-    ("diff", "Diff", "view-dual-symbolic", 'd'),
-    ("pulls", "Pull requests", "preferences-system-sharing-symbolic", 'p'),
-    ("agents", "Agents", "avatar-default-symbolic", 'a'),
-    ("devices", "Device", "phone-symbolic", 'm'),
+    ("browser", "Browser", icons::WEB, 'b'),
+    ("terminal", "Terminal", icons::TERMINAL, 't'),
+    ("files", "Files", icons::FOLDER, 'f'),
+    ("diff", "Diff", icons::SPLIT, 'd'),
+    ("pulls", "Pull requests", icons::PULL_REQUESTS, 'p'),
+    ("agents", "Agents", icons::AGENT, 'a'),
+    ("devices", "Device", icons::DEVICE, 'm'),
 ];
 
 pub struct Panel {
@@ -48,7 +49,8 @@ impl Panel {
             .hexpand(true)
             .child(&strip)
             .build();
-        let add = gtk::MenuButton::builder().icon_name("list-add-symbolic").tooltip_text("Open a Surface").build();
+        let add = gtk::MenuButton::builder().icon_name(icons::ADD).build();
+        icons::describe(&add, "Open a Surface");
         add.add_css_class("flat");
         let menu = gio::Menu::new();
         for (kind, title, _, letter) in SURFACES {
@@ -57,13 +59,11 @@ impl Panel {
             menu.append_item(&item);
         }
         add.set_menu_model(Some(&menu));
-        let refresh = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text("Refresh").build();
-        refresh.add_css_class("flat");
-        let maximize =
-            gtk::ToggleButton::builder().icon_name("view-fullscreen-symbolic").tooltip_text("Maximize Panel").build();
+        let refresh = icons::flat(icons::REFRESH, "Refresh");
+        let maximize = gtk::ToggleButton::builder().icon_name(icons::MAXIMIZE).build();
+        icons::describe(&maximize, "Maximize Panel");
         maximize.add_css_class("flat");
-        let close = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text("Hide Panel").build();
-        close.add_css_class("flat");
+        let close = icons::flat(icons::CLOSE, "Hide Panel");
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         bar.add_css_class("ls-panel-bar");
         bar.append(&strip_scroller);
@@ -83,7 +83,7 @@ impl Panel {
         launcher.append(&heading);
         for (kind, title, icon, letter) in SURFACES {
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-            row.append(&gtk::Image::from_icon_name(icon));
+            row.append(&icons::image(icon));
             let label = gtk::Label::new(Some(title));
             label.set_hexpand(true);
             label.set_xalign(0.0);
@@ -323,17 +323,11 @@ impl Panel {
             if active == Some(kind) {
                 tab.add_css_class("active");
             }
-            let image = gtk::Image::from_icon_name(icon);
-            image.set_pixel_size(14);
-            tab.append(&image);
+            tab.append(&icons::image(icon));
             tab.append(&gtk::Label::new(Some(title)));
-            let close = gtk::Button::builder()
-                .icon_name("window-close-symbolic")
-                .tooltip_text("Close Tab (Ctrl+W)")
-                .action_name("win.panel-close")
-                .build();
+            let close = icons::flat(icons::CLOSE, &format!("Close {title} (Ctrl+W)"));
+            close.set_action_name(Some("win.panel-close"));
             close.set_action_target_value(Some(&kind.to_variant()));
-            close.add_css_class("flat");
             close.add_css_class("ls-tab-close");
             tab.append(&close);
             let click = gtk::GestureClick::builder().button(0).build();

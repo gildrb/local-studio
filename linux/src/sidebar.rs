@@ -9,6 +9,7 @@ use local_studio_core::{Shelf, ThreadRow, ThreadSearchHit, ThreadStatus};
 use crate::actions;
 use crate::app::{App, Dirty, Target};
 use crate::format;
+use crate::icons;
 use crate::state::{initials, Page, State};
 
 const SETTLED_PAGE: usize = 8;
@@ -67,16 +68,10 @@ impl Sidebar {
     pub fn new(app: Weak<App>) -> Self {
         let header = adw::HeaderBar::new();
         header.set_show_end_title_buttons(false);
-        let toggle = gtk::ToggleButton::builder()
-            .icon_name("sidebar-show-symbolic")
-            .tooltip_text("Toggle Sidebar (Ctrl+B)")
-            .active(true)
-            .build();
-        let new_thread = gtk::Button::builder()
-            .icon_name("list-add-symbolic")
-            .tooltip_text("New Thread (Ctrl+N)")
-            .action_name("win.new-thread")
-            .build();
+        let toggle = gtk::ToggleButton::builder().icon_name(icons::SIDEBAR).active(true).build();
+        icons::describe(&toggle, "Toggle Sidebar (Ctrl+B)");
+        let new_thread = icons::button(icons::ADD, "New Thread (Ctrl+N)");
+        new_thread.set_action_name(Some("win.new-thread"));
         header.pack_start(&toggle);
         header.pack_start(&new_thread);
         crate::flows::new_thread_in_on_shift(&app, &new_thread);
@@ -98,20 +93,14 @@ impl Sidebar {
             .child(&projects)
             .build();
         popover.set_child(Some(&scroller));
-        let filter = gtk::MenuButton::builder()
-            .icon_name("folder-symbolic")
-            .tooltip_text("Filter by Project")
-            .popover(&popover)
-            .build();
+        let filter = gtk::MenuButton::builder().icon_name(icons::FOLDER).popover(&popover).build();
+        icons::describe(&filter, "Filter by Project");
         filter.add_css_class("flat");
         let add_menu = gio::Menu::new();
         add_menu.append(Some("Add Folder…"), Some("win.add-project"));
         add_menu.append(Some("Clone Repository…"), Some("win.clone-project"));
-        let add = gtk::MenuButton::builder()
-            .icon_name("folder-new-symbolic")
-            .tooltip_text("Add Project")
-            .menu_model(&add_menu)
-            .build();
+        let add = gtk::MenuButton::builder().icon_name(icons::FOLDER_NEW).menu_model(&add_menu).build();
+        icons::describe(&add, "Add Project");
         add.add_css_class("flat");
         let search_row = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         search_row.set_margin_start(8);
@@ -172,19 +161,15 @@ impl Sidebar {
         bulk.append(&bulk_label);
         let mut bulk_unpin = None;
         for (icon, tooltip, action) in [
-            ("mail-unread-symbolic", "Mark Unread", "bulk-unread"),
-            ("view-pin-symbolic", "Unpin", "bulk-unpin"),
-            ("object-select-symbolic", "Settle", "bulk-settle"),
-            ("folder-download-symbolic", "Archive", "bulk-archive"),
-            ("user-trash-symbolic", "Delete", "bulk-delete"),
-            ("window-close-symbolic", "Clear Selection (Esc)", "bulk-clear"),
+            (icons::UNREAD, "Mark Unread", "bulk-unread"),
+            (icons::PIN, "Unpin", "bulk-unpin"),
+            (icons::DONE, "Settle", "bulk-settle"),
+            (icons::ARCHIVE, "Archive", "bulk-archive"),
+            (icons::DELETE, "Delete", "bulk-delete"),
+            (icons::CLOSE, "Clear Selection (Esc)", "bulk-clear"),
         ] {
-            let button = gtk::Button::builder()
-                .icon_name(icon)
-                .tooltip_text(tooltip)
-                .action_name(format!("win.{action}"))
-                .build();
-            button.add_css_class("flat");
+            let button = icons::flat(icon, tooltip);
+            button.set_action_name(Some(&format!("win.{action}")));
             if action == "bulk-unpin" {
                 bulk_unpin = Some(button.clone());
             }
@@ -194,21 +179,16 @@ impl Sidebar {
 
         let footer_box = gtk::Box::new(gtk::Orientation::Horizontal, 2);
         footer_box.add_css_class("ls-footer");
-        let settings = gtk::Button::builder()
-            .icon_name("emblem-system-symbolic")
-            .tooltip_text("Settings (Ctrl+,)")
-            .action_name("win.settings")
-            .build();
-        settings.add_css_class("flat");
+        let settings = icons::flat(icons::SETTINGS, "Settings (Ctrl+,)");
+        settings.set_action_name(Some("win.settings"));
         footer_box.append(&settings);
         let mut footer = Vec::new();
         for (page, icon, tooltip) in [
-            (Page::Usage, "power-profile-performance-symbolic", "Usage (Ctrl+U)"),
-            (Page::PullRequests, "preferences-system-sharing-symbolic", "Pull Requests"),
-            (Page::Local, "network-server-symbolic", "Local"),
+            (Page::Usage, icons::USAGE, "Usage (Ctrl+U)"),
+            (Page::PullRequests, icons::PULL_REQUESTS, "Pull Requests"),
+            (Page::Local, icons::SERVER, "Local"),
         ] {
-            let button = gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).build();
-            button.add_css_class("flat");
+            let button = icons::flat(icon, tooltip);
             let weak = app.clone();
             button.connect_clicked(move |_| {
                 let Some(app) = weak.upgrade() else { return };
@@ -484,7 +464,7 @@ impl Sidebar {
                 button.remove_css_class("active");
             }
         }
-        self.filter.set_icon_name(if state.filter.is_some() { "folder-open-symbolic" } else { "folder-symbolic" });
+        self.filter.set_icon_name(if state.filter.is_some() { icons::FOLDER_OPEN } else { icons::FOLDER });
         let marked = self.marked.borrow();
         self.bulk.set_visible(!marked.is_empty());
         self.bulk_label.set_label(&format!("{} selected", marked.len()));
@@ -623,21 +603,22 @@ impl Sidebar {
                 let item = gio::MenuItem::new(Some("Project Settings…"), None);
                 item.set_action_and_target_value(Some("win.project-settings"), Some(&id.to_variant()));
                 menu.append_item(&item);
-                let more = gtk::MenuButton::builder().icon_name("view-more-symbolic").menu_model(&menu).build();
+                let more = gtk::MenuButton::builder().icon_name(icons::MORE).menu_model(&menu).build();
+                icons::describe(&more, &format!("{name} Actions"));
                 more.add_css_class("flat");
                 more.set_valign(gtk::Align::Center);
                 row.add_suffix(&more);
             } else {
-                row.add_prefix(&gtk::Image::from_icon_name("view-grid-symbolic"));
+                row.add_prefix(&icons::image(icons::ALL));
             }
             if state.filter.as_deref().unwrap_or_default() == id {
-                row.add_suffix(&gtk::Image::from_icon_name("object-select-symbolic"));
+                row.add_suffix(&icons::image(icons::DONE));
             }
             self.projects.append(&row);
         }
         let add = adw::ActionRow::builder().title("Add Project…").activatable(true).build();
         add.set_widget_name("add");
-        add.add_prefix(&gtk::Image::from_icon_name("folder-new-symbolic"));
+        add.add_prefix(&icons::image(icons::FOLDER_NEW));
         self.projects.append(&add);
     }
 }
@@ -903,7 +884,7 @@ fn entry_widget(app: &Weak<App>, entry: &Entry) -> gtk::Widget {
             text.set_xalign(0.0);
             text.set_hexpand(true);
             row.append(&text);
-            row.append(&gtk::Image::from_icon_name(if *collapsed { "pan-end-symbolic" } else { "pan-down-symbolic" }));
+            row.append(&icons::image(if *collapsed { icons::COLLAPSED } else { icons::EXPANDED }));
             row.upcast()
         }
         Entry::More { remaining } => {
@@ -1020,7 +1001,7 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
         line.append(&badge);
         line.append(&title);
         if row.pinned {
-            line.append(&small_icon("view-pin-symbolic", "ls-meta"));
+            line.append(&icons::image(icons::PIN));
         }
         if let Some(hint) = &hint {
             line.append(hint);
@@ -1048,10 +1029,10 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
     project_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     top.append(&project_label);
     if row.pinned {
-        top.append(&small_icon("view-pin-symbolic", "ls-meta"));
+        top.append(&icons::image(icons::PIN));
     }
     if let Some(group) = &row.fan_out {
-        let marker = small_icon("view-dual-symbolic", "ls-meta");
+        let marker = icons::image(icons::SPLIT);
         marker.set_tooltip_text(Some(&format!("Part of a model comparison ({group})")));
         top.append(&marker);
     }
@@ -1064,7 +1045,7 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
     if let Some(hint) = &hint {
         top.append(hint);
     } else if let Some((icon, label, class)) = format::status(row.status) {
-        top.append(&small_icon(icon, class));
+        top.append(&icons::styled(icon, class));
         let label = gtk::Label::new(Some(label));
         label.add_css_class("ls-meta");
         label.add_css_class(class);
@@ -1171,13 +1152,6 @@ fn rename_entry(app: &Weak<App>, row: &ThreadRow) -> gtk::Widget {
         focused.select_region(0, -1);
     });
     entry.upcast()
-}
-
-fn small_icon(name: &str, class: &str) -> gtk::Image {
-    let image = gtk::Image::from_icon_name(name);
-    image.set_pixel_size(12);
-    image.add_css_class(class);
-    image
 }
 
 fn tick(label: &gtk::Label, since: i64) {

@@ -7,6 +7,7 @@ use local_studio_core::{Branch, MergeMethod};
 
 use crate::app::App;
 use crate::format;
+use crate::icons;
 
 type AppAction = fn(&Rc<App>);
 type StringAction = fn(&Rc<App>, String);
@@ -143,7 +144,7 @@ fn clone_project(app: &Rc<App>) {
         .subtitle(format::escape(&parent.to_string_lossy()))
         .activatable(true)
         .build();
-    folder.add_suffix(&gtk::Image::from_icon_name("folder-open-symbolic"));
+    folder.add_suffix(&icons::image(icons::FOLDER_OPEN));
     let chosen = Rc::new(std::cell::RefCell::new(parent));
     let (weak, row, picked) = (Rc::downgrade(app), folder.clone(), Rc::clone(&chosen));
     folder.connect_activated(move |_| {

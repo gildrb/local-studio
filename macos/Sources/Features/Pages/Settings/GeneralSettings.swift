@@ -284,8 +284,8 @@ struct SettingsLoading: View {
     var body: some View {
         VStack(spacing: 8) {
             Image(systemName: "gearshape")
-                .font(.system(size: 22, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.display, .secondary)
+                .accessibilityHidden(true)
             Text("Waiting for the core…")
                 .foregroundStyle(Theme.secondaryText)
         }

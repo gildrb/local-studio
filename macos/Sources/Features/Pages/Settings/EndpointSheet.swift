@@ -101,7 +101,7 @@ struct EndpointSheet: View {
                         }
                     }
                     if let error {
-                        Label(error, systemImage: "exclamationmark.triangle")
+                        IconLabel(error, symbol: "exclamationmark.triangle.fill")
                             .foregroundStyle(Theme.danger)
                             .fixedSize(horizontal: false, vertical: true)
                     }

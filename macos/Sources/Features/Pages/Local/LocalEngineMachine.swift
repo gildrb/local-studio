@@ -35,8 +35,8 @@ struct LocalEngineMachine: View {
                     .padding(.vertical, 32)
                 HStack(alignment: .top, spacing: 12) {
                     Image(systemName: "cpu")
-                        .font(.system(size: 15))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.toolbar, .secondary)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 10) {
                         Text(note)
                             .font(.system(size: 13))

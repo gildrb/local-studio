@@ -76,14 +76,14 @@ enum ThreadActions {
         nodes.append(.action(row.unread ? "Mark as Read" : "Mark as Unread", symbol: "circle.fill") { store.inbox.markUnread([id], !row.unread) })
         if let project = row.project {
             if store.inbox.projectFilter == project {
-                nodes.append(.action("Show All Projects", symbol: "line.3.horizontal.decrease.circle") { store.inbox.projectFilter = nil })
+                nodes.append(.action("Show All Projects", symbol: "line.3.horizontal.decrease") { store.inbox.projectFilter = nil })
             } else {
-                nodes.append(.action("Filter by \(store.inbox.projectName(project))", symbol: "line.3.horizontal.decrease.circle") {
+                nodes.append(.action("Filter by \(store.inbox.projectName(project))", symbol: "line.3.horizontal.decrease") {
                     store.inbox.projectFilter = project
                 })
             }
         }
-        nodes.append(.submenu("Auto-settle", symbol: "checkmark.circle", [
+        nodes.append(.submenu("Auto-settle", symbol: "checkmark", [
             .action("Enabled", checked: row.autoSettle) { store.inbox.setAutoSettle(id, true) },
             .action("Disabled", checked: !row.autoSettle) { store.inbox.setAutoSettle(id, false) },
         ]))
@@ -114,7 +114,7 @@ enum ThreadActions {
             nodes.append(.action("Pin \(count)", symbol: "pin") { store.inbox.setPinned(ids, true) })
         }
         if rows.contains(where: \.pinned) {
-            nodes.append(.action("Unpin \(count)", symbol: "pin.slash") { store.togglePin(ids.filter { store.inbox.thread($0)?.pinned == true }) })
+            nodes.append(.action("Unpin \(count)", symbol: "pin") { store.togglePin(ids.filter { store.inbox.thread($0)?.pinned == true }) })
         }
         if rows.contains(where: { $0.shelf != .settled }) {
             nodes.append(.action("Settle \(count)", symbol: "checkmark") { store.inbox.setSettled(ids, true) })

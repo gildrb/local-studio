@@ -22,10 +22,9 @@ struct AgentSpawnRow: View {
                     store.panels.openSurface(.agents)
                 } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "person.2")
-                            .font(.system(size: 12, weight: .light))
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(width: 16)
+                        Image(systemName: "person.2.fill")
+                            .icon(.inline, .secondary)
+                            .frame(width: 20)
                             .accessibilityHidden(true)
                         Text(summary.isEmpty ? name : summary)
                             .foregroundStyle(hovering ? Color.primary : Theme.secondaryText)
@@ -44,9 +43,8 @@ struct AgentSpawnRow: View {
                             .foregroundStyle(Theme.secondaryText)
                             .opacity(hovering ? 1 : 0)
                         Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(width: 10)
+                            .icon(.inline, .secondary)
+                            .frame(width: 14)
                             .accessibilityHidden(true)
                     }
                     .font(.system(size: 12.5))

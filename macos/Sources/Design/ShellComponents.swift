@@ -12,7 +12,8 @@ struct ProjectTile: View {
         Group {
             if let icon, !icon.isEmpty, NSImage(systemSymbolName: icon, accessibilityDescription: nil) != nil {
                 Image(systemName: icon)
-                    .font(.system(size: size * 0.55, weight: .medium))
+                    .font(.system(size: size * 0.6, weight: .semibold))
+                    .symbolRenderingMode(.monochrome)
                     .foregroundStyle(.white)
             } else if let icon, !icon.isEmpty {
                 Text(icon)
@@ -44,7 +45,7 @@ struct ProjectTile: View {
 
 extension ProjectTile {
     init(project: Project?, size: CGFloat = Theme.Metrics.tile) {
-        self.init(name: project?.name ?? "No project", icon: project == nil ? "tray" : project?.icon, size: size, neutral: project == nil)
+        self.init(name: project?.name ?? "No project", icon: project == nil ? "minus" : project?.icon, size: size, neutral: project == nil)
     }
 }
 

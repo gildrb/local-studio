@@ -109,8 +109,9 @@ private struct PanelTabStrip: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 14, weight: .light))
-                        .foregroundStyle(Theme.chromeIcon)
+                        .icon(.toolbar, .primary)
+                        .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
+                        .contentShape(Rectangle())
                 }
                 .menuStyle(.button)
                 .buttonStyle(.plain)
@@ -152,26 +153,26 @@ private struct PanelTab: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: surface.symbol)
-                        .font(.system(size: 12, weight: .light))
+                        .icon(.inline)
                         .accessibilityHidden(true)
                     Text(Self.clip(surface.title))
                         .font(.system(size: 12.5))
                         .lineLimit(1)
                         .fixedSize()
                 }
-                .foregroundStyle(active ? Color.primary : Theme.secondaryText)
+                .foregroundStyle(active ? Color.primary : Theme.text)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .help(surface.title)
             .accessibilityLabel(surface.title)
             .accessibilityAddTraits(active ? .isSelected : [])
             Button {
                 panels.close(surface.id)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(Theme.secondaryText)
-                    .frame(width: 16, height: 16)
+                    .icon(.inline, .primary)
+                    .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -180,7 +181,7 @@ private struct PanelTab: View {
             .accessibilityLabel("Close \(surface.title)")
         }
         .padding(.leading, 9)
-        .padding(.trailing, 4)
+        .padding(.trailing, 2)
         .frame(height: 28)
         .rowSurface(selected: active, hovering: hovering)
         .contentShape(Rectangle())
@@ -269,9 +270,8 @@ private struct LauncherRow: View {
         Button(action: open) {
             HStack(spacing: 10) {
                 Image(systemName: action.kind.symbol)
-                    .font(.system(size: 14, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
-                    .frame(width: 20)
+                    .icon(.control, .primary)
+                    .frame(width: 22)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
@@ -383,8 +383,7 @@ struct PanelMessage: View {
             Group {
                 if let symbol {
                     Image(systemName: symbol)
-                        .font(.system(size: 22, weight: .light))
-                        .foregroundStyle(Theme.chromeIcon)
+                        .icon(.display, .secondary)
                 } else {
                     LogoMark(style: .coin)
                         .frame(width: 26, height: 26)
@@ -430,8 +429,7 @@ struct PanelIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.control, .primary)
                 .frame(width: 26, height: 26)
                 .background(hovering && enabled ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .contentShape(Rectangle())
@@ -455,8 +453,9 @@ struct PanelMenuButton<Content: View>: View {
             content
         } label: {
             Image(systemName: symbol)
-                .font(.system(size: 13, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .icon(.control, .primary)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
         }
         .menuStyle(.button)
         .buttonStyle(.plain)
@@ -484,7 +483,7 @@ struct AgentsSurfaceView: View {
                     .monospacedDigit()
             }
             if agents.isEmpty {
-                PanelMessage(symbol: "person.2", title: "No subagents in this thread yet.", detail: "Agents the assistant starts during a turn appear here while they run.")
+                PanelMessage(symbol: "person.2.fill", title: "No subagents in this thread yet.", detail: "Agents the assistant starts during a turn appear here while they run.")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
@@ -528,7 +527,7 @@ private struct AgentRow: View {
                             .frame(width: 14, height: 14)
                     } else {
                         Image(systemName: style.symbol)
-                            .font(.system(size: 13, weight: .light))
+                            .icon(.inline)
                             .foregroundStyle(style.tint)
                     }
                 }
@@ -564,8 +563,7 @@ private struct AgentRow: View {
                 }
                 if hasDetail {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(Theme.secondaryText)
+                        .icon(.inline, .secondary)
                         .frame(height: 18)
                         .accessibilityHidden(true)
                 }
@@ -625,10 +623,10 @@ private struct AgentRow: View {
     }
 
     private var style: (symbol: String, tint: Color) {
-        if agent.running { return ("circle.dotted", Theme.primary) }
+        if agent.running { return ("hourglass", Theme.primary) }
         let status = agent.status.lowercased()
-        if status.contains("fail") || status.contains("error") { return ("xmark.circle", Theme.diffRemoved) }
-        if status.contains("cancel") || status.contains("abort") || status.contains("stop") { return ("minus.circle", Theme.secondaryText) }
-        return ("checkmark.circle", Theme.diffAdded)
+        if status.contains("fail") || status.contains("error") { return ("xmark", Theme.diffRemoved) }
+        if status.contains("cancel") || status.contains("abort") || status.contains("stop") { return ("minus", Theme.secondaryText) }
+        return ("checkmark", Theme.diffAdded)
     }
 }
