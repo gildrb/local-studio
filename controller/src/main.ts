@@ -35,7 +35,7 @@ const byCard = (all: boolean): Map<string, number[]> => {
 };
 const freeGpus = () => byCard(false);
 
-const jobs = makeJobs({ config: () => config, catalog: () => catalog, freeGpus, listening: () => Effect.map(listeners, (ls) => new Set(ls.map((l) => l.port))) });
+const jobs = makeJobs({ config: () => config, catalog: () => catalog, freeGpus, listening: () => Effect.map(listeners, (ls) => new Set((ls ?? []).map((l) => l.port))) });
 const scanner = makeScanner(config.id, (p) => jobs.jobPort(p));
 
 const selfNode = (): LocalNode => ({

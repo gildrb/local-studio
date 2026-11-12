@@ -9,7 +9,7 @@ use eukhe_client::saved_sessions;
 use eukhe_types::ai::{ServiceTier, UserContent, UserContentBlock};
 use eukhe_types::daemon::{
     DaemonClientKind, DaemonCommand, DaemonSessionLifecycle, DaemonSessionSnapshot, DetachReason, ForkPosition,
-    PromptInput, SessionEvent, StreamingBehavior,
+    PromptInput, SessionEvent, StreamingBehavior, WorkerLiveness, IDLE_SHUTDOWN_CAPABILITY,
 };
 use eukhe_types::session::AgentMessage;
 use eukhe_types::shell::ShellVerdict;
@@ -21,8 +21,8 @@ use tokio::time::Instant;
 use crate::daemon::{self, DaemonQuery};
 use crate::images;
 use crate::model::{
-    AccessMode, Approval, ApprovalAnswer, Block, Connection, Delivery, ItemKind, ModelKey, ModelOption, NoticeLevel,
-    NotificationKind, PromptDraft, Subagent, ThreadInfo, ThreadRow, ThreadSettings, TranscriptOp, Update,
+    AccessMode, Approval, ApprovalAnswer, Block, Connection, DaemonMismatch, Delivery, ItemKind, ModelKey, ModelOption,
+    NoticeLevel, NotificationKind, PromptDraft, Subagent, ThreadInfo, ThreadRow, ThreadSettings, TranscriptOp, Update,
     WorktreeChoice,
 };
 use crate::oneshot::TextGen;
@@ -45,6 +45,13 @@ const GENERATED_TITLE_LIMIT: usize = 80;
 const TITLE_QUESTION: &str =
     "Reply with a concise 3-7 word title for this conversation, no punctuation. Reply with the title only.";
 const TITLE_CONTEXT_LIMIT: usize = 4000;
+const STOP_GRACE: Duration = Duration::from_secs(5);
+const START_GRACE: Duration = Duration::from_secs(30);
+const RELINK_DELAY: Duration = Duration::from_secs(1);
+const RELINK_ATTEMPTS: u32 = 20;
+const PROBE_TIMEOUT_MS: u64 = 5_000;
+const KILL_TIMEOUT_MS: u64 = 15_000;
+const DELIVERY_SLACK_MS: i64 = 2_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
@@ -332,6 +339,17 @@ enum Command {
         entry: String,
         index: u32,
     },
+    Verify {
+        thread: String,
+        attempt: u32,
+        relink: bool,
+    },
+    StopCheck {
+        thread: String,
+    },
+    RestartDaemon {
+        force: bool,
+    },
     Shutdown {
         done: std::sync::mpsc::Sender<()>,
     },
@@ -419,6 +437,10 @@ impl Studio {
             last_rows: None,
             protected: Vec::new(),
             dirty: true,
+            bundled: None,
+            interactive: true,
+            daemon: None,
+            daemon_pushed: None,
         };
         runtime.spawn(actor.run(receiver));
         Ok(Arc::new(Self { commands, mailbox, workspace, _runtime: runtime }))
@@ -503,6 +525,10 @@ impl Studio {
 
     pub fn delete_thread(&self, thread: String) {
         self.send_command(Command::DeleteThread { thread });
+    }
+
+    pub fn restart_daemon(&self, force: bool) {
+        self.send_command(Command::RestartDaemon { force });
     }
 
     pub fn set_archived(&self, thread: String, archived: bool) {
@@ -646,6 +672,8 @@ struct Thread {
     run_started_at: Option<i64>,
     failed_at: Option<i64>,
     pending_run: bool,
+    pending_at: Option<i64>,
+    stopping: Option<Instant>,
     reopen: bool,
     ended_by_events: bool,
     allowed_effects: Vec<String>,
@@ -682,6 +710,16 @@ struct Actor {
     last_rows: Option<Vec<ThreadRow>>,
     protected: Vec<String>,
     dirty: bool,
+    bundled: Option<String>,
+    interactive: bool,
+    daemon: Option<DaemonFacts>,
+    daemon_pushed: Option<Update>,
+}
+
+struct DaemonFacts {
+    version: Option<String>,
+    pid: Option<u32>,
+    mismatch: Option<String>,
 }
 
 async fn next_event(events: &mut Option<mpsc::UnboundedReceiver<DaemonClientEvent>>) -> Option<DaemonClientEvent> {
@@ -713,6 +751,9 @@ async fn wait_until(at: Option<Instant>) {
 impl Actor {
     async fn run(mut self, mut commands: mpsc::UnboundedReceiver<Command>) {
         self.push_projects();
+        let launch = self.launch.clone();
+        self.bundled =
+            tokio::task::spawn_blocking(move || daemon::bundled_version(launch.as_ref())).await.ok().flatten();
         let mut events = None;
         let mut dead = None;
         let mut retry_at = Some(Instant::now());
@@ -722,11 +763,14 @@ impl Actor {
         loop {
             if self.client.is_none() && retry_at.is_some_and(|at| at <= Instant::now()) {
                 self.mailbox.push(Update::Connection { state: Connection::Connecting });
-                match daemon::connect(&self.socket, self.launch.as_ref()).await {
+                match daemon::connect(&self.socket, self.launch.as_ref(), self.bundled.as_deref(), self.interactive)
+                    .await
+                {
                     Ok((client, receiver)) => {
                         dead = Some(client.reader_dead());
                         events = Some(receiver);
                         retry_at = None;
+                        self.interactive = false;
                         self.connected(client).await;
                     }
                     Err(error) => {
@@ -791,7 +835,9 @@ impl Actor {
         self.mailbox.push(Update::Connection { state: Connection::Ready });
         let version = Some(client.daemon_build().version.to_string()).filter(|version| !version.is_empty());
         let pid = client.hello().get("supervisorPid").and_then(Value::as_u64).and_then(|pid| u32::try_from(pid).ok());
-        self.mailbox.push(Update::Daemon { socket: self.socket.to_string_lossy().into_owned(), version, pid });
+        let mismatch = self.bundled.as_deref().and_then(|bundled| daemon::mismatch(bundled, client.daemon_build()));
+        self.daemon = Some(DaemonFacts { version, pid, mismatch });
+        self.push_daemon();
         if client.supports_server_capability("agent_roster") {
             match client.request_ok(DaemonCommand::RosterSubscribe { id: None, rest: Map::default() }).await {
                 Ok(data) => self.roster_changed(data.get("roster").cloned().unwrap_or_default(), &[], true, false),
@@ -830,10 +876,16 @@ impl Actor {
         self.by_active.clear();
         self.utility = None;
         self.roster.clear();
+        self.daemon = None;
+        self.daemon_pushed = None;
         for thread in self.threads.values_mut() {
             if let Some(live) = thread.live.take() {
                 thread.reopen = live.state.busy || thread.pending_run;
             }
+            thread.pending_run = false;
+            thread.pending_at = None;
+            thread.stopping = None;
+            thread.run_started_at = None;
         }
         if let Some(focused) = self.focused.clone() {
             self.mailbox.push(Update::Approvals { thread: focused, approvals: Vec::new() });
@@ -882,7 +934,49 @@ impl Actor {
         if !woke.is_empty() {
             self.save();
         }
+        if self.client.is_some() {
+            let unsure: Vec<String> = self
+                .threads
+                .iter()
+                .filter(|(_, thread)| {
+                    let busy = thread.live.as_ref().is_some_and(|live| live.state.busy);
+                    (busy || thread.pending_run) && thread.stopping.is_none() && !starting(thread)
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            for thread in unsure {
+                self.itself.send(Command::Verify { thread, attempt: 0, relink: false }).ok();
+            }
+        }
         self.dirty = true;
+    }
+
+    fn push_daemon(&mut self) {
+        let Some(facts) = &self.daemon else { return };
+        let mismatch = facts.mismatch.as_ref().map(|message| DaemonMismatch {
+            daemon_version: facts.version.clone().unwrap_or_default(),
+            app_version: self.bundled.clone().unwrap_or_default(),
+            message: message.clone(),
+            busy_sessions: self.busy_sessions(),
+        });
+        let update = Update::Daemon {
+            socket: self.socket.to_string_lossy().into_owned(),
+            version: facts.version.clone(),
+            pid: facts.pid,
+            mismatch,
+        };
+        if self.daemon_pushed.as_ref() != Some(&update) {
+            self.daemon_pushed = Some(update.clone());
+            self.mailbox.push(update);
+        }
+    }
+
+    fn busy_sessions(&self) -> u32 {
+        let mut busy: HashSet<&str> =
+            self.roster.values().filter(|row| row.running).map(|row| row.session_id.as_str()).collect();
+        busy.extend(self.threads.keys().filter(|id| self.running(id)).map(String::as_str));
+        let children = self.children.values().filter(|child| child.agent.running).count();
+        u32::try_from(busy.len() + children).unwrap_or(u32::MAX)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -931,15 +1025,7 @@ impl Actor {
                     self.mailbox.push(Update::RequestFailed { request, message });
                 }
             }
-            Command::Abort { thread } => {
-                let Some(active) = self.live_active(&thread) else {
-                    self.mailbox.notice(NoticeLevel::Info, "That thread is not running.");
-                    return;
-                };
-                self.report(
-                    self.call(DaemonCommand::Abort { id: None, active_session_id: active, rest: Map::default() }).await,
-                );
-            }
+            Command::Abort { thread } => self.stop_run(&thread).await,
             Command::SendQueuedNow { thread, queued } => self.send_queued_now(&thread, &queued).await,
             Command::RemoveQueued { thread, queued } => self.remove_queued(&thread, &queued).await,
             Command::AnswerApproval { thread, request, answer } => self.answer(&thread, request, answer).await,
@@ -1101,6 +1187,9 @@ impl Actor {
                 };
                 self.mailbox.push(update);
             }
+            Command::Verify { thread, attempt, relink } => self.verify(&thread, attempt, relink).await,
+            Command::StopCheck { thread } => self.stop_check(&thread).await,
+            Command::RestartDaemon { force } => self.restart_daemon(force).await,
             Command::Shutdown { done } => self.stop(&done).await,
         }
     }
@@ -1422,6 +1511,7 @@ impl Actor {
             }
         }
         self.fetch_entries(id, false).await;
+        self.settle_pending(id);
         if self.focused.as_deref() == Some(id) {
             self.emit_focus(id);
         }
@@ -1592,7 +1682,6 @@ impl Actor {
             Thread {
                 path: Some(created.session_file.clone()),
                 cwd: Some(cwd),
-                pending_run: true,
                 prompt: Some(prompt.to_string()),
                 ..Thread::default()
             },
@@ -1696,6 +1785,7 @@ impl Actor {
         };
         if let Some(thread) = self.threads.get_mut(id) {
             thread.pending_run = true;
+            thread.pending_at = Some(now_ms());
             if thread.run_started_at.is_none() {
                 thread.run_started_at = Some(now_ms());
             }
@@ -1718,6 +1808,7 @@ impl Actor {
         if let Err(error) = self.call(command).await {
             if let Some(thread) = self.threads.get_mut(id) {
                 thread.pending_run = false;
+                thread.pending_at = None;
                 thread.run_started_at = None;
             }
             self.emit_info(id);
@@ -1933,27 +2024,19 @@ impl Actor {
             self.mailbox.notice(NoticeLevel::Error, format!("Unknown thread {id}."));
             return;
         }
-        if self.running(id) {
-            self.mailbox.notice(NoticeLevel::Warning, "Stop the thread before deleting it.");
-            return;
-        }
         let Some(path) = self.session_path(id) else {
             self.mailbox.notice(NoticeLevel::Error, format!("The session file of thread {id} is unknown."));
             return;
         };
-        let active = self.live_active(id).or_else(|| self.roster_for(id).and_then(|row| row.active_session_id.clone()));
-        if let Some(active) = active {
-            if let Err(error) = self
-                .call(DaemonCommand::Kill { id: None, active_session_id: active.clone(), rest: Map::default() })
-                .await
-            {
-                self.mailbox.notice(NoticeLevel::Error, error);
-                return;
+        if let Some(active) = self.daemon_active(id) {
+            let kill = DaemonCommand::Kill { id: None, active_session_id: active.clone(), rest: Map::default() };
+            if let Err(error) = self.probe(kill, KILL_TIMEOUT_MS).await {
+                if self.liveness(&active).await != Some(WorkerLiveness::Gone) {
+                    self.mailbox.notice(NoticeLevel::Error, format!("Could not stop the thread to delete it: {error}"));
+                    return;
+                }
             }
-            self.by_active.remove(&active);
-            if let Some(thread) = self.threads.get_mut(id) {
-                thread.live = None;
-            }
+            self.forget_run(id);
         }
         let command = DaemonCommand::DeleteSavedSession {
             id: None,
@@ -2330,6 +2413,299 @@ impl Actor {
             || self.roster_for(id).is_some_and(|row| row.running)
     }
 
+    fn daemon_active(&self, id: &str) -> Option<String> {
+        self.live_active(id).or_else(|| self.roster_for(id).and_then(|row| row.active_session_id.clone()))
+    }
+
+    fn later(&self, delay: Duration, command: Command) {
+        let itself = self.itself.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(delay).await;
+            itself.send(command).ok();
+        });
+    }
+
+    async fn probe(&self, command: DaemonCommand, timeout_ms: u64) -> Result<Value, String> {
+        let Some(client) = self.client.clone() else {
+            return Err("Not connected to the Eukhe daemon.".to_string());
+        };
+        client.request_ok_with_timeout(command, timeout_ms).await.map_err(|error| format!("{error:#}"))
+    }
+
+    async fn liveness(&self, active: &str) -> Option<WorkerLiveness> {
+        let command =
+            DaemonCommand::GetWorkerLiveness { id: None, active_session_id: active.to_string(), rest: Map::default() };
+        let data = self.probe(command, PROBE_TIMEOUT_MS).await.ok()?;
+        serde_json::from_value(data.get("liveness")?.clone()).ok()
+    }
+
+    async fn state_of(&self, active: &str) -> Result<Value, String> {
+        let command = DaemonCommand::GetState { id: None, active_session_id: active.to_string(), rest: Map::default() };
+        self.probe(command, PROBE_TIMEOUT_MS).await
+    }
+
+    fn forget_run(&mut self, id: &str) {
+        let info = if self.focused.as_deref() == Some(id) { self.info(id) } else { None };
+        if let Some(thread) = self.threads.get_mut(id) {
+            if let Some(live) = thread.live.take() {
+                self.by_active.remove(&live.active);
+            }
+            thread.pending_run = false;
+            thread.pending_at = None;
+            thread.stopping = None;
+            thread.run_started_at = None;
+        }
+        for row in self.roster.values_mut().filter(|row| row.session_id == id) {
+            row.running = false;
+        }
+        if let Some(mut info) = info {
+            info.busy = false;
+            info.run_started_at = None;
+            info.compacting = false;
+            self.mailbox.push(Update::Thread { thread: id.to_string(), info });
+            self.mailbox.push(Update::Approvals { thread: id.to_string(), approvals: Vec::new() });
+        }
+        self.dirty = true;
+    }
+
+    async fn reopen_focused(&mut self, id: &str) {
+        if self.focused.as_deref() != Some(id) || self.client.is_none() {
+            return;
+        }
+        if let Err(error) = self.ensure_open(id).await {
+            self.mailbox.notice(NoticeLevel::Error, error);
+        }
+    }
+
+    async fn run_lost(&mut self, id: &str, reason: &str) {
+        let was = self.running(id);
+        self.forget_run(id);
+        if was {
+            if let Some(thread) = self.threads.get_mut(id) {
+                thread.failed_at = Some(now_ms());
+            }
+            let title = self.title(id);
+            let body = format!("The run stopped: {reason}.");
+            self.mailbox.notice(NoticeLevel::Warning, format!("“{title}”: {body}"));
+            self.mailbox.push(Update::Notification {
+                thread: id.to_string(),
+                kind: NotificationKind::Failed,
+                title,
+                body,
+            });
+        }
+        self.reopen_focused(id).await;
+    }
+
+    async fn resync(&mut self, id: &str, active: &str) {
+        let was = self.running(id);
+        if let Err(error) = self.attach(id, active).await {
+            self.run_lost(id, &error).await;
+            return;
+        }
+        self.emit_info(id);
+        if !self.running(id) {
+            if was {
+                let failed = self.threads.get(id).is_some_and(|thread| thread.failed_at.is_some());
+                self.run_finished(id, failed);
+                self.refresh_saved().await;
+            }
+            self.release(id).await;
+        }
+    }
+
+    fn settle_pending(&mut self, id: &str) {
+        let Some(thread) = self.threads.get_mut(id) else { return };
+        let Some(live) = thread.live.as_ref() else { return };
+        if live.state.busy {
+            return;
+        }
+        if !thread.pending_run {
+            thread.run_started_at = None;
+            return;
+        }
+        let sent = thread.pending_at.unwrap_or_else(now_ms);
+        if live.transcript.last_user_at().is_some_and(|at| at >= sent - DELIVERY_SLACK_MS) {
+            thread.pending_run = false;
+            thread.pending_at = None;
+            thread.run_started_at = None;
+            self.dirty = true;
+            return;
+        }
+        let held = live.state.queue.len() > 0;
+        let left = pending_left(sent);
+        if held || left.is_some() {
+            self.later(
+                left.unwrap_or(START_GRACE),
+                Command::Verify { thread: id.to_string(), attempt: 0, relink: false },
+            );
+            return;
+        }
+        thread.pending_run = false;
+        thread.pending_at = None;
+        thread.run_started_at = None;
+        thread.failed_at = Some(now_ms());
+        let title = self.title(id);
+        let body = format!("The run never started: Eukhe did not begin it within {} s.", START_GRACE.as_secs());
+        self.mailbox.notice(NoticeLevel::Error, format!("“{title}”: {body}"));
+        self.mailbox.push(Update::Notification { thread: id.to_string(), kind: NotificationKind::Failed, title, body });
+        self.dirty = true;
+    }
+
+    async fn verify(&mut self, id: &str, attempt: u32, relink: bool) {
+        let Some(thread) = self.threads.get(id) else { return };
+        if !relink && (thread.stopping.is_some() || starting(thread) || !self.running(id)) {
+            return;
+        }
+        let Some(active) = self.daemon_active(id) else {
+            self.run_lost(id, "Eukhe no longer has a session for this thread").await;
+            return;
+        };
+        let retry = attempt < RELINK_ATTEMPTS;
+        match self.liveness(&active).await {
+            Some(WorkerLiveness::Gone) => {
+                self.run_lost(id, "Eukhe stopped the thread's session worker").await;
+                return;
+            }
+            Some(WorkerLiveness::Recovering) => {
+                if retry {
+                    self.later(RELINK_DELAY, Command::Verify { thread: id.to_string(), attempt: attempt + 1, relink });
+                } else {
+                    self.run_lost(id, "its session worker did not come back").await;
+                }
+                return;
+            }
+            Some(WorkerLiveness::Live) | None => {}
+        }
+        if !relink && self.live_active(id).as_deref() == Some(active.as_str()) {
+            match self.state_of(&active).await {
+                Ok(state) if state.get("isStreaming").and_then(Value::as_bool) == Some(true) => {
+                    if let Some(thread) = self.threads.get_mut(id) {
+                        if let Some(live) = thread.live.as_mut() {
+                            live.state.merge(&state);
+                        }
+                        thread.run_started_at = thread.run_started_at.or(Some(now_ms()));
+                    }
+                    self.emit_info(id);
+                    return;
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    if retry {
+                        self.later(
+                            RELINK_DELAY,
+                            Command::Verify { thread: id.to_string(), attempt: attempt + 1, relink },
+                        );
+                    } else {
+                        self.run_lost(id, &error).await;
+                    }
+                    return;
+                }
+            }
+        }
+        self.resync(id, &active).await;
+    }
+
+    async fn stop_run(&mut self, id: &str) {
+        let Some(active) = self.daemon_active(id) else {
+            if self.running(id) {
+                self.forget_run(id);
+                self.mailbox
+                    .notice(NoticeLevel::Info, "The thread was not running in Eukhe; it no longer shows as working.");
+            } else {
+                self.mailbox.notice(NoticeLevel::Info, "That thread is not running.");
+            }
+            return;
+        };
+        self.threads.entry(id.to_string()).or_default().stopping = Some(Instant::now());
+        let abort = DaemonCommand::Abort { id: None, active_session_id: active, rest: Map::default() };
+        match self.probe(abort, PROBE_TIMEOUT_MS).await {
+            Ok(_) => self.later(STOP_GRACE, Command::StopCheck { thread: id.to_string() }),
+            Err(error) => {
+                self.mailbox.notice(NoticeLevel::Warning, format!("Eukhe did not take the stop request: {error}"));
+                self.itself.send(Command::StopCheck { thread: id.to_string() }).ok();
+            }
+        }
+    }
+
+    async fn stop_check(&mut self, id: &str) {
+        let Some(thread) = self.threads.get_mut(id) else { return };
+        if thread.stopping.take().is_none() || !self.running(id) {
+            return;
+        }
+        let Some(active) = self.daemon_active(id) else {
+            self.forget_run(id);
+            self.reopen_focused(id).await;
+            return;
+        };
+        if self.liveness(&active).await == Some(WorkerLiveness::Gone) {
+            self.forget_run(id);
+            self.reopen_focused(id).await;
+            return;
+        }
+        let streaming = match self.state_of(&active).await {
+            Ok(state) => state.get("isStreaming").and_then(Value::as_bool) == Some(true),
+            Err(_) => true,
+        };
+        if !streaming {
+            self.resync(id, &active).await;
+            if self.running(id) {
+                self.forget_run(id);
+            }
+            return;
+        }
+        let grace = STOP_GRACE.as_secs();
+        let kill = DaemonCommand::Kill { id: None, active_session_id: active, rest: Map::default() };
+        let reason = match self.probe(kill, KILL_TIMEOUT_MS).await {
+            Ok(_) => format!("did not stop within {grace} s, so Local Studio stopped its Eukhe session worker"),
+            Err(error) => format!(
+                "did not stop within {grace} s and Eukhe did not confirm stopping its session worker ({error}); it is shown as stopped"
+            ),
+        };
+        let title = self.title(id);
+        self.forget_run(id);
+        self.mailbox.notice(NoticeLevel::Warning, format!("“{title}” {reason}."));
+        self.reopen_focused(id).await;
+    }
+
+    async fn restart_daemon(&mut self, force: bool) {
+        let Some(client) = self.client.clone() else {
+            self.mailbox.notice(NoticeLevel::Info, "Not connected to the Eukhe daemon yet.");
+            return;
+        };
+        if self.launch.is_none() {
+            self.mailbox.notice(
+                NoticeLevel::Error,
+                "Local Studio has no Eukhe program to start, so it cannot restart the daemon.",
+            );
+            return;
+        }
+        let busy = self.busy_sessions();
+        if !force && busy > 0 {
+            self.push_daemon();
+            self.mailbox.notice(
+                NoticeLevel::Warning,
+                format!("{busy} Eukhe sessions are running; confirm to restart the daemon anyway."),
+            );
+            return;
+        }
+        let if_idle = (!force && client.supports_server_capability(IDLE_SHUTDOWN_CAPABILITY)).then_some(true);
+        let command = DaemonCommand::Shutdown { id: None, force: force.then_some(true), if_idle, rest: Map::default() };
+        match client.request(command).await {
+            Ok(response) if !response.success => {
+                let reason = response.error.unwrap_or_else(|| "a session holds work".to_string());
+                self.mailbox.notice(
+                    NoticeLevel::Warning,
+                    format!("The Eukhe daemon did not restart ({reason}); confirm to restart it anyway."),
+                );
+            }
+            Ok(_) | Err(_) => {
+                self.interactive = true;
+                self.mailbox.notice(NoticeLevel::Info, "Restarting the Eukhe daemon…");
+            }
+        }
+    }
+
     async fn reopen_session(&mut self, id: &str) -> Result<String, String> {
         let active = self.live_active(id).or_else(|| self.roster_for(id).and_then(|row| row.active_session_id.clone()));
         if let Some(active) = active {
@@ -2514,6 +2890,12 @@ impl Actor {
                 continue;
             }
             let was_running = self.roster.get(&agent).is_some_and(|old| old.running);
+            let restarted = self
+                .roster
+                .get(&agent)
+                .and_then(|old| old.worker.as_ref())
+                .zip(row.worker.as_ref())
+                .is_some_and(|(old, new)| old != new);
             let id = row.session_id.clone();
             let thread = self.threads.get_mut(&id);
             let attached = thread.as_ref().is_some_and(|thread| thread.live.is_some());
@@ -2535,7 +2917,21 @@ impl Actor {
             }
             let flipped = was_running != row.running;
             let stopped = was_running && !row.running;
+            let idle = !row.running;
+            let moved = row
+                .active_session_id
+                .as_ref()
+                .is_some_and(|active| self.live_active(&id).is_some_and(|live| &live != active));
             self.roster.insert(agent, row);
+            let unsure = self.threads.get(&id).is_some_and(|thread| {
+                let busy = thread.live.as_ref().is_some_and(|live| live.state.busy);
+                (busy || thread.pending_run) && thread.stopping.is_none() && !starting(thread)
+            });
+            if attached && restarted {
+                self.later(RELINK_DELAY, Command::Verify { thread: id.clone(), attempt: 0, relink: true });
+            } else if unsure && (idle || moved) {
+                self.itself.send(Command::Verify { thread: id.clone(), attempt: 0, relink: moved }).ok();
+            }
             if stopped && !self.running(&id) {
                 if let Some(thread) = self.threads.get_mut(&id) {
                     thread.run_started_at = None;
@@ -2545,6 +2941,7 @@ impl Actor {
                 self.emit_info(&id);
             }
         }
+        self.push_daemon();
         if children_changed || children_before != self.children.len() {
             if let Some(focused) = self.focused.clone() {
                 self.emit_subagents(&focused);
@@ -2651,8 +3048,12 @@ impl Actor {
             DaemonClientEvent::DaemonClosing { reason } => {
                 self.mailbox.notice(NoticeLevel::Info, format!("The Eukhe daemon is closing ({reason})."));
             }
-            DaemonClientEvent::DirectLinkLost { .. }
-            | DaemonClientEvent::SessionListItem { .. }
+            DaemonClientEvent::DirectLinkLost { active_session_id } => {
+                if let Some(thread) = self.by_active.get(&active_session_id).cloned() {
+                    self.later(RELINK_DELAY, Command::Verify { thread, attempt: 0, relink: true });
+                }
+            }
+            DaemonClientEvent::SessionListItem { .. }
             | DaemonClientEvent::SessionListProgress { .. }
             | DaemonClientEvent::HeartbeatsChanged
             | DaemonClientEvent::StateTreeUpdate { .. } => {}
@@ -3068,6 +3469,17 @@ fn truncate(text: &str, limit: usize) -> String {
     let mut cut: String = text.chars().take(limit).collect();
     cut.push('…');
     cut
+}
+
+fn starting(thread: &Thread) -> bool {
+    thread.pending_run
+        && !thread.live.as_ref().is_some_and(|live| live.state.busy)
+        && thread.pending_at.is_some_and(|at| pending_left(at).is_some())
+}
+
+fn pending_left(sent: i64) -> Option<Duration> {
+    let elapsed = Duration::from_millis(u64::try_from(now_ms().saturating_sub(sent)).unwrap_or(0));
+    START_GRACE.checked_sub(elapsed).filter(|left| !left.is_zero())
 }
 
 fn now_ms() -> i64 {

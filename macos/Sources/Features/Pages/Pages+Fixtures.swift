@@ -168,7 +168,7 @@ enum PagesFixtures {
             .keybindings(bindings: keybindings),
             .models(models: models, favorites: favorites, hidden: [ModelKey(provider: "anthropic", model: "claude-opus-4-1")]),
             .providers(providers: providers, engines: engines, errors: []),
-            .daemon(socket: "/Users/gil/.eukhe/daemon.sock", version: "0.10.0", pid: 48211),
+            .daemon(socket: "/Users/gil/.eukhe/daemon.sock", version: "0.10.0", pid: 48211, mismatch: nil),
         ]
     }
 
@@ -279,7 +279,8 @@ enum PagesFixtures {
     static var studio: LocalController {
         LocalController(
             target: "", url: "http://127.0.0.1:18091", id: "ctl-studio", name: "studio", host: "127.0.0.1", local: true,
-            reachable: true, error: nil, version: "0.9.2",
+            hasController: true, reachable: true, status: .serving, headline: "qwen3-coder-30b-a3b", detail: "studio · port 8001",
+            summary: "qwen3-coder-30b-a3b", note: nil, elsewhere: nil, error: nil, version: "0.9.2",
             hardware: LocalHardware(
                 cpus: 32, memoryTotalBytes: 128 * gib, memoryFreeBytes: 60 * gib,
                 gpus: [
@@ -289,7 +290,10 @@ enum PagesFixtures {
                 memoryUsedBytes: 39 * gib, memoryCapacityBytes: 48 * gib, memoryLabel: "VRAM", gpuSummary: "2× RTX 4090"
             ),
             endpoints: [
-                LocalEndpoint(id: "ep-1", controllerId: "ctl-studio", port: 8001, pid: 4411, models: ["qwen3-coder-30b-a3b"], live: true, jobId: "run-1"),
+                LocalEndpoint(
+                    id: "ep-1", controllerId: "ctl-studio", port: 8001, pid: 4411, models: ["qwen3-coder-30b-a3b"], state: .loaded, stale: false,
+                    error: nil, confirmedAtMs: nil, latencyMs: 9, address: "127.0.0.1:8001", provider: nil, jobId: "run-1"
+                ),
             ],
             jobs: [],
             recipes: [
@@ -304,7 +308,8 @@ enum PagesFixtures {
     static var laptop: LocalController {
         LocalController(
             target: "http://100.88.4.12:18091", url: "http://100.88.4.12:18091", id: "ctl-mbp", name: "gil-mbp", host: "100.88.4.12", local: false,
-            reachable: true, error: nil, version: "0.9.2",
+            hasController: true, reachable: true, status: .loading, headline: "Loading gpt-oss-20b-mlx on gil-mbp",
+            detail: "downloading 40% · weights 6.1 / 15.2 GB", summary: "Loading gpt-oss-20b-mlx", note: nil, elsewhere: nil, error: nil, version: "0.9.2",
             hardware: LocalHardware(
                 cpus: 14, memoryTotalBytes: 64 * gib, memoryFreeBytes: 30 * gib, gpus: [],
                 memoryUsedBytes: 34 * gib, memoryCapacityBytes: 64 * gib, memoryLabel: "Memory", gpuSummary: "Apple M4 Max"
@@ -316,13 +321,7 @@ enum PagesFixtures {
         )
     }
 
-    static var offline: LocalController {
-        LocalController(
-            target: "http://100.88.4.40:18091", url: "http://100.88.4.40:18091", id: nil, name: "rig-02", host: "100.88.4.40", local: false,
-            reachable: false, error: "connect timed out after 3s", version: nil, hardware: nil, endpoints: [], jobs: [], recipes: [],
-            requests: 0, tokens: 0, measuredRequests: 0
-        )
-    }
+    static var offline: LocalController { offlineMachine(name: "rig-02", host: "100.88.4.40") }
 
     static var localUsage: LocalUsage {
         LocalUsage(

@@ -14,6 +14,7 @@ const MODES: [(&str, &str); 3] = [("tokens", "Tokens"), ("cost", "Cost"), ("limi
 pub struct UsagePage {
     pub root: gtk::ScrolledWindow,
     tabs: Vec<(&'static str, gtk::ToggleButton)>,
+    since: gtk::Label,
     mode: Cell<&'static str>,
     period: Cell<UsagePeriod>,
     request: RefCell<Option<String>>,
@@ -30,6 +31,7 @@ impl UsagePage {
         let mut tabs = Vec::new();
         for (name, title) in MODES {
             let button = parts::tab(&gtk::Label::new(Some(title)));
+            button.set_valign(gtk::Align::BaselineCenter);
             button.set_tooltip_text(Some(&format!("{title} ({})", &name[..1])));
             if let Some((_, leader)) = tabs.first() {
                 button.set_group(Some(leader));
@@ -45,6 +47,12 @@ impl UsagePage {
             bar.append(&button);
             tabs.push((name, button));
         }
+        let since = parts::label(" ", &["dim-label", "ls-dash-label"]);
+        since.set_hexpand(true);
+        since.set_xalign(1.0);
+        since.set_valign(gtk::Align::BaselineCenter);
+        since.set_visible(false);
+        bar.append(&since);
         let view = UsageView::build(app);
         let limits = LimitsView::build();
         let loading = adw::StatusPage::builder().title("Loading usage…").build();
@@ -70,6 +78,7 @@ impl UsagePage {
         Self {
             root,
             tabs,
+            since,
             mode: Cell::new("tokens"),
             period: Cell::new(UsagePeriod::Week),
             request: RefCell::new(None),
@@ -119,9 +128,12 @@ impl UsagePage {
 
     pub fn render(&self, state: &State) {
         let Some(report) = &state.usage else {
+            self.since.set_visible(false);
             self.stack.set_visible_child_name(if self.failed.get() { "failure" } else { "loading" });
             return;
         };
+        self.since.set_label(&parts::since_text(Some(&report.lifetime)));
+        self.since.set_visible(self.mode.get() != "limits");
         match self.mode.get() {
             "limits" => {
                 self.limits.fill(&report.limits, &state.providers);

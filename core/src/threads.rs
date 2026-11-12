@@ -95,6 +95,7 @@ pub(crate) struct RosterRow {
     pub(crate) failed: bool,
     pub(crate) updated_at: Option<i64>,
     pub(crate) monitoring: bool,
+    pub(crate) worker: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -197,6 +198,9 @@ pub(crate) fn roster_row(entry: &Value) -> Option<RosterRow> {
         updated_at: text("lastActivityAt").or_else(|| text("modified")).and_then(parse_rfc3339),
         monitoring: summary.get("hasRegisteredCronJob").and_then(Value::as_bool).unwrap_or(false)
             || text("activity") == Some("monitoring"),
+        worker: text("workerInstanceId")
+            .map(str::to_string)
+            .or_else(|| summary.get("workerPid").and_then(Value::as_u64).map(|pid| pid.to_string())),
     })
 }
 

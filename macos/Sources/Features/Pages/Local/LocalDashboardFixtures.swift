@@ -14,14 +14,18 @@ extension PagesFixtures {
     static var rtxPod: LocalController {
         LocalController(
             target: "", url: "http://127.0.0.1:18091", id: "ctl-rtx6000", name: "rtx-6000-pod", host: "127.0.0.1", local: true,
-            reachable: true, error: nil, version: "0.1.0",
+            hasController: true, reachable: true, status: .serving, headline: "DeepSeek-V4.1-Flash", detail: "rtx-6000-pod · port 8000",
+            summary: "DeepSeek-V4.1-Flash", note: nil, elsewhere: nil, error: nil, version: "0.1.0",
             hardware: LocalHardware(
                 cpus: 64, memoryTotalBytes: 512 * gib, memoryFreeBytes: 300 * gib,
                 gpus: [rtxGpu(0, used: 93.7), rtxGpu(1, used: 93.5), rtxGpu(2, used: 94.7), rtxGpu(3, used: 94.7)],
                 memoryUsedBytes: 377 * gib, memoryCapacityBytes: 384 * gib, memoryLabel: "VRAM", gpuSummary: "4× RTX PRO 6000"
             ),
             endpoints: [
-                LocalEndpoint(id: "ctl-rtx6000:8000", controllerId: "ctl-rtx6000", port: 8000, pid: 812, models: ["DeepSeek-V4.1-Flash"], live: true, jobId: nil),
+                LocalEndpoint(
+                    id: "ctl-rtx6000:8000", controllerId: "ctl-rtx6000", port: 8000, pid: 812, models: ["DeepSeek-V4.1-Flash"],
+                    state: .loaded, stale: false, error: nil, confirmedAtMs: nil, latencyMs: 12, address: "127.0.0.1:8000", provider: nil, jobId: nil
+                ),
             ],
             jobs: [],
             recipes: [
@@ -32,21 +36,19 @@ extension PagesFixtures {
         )
     }
 
-    static var rtx3090Pod: LocalController {
+    static func offlineMachine(name: String, host: String) -> LocalController {
         LocalController(
-            target: "http://100.88.4.31:18091", url: "http://100.88.4.31:18091", id: nil, name: "rtx-3090-pod", host: "100.88.4.31", local: false,
-            reachable: false, error: "connect timed out after 3s", version: nil, hardware: nil, endpoints: [], jobs: [], recipes: [],
+            target: "http://\(host):18091", url: "http://\(host):18091", id: nil, name: name, host: host, local: false,
+            hasController: true, reachable: false, status: .offline, headline: "\(name) is offline",
+            detail: "connect timed out after 3s It shows live figures again once it reconnects.", summary: "connect timed out after 3s",
+            note: nil, elsewhere: nil, error: "connect timed out after 3s", version: nil, hardware: nil, endpoints: [], jobs: [], recipes: [],
             requests: 0, tokens: 0, measuredRequests: 0
         )
     }
 
-    static var dgxSpark: LocalController {
-        LocalController(
-            target: "http://100.88.4.32:18091", url: "http://100.88.4.32:18091", id: nil, name: "DGX Spark", host: "100.88.4.32", local: false,
-            reachable: false, error: "connect timed out after 3s", version: nil, hardware: nil, endpoints: [], jobs: [], recipes: [],
-            requests: 0, tokens: 0, measuredRequests: 0
-        )
-    }
+    static var rtx3090Pod: LocalController { offlineMachine(name: "rtx-3090-pod", host: "100.88.4.31") }
+
+    static var dgxSpark: LocalController { offlineMachine(name: "DGX Spark", host: "100.88.4.32") }
 
     static var dashboardSnapshot: LocalSnapshot {
         LocalSnapshot(
@@ -58,8 +60,46 @@ extension PagesFixtures {
     static var idleSnapshot: LocalSnapshot {
         var pod = rtxPod
         pod.endpoints = []
+        pod.status = .noModel
+        pod.headline = "No model loaded on rtx-6000-pod"
+        pod.detail = "rtx-6000-pod is idle. Load a model from the registry to serve it."
+        pod.summary = "No model loaded"
         return LocalSnapshot(
             controllers: [pod, rtx3090Pod], registry: nil, usage: localUsage, tailnet: nil,
+            record: nil, share: nil, autoModel: nil, generatedAt: nil, error: nil
+        )
+    }
+
+    static var engineMachine: LocalController {
+        LocalController(
+            target: "https://server.tail1234.ts.net", url: "https://server.tail1234.ts.net", id: nil, name: "server", host: "server.tail1234.ts.net",
+            local: false, hasController: false, reachable: true, status: .serving, headline: "qwen3.8-27b",
+            detail: "server · elpis at https://server.tail1234.ts.net/v1 · answered /models in 84 ms", summary: "qwen3.8-27b",
+            note: "Hardware, decode and token figures need a Local controller on server. Add one in Settings → Local.",
+            elsewhere: nil, error: nil, version: nil, hardware: nil,
+            endpoints: [
+                LocalEndpoint(
+                    id: "provider:elpis", controllerId: "", port: 443, pid: nil, models: ["qwen3.8-27b"], state: .loaded, stale: false,
+                    error: nil, confirmedAtMs: Int64(Date.now.timeIntervalSince1970 * 1000) - 3000, latencyMs: 84,
+                    address: "https://server.tail1234.ts.net/v1", provider: "elpis", jobId: nil
+                ),
+            ],
+            jobs: [], recipes: [], requests: 0, tokens: 0, measuredRequests: 0
+        )
+    }
+
+    static var engineSnapshot: LocalSnapshot {
+        var mac = rtxPod
+        mac.name = "macbook"
+        mac.endpoints = []
+        mac.hardware = nil
+        mac.status = .noModel
+        mac.headline = "No model loaded on macbook"
+        mac.detail = "qwen3.8-27b is loaded on server."
+        mac.summary = "No model loaded"
+        mac.elsewhere = LocalElsewhere(url: engineMachine.url, name: "server", models: "qwen3.8-27b")
+        return LocalSnapshot(
+            controllers: [mac, engineMachine], registry: nil, usage: localUsage, tailnet: nil,
             record: nil, share: nil, autoModel: nil, generatedAt: nil, error: nil
         )
     }

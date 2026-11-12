@@ -10,8 +10,8 @@ use reqwest::{StatusCode, Url};
 use serde_json::{json, Map, Value};
 
 use super::model::{
-    CustomProvider, EndpointPreset, LocalController, LocalEngine, ProviderApi, ProviderCredential, ProviderKey,
-    ProviderKind, ProviderModel, ProviderStatus,
+    CustomProvider, EndpointPreset, LocalController, LocalEngine, LocalEngineState, ProviderApi, ProviderCredential,
+    ProviderKey, ProviderKind, ProviderModel, ProviderStatus,
 };
 use super::{ModelsReloader, Workspace};
 use crate::model::{ModelOption, Update};
@@ -21,7 +21,7 @@ const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const LOCK_STALE: Duration = Duration::from_secs(10);
 const LOCK_ATTEMPTS: u32 = 50;
 const LOCK_DELAY: Duration = Duration::from_millis(20);
-const NO_KEY: &str = "none";
+pub(super) const NO_KEY: &str = "none";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const ENDPOINT_HEADER: &str = "x-local-studio-endpoint";
 const EXCERPT: usize = 200;
@@ -78,9 +78,9 @@ pub(super) struct ProviderState {
 }
 
 #[derive(Default)]
-struct Files {
-    providers: Map<String, Value>,
-    auth: Map<String, Value>,
+pub(super) struct Files {
+    pub(super) providers: Map<String, Value>,
+    pub(super) auth: Map<String, Value>,
     errors: Vec<String>,
 }
 
@@ -122,7 +122,7 @@ fn api_name(api: ProviderApi) -> &'static str {
     }
 }
 
-fn api_of(name: &str) -> Option<ProviderApi> {
+pub(super) fn api_of(name: &str) -> Option<ProviderApi> {
     match name {
         "openai-completions" => Some(ProviderApi::OpenAiCompatible),
         "openai-responses" => Some(ProviderApi::OpenAiResponses),
@@ -131,7 +131,7 @@ fn api_of(name: &str) -> Option<ProviderApi> {
     }
 }
 
-fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+pub(super) fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
@@ -139,7 +139,7 @@ fn is_built_in(id: &str) -> bool {
     BUILT_INS.iter().any(|built_in| built_in.id == id)
 }
 
-fn is_custom(id: &str, entry: &Value) -> bool {
+pub(super) fn is_custom(id: &str, entry: &Value) -> bool {
     !is_built_in(id)
         && text(entry, "baseUrl").is_some()
         && entry.get("models").and_then(Value::as_array).is_some_and(|models| !models.is_empty())
@@ -153,7 +153,7 @@ fn stored(auth: &Map<String, Value>, id: &str) -> Option<ProviderCredential> {
     }
 }
 
-fn resolve_reference(key: &str) -> Option<String> {
+pub(super) fn resolve_reference(key: &str) -> Option<String> {
     if key.is_empty() || key.starts_with('!') {
         return None;
     }
@@ -163,7 +163,7 @@ fn resolve_reference(key: &str) -> Option<String> {
     }
 }
 
-fn stored_key(auth: &Map<String, Value>, id: &str) -> Option<String> {
+pub(super) fn stored_key(auth: &Map<String, Value>, id: &str) -> Option<String> {
     let entry = auth.get(id).filter(|entry| text(entry, "type") == Some("api_key"))?;
     text(entry, "key").and_then(resolve_reference)
 }
@@ -308,10 +308,17 @@ fn engine_provider(controller: &LocalController, port: u16) -> String {
 fn engines(fleet: &[LocalController], providers: &Map<String, Value>) -> Vec<LocalEngine> {
     fleet
         .iter()
-        .filter(|controller| controller.reachable)
+        .filter(|controller| controller.reachable && controller.has_controller)
         .flat_map(|controller| {
-            controller.endpoints.iter().filter(|endpoint| endpoint.live && !endpoint.models.is_empty()).map(
-                move |endpoint| {
+            controller
+                .endpoints
+                .iter()
+                .filter(|endpoint| {
+                    endpoint.state == LocalEngineState::Loaded
+                        && !endpoint.controller_id.is_empty()
+                        && !endpoint.models.is_empty()
+                })
+                .map(move |endpoint| {
                     let provider = engine_provider(controller, endpoint.port);
                     LocalEngine {
                         id: endpoint.id.clone(),
@@ -322,8 +329,7 @@ fn engines(fleet: &[LocalController], providers: &Map<String, Value>) -> Vec<Loc
                         added: providers.contains_key(&provider),
                         provider,
                     }
-                },
-            )
+                })
         })
         .collect()
 }
@@ -345,7 +351,7 @@ fn read_object(path: &Path) -> Result<Map<String, Value>, String> {
     }
 }
 
-fn read_files(agent: Option<&Path>) -> Files {
+pub(super) fn read_files(agent: Option<&Path>) -> Files {
     let Some(agent) = agent else { return Files::default() };
     let mut errors = Vec::new();
     let providers = match read_object(&agent.join("models.json")) {
@@ -529,7 +535,7 @@ fn normalize_base(base_url: &str, api: ProviderApi) -> Result<String, String> {
     })
 }
 
-fn parse_models(value: &Value) -> Vec<ProviderModel> {
+pub(super) fn parse_models(value: &Value) -> Vec<ProviderModel> {
     let entries = value
         .get("data")
         .and_then(Value::as_array)

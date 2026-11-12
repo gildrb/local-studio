@@ -1,26 +1,30 @@
 use std::rc::Rc;
 
 use local_studio_core::{
-    ColorScheme, LocalController, LocalDashboard, LocalEndpoint, LocalEngineTelemetry, LocalGpu, LocalGpuTelemetry,
-    LocalHardware, LocalJob, LocalRecipe, LocalSnapshot, Settings, TokenHistory, Update,
+    ColorScheme, LocalController, LocalDashboard, LocalElsewhere, LocalEndpoint, LocalEngineState,
+    LocalEngineTelemetry, LocalGpu, LocalGpuTelemetry, LocalHardware, LocalJob, LocalMachineStatus, LocalRecipe,
+    LocalSnapshot, Settings, TokenHistory, Update,
 };
 
 use crate::app::App;
 use crate::format;
 use crate::state::Page;
 
-pub const SCENES: [&str; 6] = [
+pub const SCENES: [&str; 8] = [
     "local-dashboard",
     "local-dashboard-light",
     "local-dashboard-gildrb",
     "local-dashboard-gildrb-dark",
     "local-offline",
     "local-loading",
+    "local-elsewhere",
+    "local-engine-machine",
 ];
 
 const MIB: u64 = 1_048_576;
 const GIB: u64 = 1_073_741_824;
 const POD_URL: &str = "http://127.0.0.1:18091";
+const SERVER_URL: &str = "https://server.tail1234.ts.net";
 const MODEL: &str = "DeepSeek-V4.1-Flash";
 const SPIKES: [f64; 48] = [
     22.0, 35.0, 40.0, 25.0, 25.0, 60.0, 25.0, 5.0, 180.0, 40.0, 85.0, 50.0, 10.0, 5.0, 25.0, 5.0, 10.0, 120.0, 70.0,
@@ -50,7 +54,12 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             app.apply(vec![local(snapshot(pod()))]);
             let mut gone = pod();
             gone.reachable = false;
+            gone.status = LocalMachineStatus::Offline;
             gone.error = Some("connect timed out after 3s".to_string());
+            gone.headline = "rtx-6000-pod is offline".to_string();
+            gone.detail = format!(
+                "connect timed out after 3s It last ran {MODEL}. It shows live figures again once it reconnects."
+            );
             gone.endpoints.clear();
             gone.hardware = None;
             app.apply(vec![local(snapshot(gone))]);
@@ -58,6 +67,9 @@ pub fn stage(app: &Rc<App>, scene: &str) {
         "local-loading" => {
             let mut loading = pod();
             loading.endpoints.clear();
+            loading.status = LocalMachineStatus::Loading;
+            loading.headline = "Loading glm-5.3-flash-sglang-2xrtx6000 on rtx-6000-pod".to_string();
+            loading.detail = "Downloading weights · 42% · 61 of 146 GB".to_string();
             loading.jobs.push(LocalJob {
                 id: "run-glm".to_string(),
                 recipe_id: "glm-5.3-flash-sglang-2xrtx6000".to_string(),
@@ -70,9 +82,72 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             });
             app.apply(vec![local(snapshot(loading)), Update::LocalDashboard { dashboard: idle_dashboard() }]);
         }
+        "local-elsewhere" | "local-engine-machine" => {
+            let mut mac = pod();
+            mac.name = "macbook".to_string();
+            mac.endpoints.clear();
+            mac.status = LocalMachineStatus::NoModel;
+            mac.headline = "No model loaded on macbook".to_string();
+            mac.detail = "qwen3.8-27b is loaded on server.".to_string();
+            mac.summary = "No model loaded".to_string();
+            mac.elsewhere = Some(LocalElsewhere {
+                url: SERVER_URL.to_string(),
+                name: "server".to_string(),
+                models: "qwen3.8-27b".to_string(),
+            });
+            let snapshot = LocalSnapshot { controllers: vec![mac, engine_machine()], ..LocalSnapshot::default() };
+            app.apply(vec![local(snapshot), Update::LocalDashboard { dashboard: idle_dashboard() }]);
+            app.local.select(if scene == "local-elsewhere" { POD_URL } else { SERVER_URL });
+            return;
+        }
         _ => app.apply(vec![local(snapshot(pod())), Update::LocalDashboard { dashboard: dashboard() }]),
     }
     app.local.select(POD_URL);
+}
+
+fn engine_machine() -> LocalController {
+    LocalController {
+        target: SERVER_URL.to_string(),
+        url: SERVER_URL.to_string(),
+        id: None,
+        name: "server".to_string(),
+        host: "server.tail1234.ts.net".to_string(),
+        local: false,
+        has_controller: false,
+        reachable: true,
+        status: LocalMachineStatus::Serving,
+        headline: "qwen3.8-27b".to_string(),
+        detail: format!("server · elpis at {SERVER_URL}/v1 · answered /models in 84 ms"),
+        summary: "qwen3.8-27b".to_string(),
+        note: Some(
+            "Hardware, decode and token figures need a Local controller on server. Add one in Settings → Local."
+                .to_string(),
+        ),
+        elsewhere: None,
+        error: None,
+        version: None,
+        hardware: None,
+        endpoints: vec![LocalEndpoint {
+            id: "provider:elpis".to_string(),
+            controller_id: String::new(),
+            port: 443,
+            pid: None,
+            models: vec!["qwen3.8-27b".to_string()],
+            state: LocalEngineState::Loaded,
+            stale: false,
+            error: None,
+            confirmed_at_ms: Some(format::now_ms() - 3000),
+            latency_ms: Some(84),
+            address: format!("{SERVER_URL}/v1"),
+            provider: Some("elpis".to_string()),
+            job_id: None,
+        }],
+        jobs: Vec::new(),
+        recipes: Vec::new(),
+        requests: 0,
+        tokens: 0,
+        measured_requests: 0,
+    }
 }
 
 fn local(snapshot: LocalSnapshot) -> Update {
@@ -130,7 +205,14 @@ fn pod() -> LocalController {
         name: "rtx-6000-pod".to_string(),
         host: "127.0.0.1".to_string(),
         local: true,
+        has_controller: true,
         reachable: true,
+        status: LocalMachineStatus::Serving,
+        headline: MODEL.to_string(),
+        detail: "rtx-6000-pod · port 8000".to_string(),
+        summary: MODEL.to_string(),
+        note: None,
+        elsewhere: None,
         error: None,
         version: Some("0.1.0".to_string()),
         hardware: Some(LocalHardware {
@@ -149,7 +231,13 @@ fn pod() -> LocalController {
             port: 8000,
             pid: Some(812),
             models: vec![MODEL.to_string()],
-            live: true,
+            state: LocalEngineState::Loaded,
+            stale: false,
+            error: None,
+            confirmed_at_ms: None,
+            latency_ms: Some(12),
+            address: "127.0.0.1:8000".to_string(),
+            provider: None,
             job_id: None,
         }],
         jobs: Vec::new(),
@@ -172,7 +260,14 @@ fn offline(name: &str, url: &str) -> LocalController {
         name: name.to_string(),
         host: url.trim_start_matches("http://").trim_end_matches(":18091").to_string(),
         local: false,
+        has_controller: true,
         reachable: false,
+        status: LocalMachineStatus::Offline,
+        headline: format!("{name} is offline"),
+        detail: "connect timed out after 3s It shows live figures again once it reconnects.".to_string(),
+        summary: "connect timed out after 3s".to_string(),
+        note: None,
+        elsewhere: None,
         error: Some("connect timed out after 3s".to_string()),
         version: None,
         hardware: None,

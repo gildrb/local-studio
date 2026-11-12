@@ -282,8 +282,9 @@ final class PanelState {
     }
 
     private func registerCommands(_ commands: CommandRouter) {
-        commands.register("preview.toggle", owner: self) { [weak self] in self?.togglePreview() }
-        let browser: @MainActor () -> Bool = { [weak self] in self?.activeBrowser != nil }
+        let shown: @MainActor () -> Bool = { [weak self] in self?.inbox?.shell.route == .thread }
+        commands.register("preview.toggle", owner: self, enabled: shown) { [weak self] in self?.togglePreview() }
+        let browser: @MainActor () -> Bool = { [weak self] in shown() && self?.activeBrowser != nil }
         commands.register("preview.refresh", owner: self, enabled: browser) { [weak self] in self?.refreshPreview() }
         commands.register("preview.focusUrl", owner: self, enabled: browser) { [weak self] in self?.focusPreviewAddress() }
         commands.register("preview.zoomIn", owner: self, enabled: browser) { [weak self] in self?.zoomPreview(by: 0.1) }

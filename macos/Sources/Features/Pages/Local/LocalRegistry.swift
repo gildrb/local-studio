@@ -11,7 +11,7 @@ struct LocalRegistrySection: View {
 
     private var pages: PagesStore { store.pages }
     private var registry: LocalRegistry? { pages.local?.registry }
-    private var reachable: [LocalController] { (pages.local?.controllers ?? []).filter(\.reachable) }
+    private var reachable: [LocalController] { (pages.local?.controllers ?? []).filter { $0.reachable && $0.hasController } }
 
     var body: some View {
         Section {

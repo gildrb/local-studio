@@ -5,12 +5,15 @@ struct TokenSummary: View {
     let tokens: TokenHistory?
     let empty: String
     var rows: [(label: String, value: String?)] = []
+    var titled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(since)
-                .font(.system(size: 13))
-                .foregroundStyle(Theme.secondaryText)
+            if titled {
+                Text(Self.since(tokens))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondaryText)
+            }
             Text(tokens.map { LocalFormat.compact($0.total) } ?? "—")
                 .font(.system(size: 44, weight: .bold))
                 .monospacedDigit()
@@ -36,7 +39,7 @@ struct TokenSummary: View {
         .padding(.top, 2)
     }
 
-    private var since: String {
+    static func since(_ tokens: TokenHistory?) -> String {
         guard let day = tokens?.sinceDay, let date = LocalFormat.date(day) else { return "Tokens" }
         return "Tokens since \(LocalFormat.day(date, year: true))"
     }

@@ -406,6 +406,15 @@ pub enum Connection {
     Lost { reason: String },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct DaemonMismatch {
+    pub daemon_version: String,
+    pub app_version: String,
+    pub message: String,
+    pub busy_sessions: u32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 #[allow(clippy::large_enum_variant)]
@@ -451,7 +460,7 @@ pub enum Update {
     ProjectScripts { project: String, scripts: Vec<ProjectScript> },
     ProjectSettings { project: String, settings: ProjectSettings, effective: Settings },
     WorktreeSetup { thread: String, stages: Vec<SetupStage>, done: bool, error: Option<String> },
-    Daemon { socket: String, version: Option<String>, pid: Option<u32> },
+    Daemon { socket: String, version: Option<String>, pid: Option<u32>, mismatch: Option<DaemonMismatch> },
     Kernel { state: KernelState },
     RequestDone { request: String, message: String },
     RequestFailed { request: String, message: String },

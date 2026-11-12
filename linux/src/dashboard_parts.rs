@@ -240,11 +240,13 @@ impl TokenSummary {
         Self { root, since, total, split, week, busiest, active, extra }
     }
 
+    pub fn move_since(&self) {
+        self.since.set_visible(false);
+        self.root.set_margin_top(34);
+    }
+
     pub fn set(&self, tokens: Option<&TokenHistory>, empty: &str) {
-        let since = tokens.and_then(|tokens| tokens.since_day.as_deref()).and_then(numbers::parse_day);
-        self.since.set_label(
-            &since.map_or_else(|| "Tokens".to_string(), |day| format!("Tokens since {}", numbers::day(day, true))),
-        );
+        self.since.set_label(&since_text(tokens));
         self.total.set_label(&tokens.map_or_else(|| "—".to_string(), |tokens| numbers::compact(tokens.total)));
         self.split.set_label(&match tokens {
             None => " ".to_string(),
@@ -280,6 +282,13 @@ impl TokenSummary {
             label.set_label(value.unwrap_or("—"));
         }
     }
+}
+
+pub fn since_text(tokens: Option<&TokenHistory>) -> String {
+    tokens
+        .and_then(|tokens| tokens.since_day.as_deref())
+        .and_then(numbers::parse_day)
+        .map_or_else(|| "Tokens".to_string(), |day| format!("Tokens since {}", numbers::day(day, true)))
 }
 
 pub fn columns(left: &impl IsA<gtk::Widget>, summary: &TokenSummary) -> gtk::Box {

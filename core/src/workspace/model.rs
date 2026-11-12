@@ -736,7 +736,14 @@ pub struct LocalController {
     pub name: String,
     pub host: String,
     pub local: bool,
+    pub has_controller: bool,
     pub reachable: bool,
+    pub status: LocalMachineStatus,
+    pub headline: String,
+    pub detail: String,
+    pub summary: String,
+    pub note: Option<String>,
+    pub elsewhere: Option<LocalElsewhere>,
     pub error: Option<String>,
     pub version: Option<String>,
     pub hardware: Option<LocalHardware>,
@@ -772,6 +779,32 @@ pub struct LocalGpu {
     pub busy: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum LocalMachineStatus {
+    Serving,
+    Loading,
+    EngineUnreachable,
+    NoModel,
+    Offline,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Record))]
+pub struct LocalElsewhere {
+    pub url: String,
+    pub name: String,
+    pub models: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
+pub enum LocalEngineState {
+    Loaded,
+    Empty,
+    Unreachable,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalEndpoint {
@@ -780,7 +813,13 @@ pub struct LocalEndpoint {
     pub port: u16,
     pub pid: Option<u32>,
     pub models: Vec<String>,
-    pub live: bool,
+    pub state: LocalEngineState,
+    pub stale: bool,
+    pub error: Option<String>,
+    pub confirmed_at_ms: Option<i64>,
+    pub latency_ms: Option<u32>,
+    pub address: String,
+    pub provider: Option<String>,
     pub job_id: Option<String>,
 }
 

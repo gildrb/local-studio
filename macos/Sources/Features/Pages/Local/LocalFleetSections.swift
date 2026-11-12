@@ -99,11 +99,12 @@ struct LocalFleetSections: View {
             pages.perform(.scanTailnet, pending: .scan)
         }
         if let snapshot {
-            if snapshot.controllers.isEmpty {
+            let machines = snapshot.controllers.filter(\.hasController)
+            if machines.isEmpty {
                 Text("No controller answered at \(LocalControllerAddress.effective(pages.settings)).")
                     .foregroundStyle(Theme.secondaryText)
             }
-            ForEach(snapshot.controllers, id: \.url) { controller in
+            ForEach(machines, id: \.url) { controller in
                 MachineRow(controller: controller, pages: pages, ui: binding(controller.url))
             }
             ForEach(tailnetCandidates(snapshot), id: \.ip) { device in
@@ -201,9 +202,9 @@ private struct MachineRow: View {
                     .help(ui.reveal ? "Hide address" : "Show address")
                     .accessibilityLabel(ui.reveal ? "Hide address" : "Show address")
                 }
-                Text(subtitle)
+                Text(controller.summary)
                     .font(.system(size: 11.5))
-                    .foregroundStyle(controller.reachable ? Theme.secondaryText : .red)
+                    .foregroundStyle(subtitleTone)
                     .lineLimit(1)
             }
             Spacer(minLength: 12)
@@ -216,23 +217,21 @@ private struct MachineRow: View {
     }
 
     @ViewBuilder private var dot: some View {
-        if !controller.reachable {
-            StatusDot(color: .red, help: "Offline")
-        } else if !controller.endpoints.isEmpty {
-            StatusDot(color: .green, help: "Serving")
-        } else if controller.jobs.contains(where: { !$0.failed }) {
-            StatusDot(color: .orange, help: "Loading")
-        } else {
-            StatusDot(color: Theme.input, help: "Idle")
+        switch controller.status {
+        case .offline: StatusDot(color: .red, help: "Offline")
+        case .serving: StatusDot(color: controller.endpoints.contains(where: \.stale) ? .orange : .green, help: "Serving")
+        case .loading: StatusDot(color: .orange, help: "Loading")
+        case .engineUnreachable: StatusDot(color: .orange, help: "Engine not answering")
+        case .noModel: StatusDot(color: Theme.input, help: "Idle")
         }
     }
 
-    private var subtitle: String {
-        guard controller.reachable else { return controller.error ?? "Offline" }
-        let loaded = controller.endpoints.flatMap(\.models).joined(separator: ", ")
-        if !loaded.isEmpty { return loaded }
-        if let job = controller.jobs.first { return "Loading \(job.recipeId)" }
-        return "No model loaded"
+    private var subtitleTone: Color {
+        switch controller.status {
+        case .offline: .red
+        case .engineUnreachable: .orange
+        default: controller.endpoints.contains(where: \.stale) ? .orange : Theme.secondaryText
+        }
     }
 
     private func commitRename() {
@@ -332,7 +331,7 @@ private struct MachineDetails: View {
             ("Tokens served", controller.measuredRequests > 0 ? PageFormat.tokens(controller.tokens) : "—"),
             ("Requests", PageFormat.count(controller.requests)),
             ("Hardware", controller.hardware.map { $0.gpuSummary.isEmpty ? "\($0.cpus) CPUs" : $0.gpuSummary } ?? "—"),
-            ("Models loaded", "\(controller.endpoints.count)"),
+            ("Models loaded", "\(controller.endpoints.filter { $0.state == .loaded }.count)"),
         ]
     }
 }
@@ -347,16 +346,22 @@ private struct EndpointRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            StatusDot(color: .green, help: "Serving")
-            Text(endpoint.models.joined(separator: ", "))
+            dot
+            Text(endpoint.models.isEmpty ? "No models listed" : endpoint.models.joined(separator: ", "))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 8)
-            Text(":\(String(endpoint.port))")
+            Text(endpoint.controllerId.isEmpty ? endpoint.address : ":\(String(endpoint.port))")
                 .font(.system(size: 11.5))
                 .monospacedDigit()
                 .foregroundStyle(Theme.secondaryText)
-            if ui.armed == armKey {
+            if endpoint.state != .loaded || endpoint.controllerId.isEmpty {
+                Text(stateText)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(endpoint.state == .unreachable ? .orange : Theme.secondaryText)
+                    .lineLimit(1)
+                    .help(endpoint.error ?? stateText)
+            } else if ui.armed == armKey {
                 Button("Confirm Unload", role: .destructive) {
                     ui.armed = nil
                     pages.perform(.stopPort(controller: controller.target, port: endpoint.port), pending: .unload(controller.target, endpoint.port))
@@ -381,6 +386,23 @@ private struct EndpointRow: View {
                 }
             }
             .controlSize(.small)
+            .disabled(endpoint.state != .loaded || endpoint.controllerId.isEmpty)
+        }
+    }
+
+    @ViewBuilder private var dot: some View {
+        switch endpoint.state {
+        case .loaded: StatusDot(color: endpoint.stale ? .orange : .green, help: endpoint.stale ? "Serving, not confirmed recently" : "Serving")
+        case .empty: StatusDot(color: Theme.input, help: "No model loaded")
+        case .unreachable: StatusDot(color: .orange, help: "Not answering")
+        }
+    }
+
+    private var stateText: String {
+        switch endpoint.state {
+        case .loaded: endpoint.stale ? "not confirmed recently" : "serving"
+        case .empty: "no model loaded"
+        case .unreachable: "not answering"
         }
     }
 
@@ -395,6 +417,7 @@ private struct ModelLoader: View {
     @Binding var ui: MachineUI
 
     private var ready: [LocalRecipe] { controller.recipes.filter(\.fits) }
+    private var serving: [LocalEndpoint] { controller.endpoints.filter { $0.state == .loaded && !$0.controllerId.isEmpty } }
 
     private var reference: [LocalRecipe] {
         var seen = Set<String>()
@@ -442,12 +465,12 @@ private struct ModelLoader: View {
                 .pickerStyle(.menu)
                 .labelsHidden()
                 if ui.armed == armKey {
-                    Button("Unload \(controller.endpoints.count) and Load", role: .destructive) { load(replace: true) }
+                    Button("Unload \(serving.count) and Load", role: .destructive) { load(replace: true) }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
                 } else {
                     Button(loading ? "Loading…" : "Load") {
-                        if controller.endpoints.isEmpty {
+                        if serving.isEmpty {
                             load(replace: false)
                         } else {
                             ui.armed = armKey
@@ -468,7 +491,7 @@ private struct ModelLoader: View {
         var text = picked.map { "Recipe \($0.id) · \($0.detail)" }
             ?? "None of the \(reference.count) registry recipes for this hardware can load automatically yet. See the supported hardware below."
         if ui.armed == armKey, let picked {
-            text += " Loading \(picked.model) unloads \(controller.endpoints.flatMap(\.models).joined(separator: ", ")) first."
+            text += " Loading \(picked.model) unloads \(serving.flatMap(\.models).joined(separator: ", ")) first."
         }
         return text
     }

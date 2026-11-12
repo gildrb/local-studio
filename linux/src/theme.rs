@@ -72,6 +72,7 @@ window, dialog { font-size: 13px; }
 .ls-dot.serving { background: #34d399; }
 .ls-dot.loading { background: #f5a524; }
 .ls-dot.offline { background: #f85149; }
+.ls-dot.unreachable { background: transparent; box-shadow: inset 0 0 0 1.5px #f5a524; }
 .ls-panel { background: var(--sidebar-bg-color); border-left: 1px solid var(--border-color); }
 .ls-diff { font-family: monospace; font-size: 12px; background: transparent; }
 .ls-diff text { background: transparent; }
@@ -133,6 +134,12 @@ window, dialog { font-size: 13px; }
 .ls-drop-target { box-shadow: inset 0 0 0 2px alpha(var(--accent-bg-color), 0.7); border-radius: 10px; }
 .ls-diff-tree { border-right: 1px solid var(--border-color); }
 .ls-palette-group { font-size: 11px; font-weight: 700; color: alpha(currentColor, 0.5); padding: 10px 12px 4px 12px; }
+popover.ls-palette > contents { padding: 0; }
+.ls-palette-search { margin: 8px; }
+.ls-palette-list { background: transparent; padding: 6px; }
+.ls-palette-list > row { border-radius: 7px; }
+.ls-palette-list > row:hover, .ls-palette-list > row:active, .ls-palette-list > row:focus { background: transparent; }
+.ls-palette-list > row:selected, .ls-palette-list > row:selected:hover { background: var(--accent-bg-color); color: var(--accent-fg-color); }
 .ls-emoji { font-size: 18px; min-width: 36px; min-height: 36px; padding: 0; }
 .ls-commit-box { border: 1px solid var(--border-color); border-radius: 10px; background: alpha(currentColor, 0.03); }
 .ls-commit-box textview, .ls-commit-box textview text { background: transparent; }
@@ -145,6 +152,7 @@ window, dialog { font-size: 13px; }
 .ls-machine-dot.loading { background: var(--warning-color); }
 .ls-machine-dot.idle { background: alpha(var(--window-fg-color), 0.4); }
 .ls-machine-dot.offline { box-shadow: inset 0 0 0 1.5px alpha(var(--window-fg-color), 0.62); }
+.ls-machine-dot.unreachable { box-shadow: inset 0 0 0 1.5px var(--warning-color); }
 .ls-dash-label { font-size: 13px; }
 .ls-dash-small { font-size: 11.5px; }
 .ls-dash-num { font-feature-settings: 'tnum'; }

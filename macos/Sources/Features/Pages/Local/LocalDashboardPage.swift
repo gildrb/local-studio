@@ -5,7 +5,6 @@ struct LocalPage: View {
     let store: StudioStore
     var leadingInset: CGFloat = 0
     @State private var selected: String?
-    @State private var lastModels: [String: String] = [:]
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.windowActivity) private var activity
 
@@ -20,13 +19,13 @@ struct LocalPage: View {
 
     private var current: LocalController? {
         controllers.first { $0.url == selected }
-            ?? controllers.first { $0.reachable && !$0.endpoints.isEmpty }
+            ?? controllers.first { $0.status == .serving }
             ?? controllers.first(where: \.reachable)
             ?? controllers.first
     }
 
     private var watchTarget: String? {
-        guard scenePhase != .background, activity.visible, let current, current.reachable else { return nil }
+        guard scenePhase != .background, activity.visible, let current, current.reachable, current.hasController else { return nil }
         return current.target
     }
 
@@ -48,13 +47,6 @@ struct LocalPage: View {
         .localPolling(pages)
         .task(id: watchTarget) { pages.watchLocalDashboard(watchTarget) }
         .onDisappear { pages.watchLocalDashboard(nil) }
-        .onChange(of: pages.local, initial: true) { _, snapshot in
-            for controller in snapshot?.controllers ?? [] {
-                if let model = controller.endpoints.first?.models.first {
-                    lastModels[controller.url] = model
-                }
-            }
-        }
     }
 
     private var subtitle: String {
@@ -83,17 +75,31 @@ struct LocalPage: View {
                     .textSelection(.enabled)
                     .padding(.bottom, 10)
             }
-            LocalMachineTabs(controllers: snapshot.controllers, selected: current?.url) { selected = $0 }
+            HStack(spacing: 6) {
+                LocalMachineTabs(controllers: snapshot.controllers, selected: current?.url) { selected = $0 }
+                Spacer(minLength: 12)
+                if let current, current.hasController, current.reachable {
+                    Text(TokenSummary.since(dashboard(current)?.tokens))
+                        .font(.system(size: 13))
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.leading, -7)
             if let current {
-                if current.reachable {
+                if !current.hasController {
+                    LocalEngineMachine(controller: current, select: { selected = $0 }, addController: { store.openSettings(.local) })
+                        .id(current.url)
+                } else if current.reachable {
                     LocalMachineDashboard(
                         controller: current,
-                        dashboard: pages.localDashboard.flatMap { $0.controller == current.target ? $0 : nil },
-                        pages: pages
+                        dashboard: dashboard(current),
+                        pages: pages,
+                        select: { selected = $0 }
                     )
                     .id(current.url)
                 } else {
-                    LocalOfflineMachine(name: current.name, lastModel: lastModels[current.url])
+                    LocalOfflineMachine(controller: current)
                 }
             }
         } else if let error = pages.local?.error ?? pages.localError {
@@ -104,41 +110,33 @@ struct LocalPage: View {
                 .frame(minHeight: 360)
         }
     }
+
+    private func dashboard(_ controller: LocalController) -> LocalDashboard? {
+        pages.localDashboard.flatMap { $0.controller == controller.target ? $0 : nil }
+    }
 }
 
-private enum MachineState {
-    case serving, loading, idle, offline
-
-    init(_ controller: LocalController) {
-        if !controller.reachable {
-            self = .offline
-        } else if !controller.endpoints.isEmpty {
-            self = .serving
-        } else if controller.jobs.contains(where: { !$0.failed }) {
-            self = .loading
-        } else {
-            self = .idle
-        }
-    }
-
+extension LocalMachineStatus {
     var label: String {
         switch self {
         case .serving: "serving"
         case .loading: "loading"
-        case .idle: "idle"
+        case .engineUnreachable: "engine not answering"
+        case .noModel: "idle"
         case .offline: "offline"
         }
     }
 }
 
-private struct MachineDot: View {
-    let state: MachineState
+struct MachineDot: View {
+    let status: LocalMachineStatus
 
     var body: some View {
-        switch state {
+        switch status {
         case .serving: Circle().fill(Theme.success).frame(width: 7, height: 7)
         case .loading: Circle().fill(Theme.warning).frame(width: 7, height: 7)
-        case .idle: Circle().fill(Theme.tertiaryText).frame(width: 7, height: 7)
+        case .engineUnreachable: Circle().strokeBorder(Theme.warning, lineWidth: 1.5).frame(width: 7, height: 7)
+        case .noModel: Circle().fill(Theme.tertiaryText).frame(width: 7, height: 7)
         case .offline: Circle().strokeBorder(Theme.secondaryText, lineWidth: 1.5).frame(width: 7, height: 7)
         }
     }
@@ -153,13 +151,12 @@ private struct LocalMachineTabs: View {
         ScrollView(.horizontal) {
             HStack(spacing: 6) {
                 ForEach(controllers, id: \.url) { controller in
-                    let state = MachineState(controller)
                     DashboardTab(
                         title: controller.name,
                         active: controller.url == selected,
-                        accessibility: "\(controller.name), \(state.label)",
+                        accessibility: "\(controller.name), \(controller.status.label)",
                         select: { select(controller.url) },
-                        leading: { MachineDot(state: state) }
+                        leading: { MachineDot(status: controller.status) }
                     )
                 }
             }
@@ -169,8 +166,7 @@ private struct LocalMachineTabs: View {
 }
 
 private struct LocalOfflineMachine: View {
-    let name: String
-    let lastModel: String?
+    let controller: LocalController
 
     var body: some View {
         VStack(spacing: 10) {
@@ -181,21 +177,29 @@ private struct LocalOfflineMachine: View {
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 .overlay { RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.hairline) }
                 .padding(.bottom, 4)
-            Text("\(name) is offline")
+            Text(controller.headline)
                 .font(.system(size: 15, weight: .medium))
-            Text(message)
+            Text(controller.detail)
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.secondaryText)
                 .multilineTextAlignment(.center)
+                .textSelection(.enabled)
                 .frame(maxWidth: 380)
         }
         .frame(maxWidth: .infinity, minHeight: 420)
     }
+}
 
-    private var message: String {
-        let reconnect = "It shows live figures again once it reconnects."
-        guard let lastModel else { return reconnect }
-        return "It last ran \(lastModel). \(reconnect)"
+struct LocalElsewhereLink: View {
+    let elsewhere: LocalElsewhere?
+    let select: (String) -> Void
+
+    var body: some View {
+        if let elsewhere {
+            Button("Show \(elsewhere.name)") { select(elsewhere.url) }
+                .buttonStyle(.link)
+                .font(.system(size: 13))
+        }
     }
 }
 
@@ -203,13 +207,13 @@ private struct LocalMachineDashboard: View {
     let controller: LocalController
     let dashboard: LocalDashboard?
     let pages: PagesStore
+    let select: (String) -> Void
     @State private var switching = false
     @State private var stopping = false
     @State private var width: CGFloat = 900
 
-    private var endpoint: LocalEndpoint? { controller.endpoints.first }
+    private var endpoint: LocalEndpoint? { controller.endpoints.first { $0.state == .loaded && !$0.controllerId.isEmpty } }
     private var model: String? { endpoint.map { $0.models.joined(separator: ", ") } }
-    private var job: LocalJob? { controller.jobs.first }
     private var column: CGFloat { max(160, width / 3) }
 
     var body: some View {
@@ -253,8 +257,13 @@ private struct LocalMachineDashboard: View {
                     .fill(Theme.hairline)
                     .frame(width: 1)
                     .padding(.horizontal, 44)
-                TokenSummary(tokens: dashboard?.tokens, empty: "Counted from engine metrics as models serve requests.")
-                    .frame(width: 244, alignment: .leading)
+                TokenSummary(
+                    tokens: dashboard?.tokens,
+                    empty: "Counted from engine metrics as models serve requests.",
+                    titled: false
+                )
+                .padding(.top, 32)
+                .frame(width: 244, alignment: .leading)
             }
             Rectangle()
                 .fill(Theme.hairline)
@@ -276,29 +285,34 @@ private struct LocalMachineDashboard: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(model ?? job.map { "Loading \($0.recipeId)" } ?? "No model loaded")
+                Text(controller.headline)
                     .font(.system(size: 17, weight: .semibold))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .textSelection(.enabled)
                 Text(headerDetail)
                     .font(.system(size: 13))
-                    .foregroundStyle(job?.failed == true ? Theme.danger : Theme.secondaryText)
+                    .foregroundStyle(detailTone)
                     .lineLimit(2)
+                    .textSelection(.enabled)
+                LocalElsewhereLink(elsewhere: controller.elsewhere, select: select)
             }
             Spacer(minLength: 12)
             actions
         }
     }
 
+    private var detailTone: Color {
+        if controller.jobs.first?.failed == true { return Theme.danger }
+        if controller.status == .engineUnreachable || controller.endpoints.contains(where: \.stale) { return Theme.warning }
+        return Theme.secondaryText
+    }
+
     private var headerDetail: String {
-        if let endpoint {
-            let loaded = dashboard?.engines.first { $0.port == endpoint.port }?.loadedAtMs.map(LocalFormat.loaded) ?? "Serving on port \(endpoint.port)"
-            let others = controller.endpoints.count - 1
-            return others > 0 ? "\(loaded) · \(others) more engine\(others == 1 ? "" : "s") running" : loaded
-        }
-        if let job { return job.detail }
-        return "\(controller.name) is idle. Load a model from the registry to serve it."
+        guard let endpoint, !endpoint.stale,
+              let loaded = dashboard?.engines.first(where: { $0.port == endpoint.port })?.loadedAtMs.map(LocalFormat.loaded)
+        else { return controller.detail }
+        return "\(loaded) · \(controller.detail)"
     }
 
     @ViewBuilder private var actions: some View {
@@ -439,7 +453,8 @@ private struct LocalSwitchModelSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var ready: [LocalRecipe] { controller.recipes.filter(\.fits) }
-    private var replacing: Bool { !controller.endpoints.isEmpty }
+    private var serving: [LocalEndpoint] { controller.endpoints.filter { $0.state == .loaded && !$0.controllerId.isEmpty } }
+    private var replacing: Bool { !serving.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -466,7 +481,7 @@ private struct LocalSwitchModelSheet: View {
                 .labelsHidden()
             }
             if replacing {
-                Text("Switching stops \(controller.endpoints.flatMap(\.models).joined(separator: ", ")) first; its requests in flight end.")
+                Text("Switching stops \(serving.flatMap(\.models).joined(separator: ", ")) first; its requests in flight end.")
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.secondaryText)
             }
@@ -537,6 +552,16 @@ enum LocalFormat {
         }
         style.timeZone = .gmt
         return date.formatted(style)
+    }
+
+    static func ago(_ milliseconds: Int64) -> String {
+        let seconds = Int(max(0, Date.now.timeIntervalSince1970 - TimeInterval(milliseconds) / 1000))
+        return switch seconds {
+        case ..<60: "\(seconds) s ago"
+        case ..<3600: "\(seconds / 60) min ago"
+        case ..<86_400: "\(seconds / 3600) h ago"
+        default: "\(seconds / 86_400) d ago"
+        }
     }
 
     static func loaded(_ milliseconds: Int64) -> String {

@@ -10,6 +10,7 @@ final class StudioStore {
     private(set) var notice: StudioNotice?
     private(set) var kernel: KernelState?
     var kernelNoticeHidden = false
+    private(set) var daemonMismatch: DaemonMismatch?
 
     let inbox: InboxStore
     let conversation: ConversationStore
@@ -105,6 +106,15 @@ final class StudioStore {
     func installKernel() {
         kernelNoticeHidden = false
         core.run { $0.installKernel() }
+    }
+
+    func restartDaemon() {
+        let busy = daemonMismatch?.busySessions ?? 0
+        if busy > 0 {
+            shell.confirmation = .restartDaemon(busy)
+        } else {
+            core.run { $0.restartDaemon(force: false) }
+        }
     }
 
     func receive(_ updates: [Update]) {
@@ -224,8 +234,9 @@ final class StudioStore {
             inbox.setProjectSettings(project: project, settings: settings, effective: effective)
         case .worktreeSetup(let thread, let stages, let done, let error):
             conversation.setWorktreeSetup(thread: thread, stages: stages, done: done, error: error)
-        case .daemon(let socket, let version, let pid):
+        case .daemon(let socket, let version, let pid, let mismatch):
             pages.setDaemon(socket: socket, version: version, pid: pid)
+            daemonMismatch = mismatch
         case .kernel(let state):
             if !state.installing || kernel?.installing != true {
                 kernelNoticeHidden = false

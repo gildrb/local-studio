@@ -36,17 +36,12 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .overlay(alignment: .topTrailing) {
-            PanelToggles(store: store)
+            if shell.route == .thread {
+                PanelToggles(store: store)
+            }
         }
         .overlay(alignment: .top) {
-            if let page = shell.palette {
-                ZStack(alignment: .top) {
-                    Color.black.opacity(0.001)
-                        .onTapGesture { shell.palette = nil }
-                    CommandPalette(store: store, page: page)
-                        .padding(.top, 72)
-                }
-            }
+            PaletteLayer(store: store)
         }
         .background(Theme.canvas)
         .ignoresSafeArea(.container, edges: .top)
@@ -145,31 +140,54 @@ struct RootView: View {
         let noun = count == 1 ? "this thread" : "\(count) threads"
         switch confirmation {
         case .delete: return "Delete \(noun)?"
+        case .stopAndDelete: return "Stop and delete \(noun)?"
         case .archive: return "Archive \(noun)?"
         case .unpin: return "Unpin \(noun)?"
+        case .restartDaemon: return "Restart the Eukhe daemon?"
         }
     }
 
     private func confirmationMessage(_ confirmation: ShellConfirmation) -> String {
         switch confirmation {
         case .delete: "The conversation history is removed permanently. This can't be undone."
+        case .stopAndDelete: "A running thread is stopped first, then its conversation history is removed permanently. This can't be undone."
         case .archive: "Archived threads leave the inbox. You can restore them from Archive."
         case .unpin: "The thread moves back to the Active list."
+        case .restartDaemon(let busy):
+            "\(busy) Eukhe sessions are running. Restarting stops their runs; their threads stay saved and reopen on the new daemon."
         }
     }
 
     private func confirmationAction(_ confirmation: ShellConfirmation) -> String {
         switch confirmation {
         case .delete: "Delete"
+        case .stopAndDelete: "Stop and Delete"
         case .archive: "Archive"
         case .unpin: "Unpin"
+        case .restartDaemon: "Restart"
         }
     }
 
     private func confirmationRole(_ confirmation: ShellConfirmation) -> ButtonRole? {
         switch confirmation {
-        case .delete: .destructive
+        case .delete, .stopAndDelete, .restartDaemon: .destructive
         case .archive, .unpin: nil
+        }
+    }
+}
+
+private struct PaletteLayer: View {
+    let store: StudioStore
+
+    var body: some View {
+        if let page = store.shell.palette {
+            ZStack(alignment: .top) {
+                Color.black.opacity(0.001)
+                    .onTapGesture { store.shell.palette = nil }
+                CommandPalette(store: store, page: page)
+                    .id(page)
+                    .padding(.top, 72)
+            }
         }
     }
 }
@@ -251,6 +269,7 @@ struct NoticeStack: View {
     var body: some View {
         VStack(spacing: 8) {
             ToastLayer(store: store)
+            DaemonNotice(store: store)
             KernelNotice(store: store)
         }
         .padding(.top, Theme.Metrics.titlebarHeight + 6)

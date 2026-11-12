@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { type LocalControllerLink, type LocalEndpoint, LocalNode, LocalUsage } from "./contracts.ts";
 import { type Config, fetchJson, home, now, readJson, writeJson } from "./core.ts";
+import { MISSES } from "./discovery.ts";
 
 const MAX_DEPTH = 4;
 const MAX_NODES = 32;
@@ -41,9 +42,10 @@ export const makeUsage = () => {
 
 export const makeGraph = (config: () => Config, self: () => LocalNode) => {
   let cache: { at: number; value: Promise<Graph> } | null = null;
+  const seen = new Map<string, { node: LocalNode; at: string; misses: number }>();
 
   const fetchNode = (url: string) =>
-    fetchJson(`${url}/api/node`, 3_000, { authorization: `Bearer ${config().fleetKey}` }).pipe(
+    fetchJson(`${url}/api/node`, 8_000, { authorization: `Bearer ${config().fleetKey}` }).pipe(
       Effect.flatMap((r) => {
         const n = decodeNode(r.body);
         return r.status !== 200 ? Effect.fail(`HTTP ${r.status}`) : n._tag === "Some" ? Effect.succeed(n.value) : Effect.fail("not a Local Studio controller");
@@ -64,15 +66,22 @@ export const makeGraph = (config: () => Config, self: () => LocalNode) => {
       const got = yield* Effect.forEach(batch, (u) => fetchNode(u).pipe(Effect.map((r) => [u, r] as const)), { concurrency: 8 });
       frontier = [];
       for (const [url, r] of got) {
+        const prev = seen.get(url);
         if (r._tag === "Failure") {
-          links.push({ id: null, name: null, url, self: false, reachable: false, error: r.failure });
-          continue;
-        }
-        const n = r.success;
+          const misses = (prev?.misses ?? 0) + 1;
+          if (prev) seen.set(url, { ...prev, misses });
+          if (!prev || misses >= MISSES) {
+            links.push({ id: prev?.node.controller.id ?? null, name: prev?.node.controller.name ?? null, url, self: false, reachable: false, error: r.failure, seenAt: prev?.at ?? null });
+            continue;
+          }
+        } else seen.set(url, { node: r.success, at: now(), misses: 0 });
+        const n = r._tag === "Success" ? r.success : prev?.node;
+        if (!n) continue;
+        const error = r._tag === "Failure" ? r.failure : null;
         if (ids.has(n.controller.id)) continue;
         ids.add(n.controller.id);
         nodes.push({ url, depth, node: n });
-        links.push({ id: n.controller.id, name: n.controller.name, url, self: false, reachable: true, error: null, usage: n.usage });
+        links.push({ id: n.controller.id, name: n.controller.name, url, self: false, reachable: true, error, seenAt: seen.get(url)?.at ?? null, usage: n.usage });
         frontier.push(...n.peers.map(normUrl).filter((p) => isLoopback(url) || !isLoopback(p)));
       }
     }

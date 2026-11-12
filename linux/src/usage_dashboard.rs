@@ -114,6 +114,7 @@ impl UsageView {
         left.append(&header);
         left.append(&grid);
         let summary = TokenSummary::build(&["Lifetime cost"]);
+        summary.move_since();
         let heatmap = Heatmap::build();
         let table = gtk::Box::new(gtk::Orientation::Vertical, 12);
         let footnote = label(FOOTNOTE, &["dim-label", "ls-dash-small"]);

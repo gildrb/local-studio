@@ -37,6 +37,11 @@ export const LocalEndpoint = Schema.Struct({
   live: Schema.Boolean,
   lastSeenAt: OptionalString,
   jobId: OptionalString,
+  state: Schema.optionalKey(Schema.Literals(["loaded", "empty", "unreachable"])),
+  checkedAt: Schema.optionalKey(OptionalString),
+  failures: Schema.optionalKey(Schema.Number),
+  error: Schema.optionalKey(OptionalString),
+  latencyMs: Schema.optionalKey(OptionalNumber),
 });
 export type LocalEndpoint = typeof LocalEndpoint.Type;
 
@@ -56,6 +61,7 @@ export const LocalControllerLink = Schema.Struct({
   self: Schema.Boolean,
   reachable: Schema.Boolean,
   error: OptionalString,
+  seenAt: Schema.optionalKey(OptionalString),
   usage: Schema.optionalKey(Schema.Array(LocalUsage)),
 });
 export type LocalControllerLink = typeof LocalControllerLink.Type;

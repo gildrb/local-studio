@@ -77,6 +77,20 @@ The registry backs captured fleet configurations up next to the catalog. They ar
 
 `GET /api/registry/share?port=<port>` builds registry records from a running server's launch command or container, sends one short validation request, scrubs credentials, home paths, hostnames, private addresses and device IDs, and validates the records against the registry's JSON Schemas at the checked-out commit. Nothing is sent until `POST /api/registry/share`; the controller then forks `0xSero/local-ai-registry` and opens the pull request with your `gh` CLI login. `"dryRun": true` lists the `gh` calls without running them.
 
+## Discovery
+
+Every scan (about every 10 seconds) the controller lists the machine's TCP listeners and asks each one for `GET /v1/models`, with the port's `engineKeys` entry as a bearer token. New ports get 1.5 seconds to answer; ports that already answered get 10 seconds, so a busy engine that answers slowly stays loaded.
+
+| Endpoint `state` | Meaning                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| `loaded`         | The engine listed models. It stays `loaded` through two failed checks in a row (`failures`, `error` set)    |
+| `empty`          | The engine answered with an empty model list                                                                |
+| `unreachable`    | Three checks in a row failed (timeout, refused, 401/403, 5xx). The last models stay listed until forgotten |
+
+`lastSeenAt` is the last answer, `checkedAt` the last check, `latencyMs` the last answer's time. A port that no longer listens is dropped at once; an unreachable one after 10 minutes. Only answers that are clearly not an inference server (404, non-JSON, another controller) are skipped for 5 minutes, never a port that already answered or a launched job's port. If the listener scan itself fails, the previous state is kept. A peer that misses `/api/node` (8 seconds) keeps its last state, flagged with the error, for two more walks before it shows as unreachable.
+
+The Local page also lists the OpenAI-compatible custom endpoints in Eukhe's `models.json` whose host is private (loopback, private or tailnet addresses, `.local`, `.ts.net` and similar). Local Studio's core asks each one for `/models` itself with the key from Eukhe's `auth.json` or `models.json`, so the key never reaches a controller. An endpoint on a machine that runs a controller joins that machine; otherwise it shows as its own machine with its models, reachability and response time, and the page says that hardware and decode figures need a controller there.
+
 ## Telemetry
 
 Every 5 seconds the controller reads `nvidia-smi` (memory, power draw and limit, temperature, utilization per GPU) and the Prometheus `/metrics` of each live engine on the machine. It understands vLLM (`vllm:`), SGLang (`sglang:`) and llama.cpp (`llamacpp:`, started with `--metrics`) names, summed across labels:

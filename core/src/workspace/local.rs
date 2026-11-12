@@ -1,6 +1,8 @@
 pub(crate) mod dashboard;
+mod engines;
+mod status;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -12,9 +14,9 @@ use serde_json::{json, Value};
 use tokio::task::JoinSet;
 
 use super::model::{
-    LocalAction, LocalController, LocalDownload, LocalEndpoint, LocalGpu, LocalHardware, LocalJob, LocalModelUsage,
-    LocalRecipe, LocalRecord, LocalRegistry, LocalRegistryMatch, LocalShare, LocalSnapshot, LocalTailnet, LocalUsage,
-    RegistryModel, RegistryVariant, Settings, TailnetDevice, UsageDay,
+    LocalAction, LocalController, LocalDownload, LocalEndpoint, LocalEngineState, LocalGpu, LocalHardware, LocalJob,
+    LocalMachineStatus, LocalModelUsage, LocalRecipe, LocalRecord, LocalRegistry, LocalRegistryMatch, LocalShare,
+    LocalSnapshot, LocalTailnet, LocalUsage, RegistryModel, RegistryVariant, Settings, TailnetDevice, UsageDay,
 };
 use super::process;
 use super::time::{day_key, monday_of, now_ms, parse_rfc3339_ms, DAY_MS};
@@ -22,6 +24,9 @@ use super::time::{day_key, monday_of, now_ms, parse_rfc3339_ms, DAY_MS};
 const DEFAULT_URL: &str = "http://127.0.0.1:18091";
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(2);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
+const PEER_TIMEOUT: Duration = Duration::from_secs(10);
+const SILENT_LIMIT_MS: i64 = 60_000;
+const FORGET_MS: i64 = 10 * 60_000;
 const ACTION_TIMEOUT: Duration = Duration::from_secs(180);
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_GRACE: Duration = Duration::from_secs(3);
@@ -37,9 +42,18 @@ struct Cached {
 pub(crate) struct Local {
     client: reqwest::Client,
     data_root: PathBuf,
+    agent_dir: Option<PathBuf>,
     cached: tokio::sync::Mutex<Cached>,
     spawned: Mutex<Option<Child>>,
     controller_main: Option<PathBuf>,
+    remembered: Mutex<HashMap<String, (i64, Value)>>,
+    engines: engines::Engines,
+}
+
+enum Memory {
+    Fresh,
+    Silent { at: i64, error: String },
+    Gone,
 }
 
 struct Endpoint {
@@ -157,14 +171,41 @@ fn hardware(value: &Value) -> LocalHardware {
     }
 }
 
-fn endpoint(value: &Value) -> LocalEndpoint {
+fn endpoint(value: &Value, host: &str, memory: &Memory, now: i64) -> LocalEndpoint {
+    let port = port(value, "port");
+    let mut state = match value.get("state").and_then(Value::as_str) {
+        Some("loaded") => LocalEngineState::Loaded,
+        Some("empty") => LocalEngineState::Empty,
+        Some("unreachable") => LocalEngineState::Unreachable,
+        _ if flag(value, "live") => LocalEngineState::Loaded,
+        _ => LocalEngineState::Unreachable,
+    };
+    let mut error = optional_text(value, "error");
+    match memory {
+        Memory::Fresh => {}
+        Memory::Silent { at, error: why } => {
+            if now - at > SILENT_LIMIT_MS {
+                state = LocalEngineState::Unreachable;
+            }
+            error = Some(why.clone());
+        }
+        Memory::Gone => state = LocalEngineState::Unreachable,
+    }
+    let outdated =
+        state == LocalEngineState::Loaded && (small(value, "failures") > 0 || !matches!(memory, Memory::Fresh));
     LocalEndpoint {
         id: text(value, "id"),
         controller_id: text(value, "controllerId"),
-        port: port(value, "port"),
+        port,
         pid: value.get("pid").and_then(Value::as_u64).and_then(|pid| u32::try_from(pid).ok()),
         models: strings(value, "models"),
-        live: flag(value, "live"),
+        state,
+        stale: outdated,
+        error,
+        confirmed_at_ms: value.get("lastSeenAt").and_then(Value::as_str).and_then(parse_rfc3339_ms),
+        latency_ms: value.get("latencyMs").and_then(Value::as_u64).and_then(|ms| u32::try_from(ms).ok()),
+        address: format!("{host}:{port}"),
+        provider: None,
         job_id: optional_text(value, "jobId"),
     }
 }
@@ -340,24 +381,34 @@ fn usage(root: &Value) -> LocalUsage {
     }
 }
 
-fn controller(link: &Value, snapshot: Option<&Value>, recipes: Option<&Value>) -> LocalController {
+fn controller(
+    link: &Value,
+    snapshot: Option<&Value>,
+    recipes: Option<&Value>,
+    memory: &Memory,
+    now: i64,
+) -> LocalController {
     let url = text(link, "url");
     let id = optional_text(link, "id");
     let local = flag(link, "self");
     let host = host_of(&url);
     let usage_rows = array(link, "usage");
-    let hardware = snapshot.and_then(|snapshot| snapshot.get("hardware")).map(hardware);
+    let gone = matches!(memory, Memory::Gone);
+    let hardware = snapshot.filter(|_| !gone).and_then(|snapshot| snapshot.get("hardware")).map(hardware);
     let rig = hardware.as_ref().map_or(0, |hardware| hardware.gpus.len());
     let endpoints = snapshot
         .map(|snapshot| {
             array(snapshot, "endpoints")
                 .iter()
-                .map(endpoint)
-                .filter(|endpoint| endpoint.live && id.as_deref().is_none_or(|id| endpoint.controller_id == id))
+                .map(|value| endpoint(value, &host, memory, now))
+                .filter(|endpoint| {
+                    id.as_deref().is_none_or(|id| endpoint.controller_id == id) && !(gone && endpoint.models.is_empty())
+                })
                 .collect()
         })
         .unwrap_or_default();
     let jobs = snapshot
+        .filter(|_| !gone)
         .map(|snapshot| {
             array(snapshot, "jobs")
                 .iter()
@@ -366,6 +417,10 @@ fn controller(link: &Value, snapshot: Option<&Value>, recipes: Option<&Value>) -
                 .collect()
         })
         .unwrap_or_default();
+    let error = match memory {
+        Memory::Silent { error, .. } => Some(format!("No fresh state from this machine: {error}")),
+        Memory::Fresh | Memory::Gone => optional_text(link, "error"),
+    };
     let mut recipes: Vec<LocalRecipe> = recipes
         .map(|recipes| array(recipes, "recipes").iter().map(|entry| recipe(entry, rig)).collect())
         .unwrap_or_default();
@@ -383,9 +438,17 @@ fn controller(link: &Value, snapshot: Option<&Value>, recipes: Option<&Value>) -
         url,
         id,
         local,
+        has_controller: true,
         reachable: flag(link, "reachable"),
-        error: optional_text(link, "error"),
+        status: LocalMachineStatus::Offline,
+        headline: String::new(),
+        detail: String::new(),
+        summary: String::new(),
+        note: None,
+        elsewhere: None,
+        error,
         version: snapshot
+            .filter(|_| !gone)
             .and_then(|snapshot| snapshot.get("controller"))
             .and_then(|info| optional_text(info, "version")),
         hardware,
@@ -491,16 +554,19 @@ fn is_loopback(url: &Url) -> bool {
 }
 
 impl Local {
-    pub(crate) fn new(data_dir: &Path, controller_main: Option<PathBuf>) -> Self {
+    pub(crate) fn new(data_dir: &Path, agent_dir: Option<PathBuf>, controller_main: Option<PathBuf>) -> Self {
         Self {
             client: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(5))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new()),
             data_root: data_dir.join("controller"),
+            agent_dir,
             cached: tokio::sync::Mutex::new(Cached::default()),
             spawned: Mutex::new(None),
             controller_main,
+            remembered: Mutex::new(HashMap::new()),
+            engines: engines::Engines::default(),
         }
     }
 
@@ -650,8 +716,23 @@ impl Local {
     }
 
     pub(crate) async fn snapshot(&self, settings: &Settings) -> Result<LocalSnapshot, String> {
-        let root = self.ensure(settings).await?;
-        self.assemble(&root).await
+        match self.ensure(settings).await {
+            Ok(root) => self.assemble(&root).await,
+            Err(error) => {
+                let mut gateways: Vec<String> =
+                    self.remembered.lock().unwrap_or_else(PoisonError::into_inner).keys().cloned().collect();
+                gateways.extend(Self::base_url(settings).map(|base| normalize(base.as_str())));
+                let targets = self.engines.targets(self.agent_dir.as_deref(), &gateways);
+                self.engines.refresh(&self.client, &targets).await;
+                let mut controllers = Vec::new();
+                self.engines.place(&targets, &mut controllers).await;
+                status::describe(&mut controllers, now_ms());
+                if controllers.is_empty() {
+                    return Err(error);
+                }
+                Ok(LocalSnapshot { controllers, error: Some(error), ..LocalSnapshot::default() })
+            }
+        }
     }
 
     pub(crate) async fn fleet(&self, settings: &Settings) -> Vec<LocalController> {
@@ -663,28 +744,16 @@ impl Local {
         let Ok(graph) = self.request(&root, Method::GET, "/api/snapshot", None, READ_TIMEOUT).await else {
             return Vec::new();
         };
-        let mut controllers = Vec::new();
-        for link in array(&graph, "controllers").iter().filter(|link| flag(link, "reachable")) {
-            let snapshot = if flag(link, "self") {
-                Some(graph.clone())
-            } else {
-                let Ok(base) = Url::parse(&text(link, "url")) else { continue };
-                let endpoint = Endpoint { base, key: root.key.clone() };
-                self.request(&endpoint, Method::GET, "/api/snapshot", None, HEALTH_TIMEOUT).await.ok()
-            };
-            controllers.push(controller(link, snapshot.as_ref(), None));
-        }
-        controllers
+        self.controllers(&root, &graph, false).await
     }
 
     pub(crate) fn key(&self, settings: &Settings) -> Option<String> {
         self.fleet_key(settings)
     }
 
-    async fn assemble(&self, root: &Endpoint) -> Result<LocalSnapshot, String> {
-        let graph = self.request(root, Method::GET, "/api/snapshot", None, READ_TIMEOUT).await?;
+    async fn controllers(&self, root: &Endpoint, graph: &Value, with_recipes: bool) -> Vec<LocalController> {
         let mut tasks = JoinSet::new();
-        for (index, link) in array(&graph, "controllers").iter().enumerate() {
+        for (index, link) in array(graph, "controllers").iter().enumerate() {
             if !flag(link, "reachable") {
                 continue;
             }
@@ -700,45 +769,81 @@ impl Local {
             let client = self.client.clone();
             let own = local.then(|| graph.clone());
             tasks.spawn(async move {
-                let fetch = |path: &'static str| {
+                let fetch = |path: &'static str, timeout: Duration| {
                     let client = client.clone();
                     let url = endpoint.base.join(path);
                     let key = endpoint.key.clone();
                     async move {
-                        let url = url.ok()?;
-                        let mut request = client.get(url).timeout(READ_TIMEOUT);
+                        let url = url.map_err(|error| error.to_string())?;
+                        let mut request = client.get(url).timeout(timeout);
                         if let Some(key) = key {
                             request = request.bearer_auth(key);
                         }
-                        let response = request.send().await.ok()?;
-                        if !response.status().is_success() {
-                            return None;
+                        let response = request.send().await.map_err(|error| {
+                            if error.is_timeout() {
+                                format!("no answer within {} s", timeout.as_secs())
+                            } else {
+                                "could not connect".to_string()
+                            }
+                        })?;
+                        let status = response.status();
+                        if !status.is_success() {
+                            return Err(format!("HTTP {}", status.as_u16()));
                         }
-                        response.json::<Value>().await.ok()
+                        response.json::<Value>().await.map_err(|_| "not JSON".to_string())
                     }
                 };
                 let snapshot = match own {
-                    Some(own) => Some(own),
-                    None => fetch("/api/snapshot").await,
+                    Some(own) => Ok(own),
+                    None => fetch("/api/snapshot", PEER_TIMEOUT).await,
                 };
-                let recipes = fetch("/api/recipes").await;
+                let recipes = if with_recipes { fetch("/api/recipes", READ_TIMEOUT).await.ok() } else { None };
                 (index, snapshot, recipes)
             });
         }
-        let mut fetched: BTreeMap<usize, (Option<Value>, Option<Value>)> = BTreeMap::new();
+        let mut fetched: BTreeMap<usize, (Result<Value, String>, Option<Value>)> = BTreeMap::new();
         while let Some(result) = tasks.join_next().await {
             if let Ok((index, snapshot, recipes)) = result {
                 fetched.insert(index, (snapshot, recipes));
             }
         }
-        let controllers = array(&graph, "controllers")
+        let now = now_ms();
+        let mut remembered = self.remembered.lock().unwrap_or_else(PoisonError::into_inner);
+        remembered.retain(|_, (at, _)| now - *at < FORGET_MS);
+        array(graph, "controllers")
             .iter()
             .enumerate()
             .map(|(index, link)| {
-                let (snapshot, recipes) = fetched.remove(&index).unwrap_or((None, None));
-                controller(link, snapshot.as_ref(), recipes.as_ref())
+                let url = normalize(&text(link, "url"));
+                match fetched.remove(&index) {
+                    Some((Ok(snapshot), recipes)) => {
+                        let built = controller(link, Some(&snapshot), recipes.as_ref(), &Memory::Fresh, now);
+                        remembered.insert(url, (now, snapshot));
+                        built
+                    }
+                    Some((Err(error), recipes)) => {
+                        let (at, last) = remembered.get(&url).map_or((now, None), |(at, last)| (*at, Some(last)));
+                        controller(link, last, recipes.as_ref(), &Memory::Silent { at, error }, now)
+                    }
+                    None => {
+                        let last = remembered.get(&url).map(|(_, last)| last);
+                        controller(link, last, None, &Memory::Gone, now)
+                    }
+                }
             })
-            .collect();
+            .collect()
+    }
+
+    async fn assemble(&self, root: &Endpoint) -> Result<LocalSnapshot, String> {
+        let graph = self.request(root, Method::GET, "/api/snapshot", None, READ_TIMEOUT).await?;
+        let mut gateways: Vec<String> =
+            array(&graph, "controllers").iter().map(|link| normalize(&text(link, "url"))).collect();
+        gateways.push(normalize(root.base.as_str()));
+        let targets = self.engines.targets(self.agent_dir.as_deref(), &gateways);
+        let (mut controllers, ()) =
+            tokio::join!(self.controllers(root, &graph, true), self.engines.refresh(&self.client, &targets));
+        self.engines.place(&targets, &mut controllers).await;
+        status::describe(&mut controllers, now_ms());
         let mut cached = self.cached.lock().await;
         let refresh =
             cached.registry.as_ref().is_none_or(|registry| registry.error.is_some() && registry.models.is_empty());
