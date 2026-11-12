@@ -483,7 +483,7 @@ struct DraftRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "plus")
+            Image(systemName: "square.and.pencil")
                 .icon(.control, .primary)
                 .frame(width: 18)
                 .accessibilityHidden(true)

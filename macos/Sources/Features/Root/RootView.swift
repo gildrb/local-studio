@@ -207,7 +207,7 @@ struct WindowChrome: View {
                 }
             })
             if store.shell.sidebarVisible {
-                ChromeIconButton(hint("New Thread", "chat.new"), symbol: "plus", fitted: true) {
+                ChromeIconButton(hint("New Thread", "chat.new"), symbol: "square.and.pencil", fitted: true) {
                     store.newThreadCommand(currentProject: NSEvent.modifierFlags.contains(.shift))
                 }
                 .disabled(store.inbox.projects.isEmpty && store.connection != .ready)

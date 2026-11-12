@@ -48,6 +48,7 @@ enum Theme {
         static let sidebarInset: CGFloat = 8
         static let chromeButton: CGFloat = 28
         static let chromeGlyphInset: CGFloat = 7
+        static let chromeGlyph = CGSize(width: 20, height: 17)
         static let trailingChromeInset: CGFloat = 76
     }
 }
@@ -94,7 +95,7 @@ struct ChromeIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .icon(.toolbar, .primary)
+                .toolbarIcon()
                 .padding(.horizontal, fitted ? Theme.Metrics.chromeGlyphInset : 0)
                 .frame(width: fitted ? nil : Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
                 .background(isOn ? Theme.selection : hovering ? Theme.hover : .clear, in: RoundedRectangle(cornerRadius: 7, style: .continuous))

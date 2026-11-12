@@ -53,7 +53,7 @@ enum PanelSurfaceKind: String, CaseIterable, Identifiable {
         case .files: "folder"
         case .diff: "plusminus"
         case .pullRequest: "arrow.triangle.pull"
-        case .pullRequests: "arrow.triangle.pull"
+        case .pullRequests: "arrow.triangle.branch"
         case .agents: "person.2.fill"
         case .device: "iphone"
         case .file: "doc"

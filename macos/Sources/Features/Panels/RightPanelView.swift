@@ -109,7 +109,7 @@ private struct PanelTabStrip: View {
                     }
                 } label: {
                     Image(systemName: "plus")
-                        .icon(.toolbar, .primary)
+                        .toolbarIcon()
                         .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
                         .contentShape(Rectangle())
                 }

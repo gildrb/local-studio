@@ -215,11 +215,11 @@ struct CommandPalette: View {
         let group = "Actions"
         let current = store.inbox.project(store.focusedProject ?? store.inbox.currentProject)
         var items = [
-            PaletteItem(id: "new", group: group, title: current.map { "New Thread in \($0.name)" } ?? "New Thread", icon: .symbol("plus"), shortcut: store.shortcutText("chat.newLocal")) {
+            PaletteItem(id: "new", group: group, title: current.map { "New Thread in \($0.name)" } ?? "New Thread", icon: .symbol("square.and.pencil"), shortcut: store.shortcutText("chat.newLocal")) {
                 store.newThread(in: current?.id)
             },
-            PaletteItem(id: "new-in", group: group, title: "New Thread in…", icon: .symbol("plus"), shortcut: store.shortcutText("chat.new")) { go(.newThread) },
-            PaletteItem(id: "new-none", group: group, title: "New Thread Without a Project", icon: .symbol("plus"), shortcut: store.shortcutText("chat.newWithoutProject")) {
+            PaletteItem(id: "new-in", group: group, title: "New Thread in…", icon: .symbol("square.and.pencil"), shortcut: store.shortcutText("chat.new")) { go(.newThread) },
+            PaletteItem(id: "new-none", group: group, title: "New Thread Without a Project", icon: .symbol("square.and.pencil"), shortcut: store.shortcutText("chat.newWithoutProject")) {
                 store.newThread(in: nil)
             },
             PaletteItem(id: "add-project", group: group, title: "Add Project…", icon: .symbol("folder")) {
@@ -249,9 +249,9 @@ struct CommandPalette: View {
                 store.panels.toggleRightPanel()
             },
             PaletteItem(id: "appearance", group: group, title: "Change Appearance…", icon: .symbol("circle.lefthalf.filled"), shortcut: store.shortcutText("appearance.cycle")) { go(.appearance) },
-            PaletteItem(id: "usage", group: group, title: "Show Usage", icon: .symbol("chart.bar"), shortcut: store.shortcutText("usage.open")) { store.show(.usage) },
+            PaletteItem(id: "usage", group: group, title: "Show Usage", icon: .symbol("gauge.with.needle"), shortcut: store.shortcutText("usage.open")) { store.show(.usage) },
             PaletteItem(id: "local", group: group, title: "Show Local Models", icon: .symbol("server.rack")) { store.show(.local) },
-            PaletteItem(id: "pulls", group: group, title: "Show Pull Requests", icon: .symbol("arrow.triangle.pull")) { store.show(.pullRequests) },
+            PaletteItem(id: "pulls", group: group, title: "Show Pull Requests", icon: .symbol("arrow.triangle.branch")) { store.show(.pullRequests) },
             PaletteItem(id: "archive", group: group, title: "Show Archived Threads", icon: .symbol("archivebox")) { store.show(.archive) },
         ]
         if let row = store.focusedRow {

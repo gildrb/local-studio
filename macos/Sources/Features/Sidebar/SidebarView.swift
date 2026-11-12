@@ -437,8 +437,8 @@ private struct SidebarFooter: View {
                 Spacer()
             } else {
                 ChromeIconButton("Settings", symbol: "gearshape") { openSettings() }
-                ChromeIconButton("Usage", symbol: "chart.bar") { store.show(.usage) }
-                ChromeIconButton("Pull Requests", symbol: "arrow.triangle.pull") { store.show(.pullRequests) }
+                ChromeIconButton("Usage", symbol: "gauge.with.needle") { store.show(.usage) }
+                ChromeIconButton("Pull Requests", symbol: "arrow.triangle.branch") { store.show(.pullRequests) }
                 Spacer()
                 ChromeIconButton("Local", symbol: "server.rack") { store.show(.local) }
             }
@@ -458,7 +458,7 @@ private struct AddProjectMenu: View {
             Button("Clone Repository…") { store.shell.cloneShown = true }
         } label: {
             Image(systemName: "folder")
-                .icon(.toolbar, .primary)
+                .toolbarIcon()
                 .frame(width: Theme.Metrics.chromeButton, height: Theme.Metrics.chromeButton)
                 .contentShape(Rectangle())
                 .accessibilityHidden(true)

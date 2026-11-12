@@ -104,3 +104,13 @@ extension View {
         modifier(IconStyle(size: size, tone: tone))
     }
 }
+
+@MainActor
+extension Image {
+    func toolbarIcon(_ tone: IconTone = .primary) -> some View {
+        resizable()
+            .scaledToFit()
+            .icon(.toolbar, tone)
+            .frame(width: Theme.Metrics.chromeGlyph.width, height: Theme.Metrics.chromeGlyph.height)
+    }
+}

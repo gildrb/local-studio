@@ -20,9 +20,9 @@ enum MainRoute: Hashable {
     var symbol: String {
         switch self {
         case .thread: "bubble.left"
-        case .usage: "chart.bar"
+        case .usage: "gauge.with.needle"
         case .local: "server.rack"
-        case .pullRequests: "arrow.triangle.pull"
+        case .pullRequests: "arrow.triangle.branch"
         case .archive: "archivebox"
         }
     }
