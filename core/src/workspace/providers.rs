@@ -23,6 +23,7 @@ const LOCK_ATTEMPTS: u32 = 50;
 const LOCK_DELAY: Duration = Duration::from_millis(20);
 const NO_KEY: &str = "none";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+const ENDPOINT_HEADER: &str = "x-local-studio-endpoint";
 const EXCERPT: usize = 200;
 
 struct BuiltIn {
@@ -915,8 +916,14 @@ impl Workspace {
             let label = name.clone();
             blocking(move || {
                 edit_models(&agent, |providers| {
-                    let entry =
+                    let mut entry =
                         provider_entry(providers.get(&id), &name, &base_url, ProviderApi::OpenAiCompatible, &models);
+                    if let Some(object) = entry.as_object_mut() {
+                        let headers = object.entry("headers").or_insert_with(|| json!({}));
+                        if let Some(headers) = headers.as_object_mut() {
+                            headers.insert(ENDPOINT_HEADER.to_string(), json!(engine));
+                        }
+                    }
                     providers.insert(id.clone(), entry);
                     Ok(())
                 })?;
