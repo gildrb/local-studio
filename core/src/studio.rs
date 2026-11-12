@@ -414,6 +414,7 @@ impl Studio {
             focused: None,
             heads: HashMap::new(),
             models: Vec::new(),
+            models_waiting: Vec::new(),
             utility: None,
             titles: HashMap::new(),
             last_rows: None,
@@ -676,6 +677,7 @@ struct Actor {
     focused: Option<String>,
     heads: HashMap<String, GitHead>,
     models: Vec<ModelOption>,
+    models_waiting: Vec<Option<(String, String)>>,
     utility: Option<String>,
     titles: HashMap<String, String>,
     last_rows: Option<Vec<ThreadRow>>,
@@ -811,6 +813,13 @@ impl Actor {
             }
             if let Err(error) = self.ensure_open(&id).await {
                 self.mailbox.notice(NoticeLevel::Error, error);
+            }
+        }
+        let waiting = std::mem::take(&mut self.models_waiting);
+        if !waiting.is_empty() {
+            self.fetch_models().await;
+            for (request, message) in waiting.into_iter().flatten() {
+                self.mailbox.push(Update::RequestDone { request, message });
             }
         }
         self.dirty = true;
@@ -1003,6 +1012,7 @@ impl Actor {
                 }
                 self.emit_info(&thread);
             }
+            Command::LoadModels { answer } if self.client.is_none() => self.models_waiting.push(answer),
             Command::LoadModels { answer } => self.load_models(answer).await,
             Command::SetFavoriteModel { provider, model, favorite } => {
                 toggle_key(&mut self.store.favorites, ModelKey { provider, model }, favorite);

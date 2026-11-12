@@ -109,6 +109,17 @@ fn main() -> glib::ExitCode {
             return glib::ExitCode::FAILURE;
         }
     };
+    if matches!(mode, Mode::SmokeProviders) {
+        let agent = std::env::var_os("EUKHE_CODING_AGENT_DIR").filter(|dir| !dir.is_empty());
+        let checked = agent.map_or_else(
+            || Err("EUKHE_CODING_AGENT_DIR must name a scratch agent dir holding its own auth.json ({})".to_string()),
+            |agent| local_studio_core::check_scratch_agent(&PathBuf::from(agent)),
+        );
+        if let Err(refusal) = checked {
+            println!("FAIL linux providers smoke: {refusal}");
+            return glib::ExitCode::FAILURE;
+        }
+    }
     let flags = match mode {
         Mode::App => gio::ApplicationFlags::default(),
         Mode::Smoke | Mode::SmokeKernel(_) | Mode::SmokeKernelOffline | Mode::SmokeProviders | Mode::Snapshot(..) => {

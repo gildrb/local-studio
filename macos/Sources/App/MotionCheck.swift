@@ -356,14 +356,14 @@ enum MotionCheck {
             ),
             Scene(
                 name: "toast-in", size: toast, crop: CGRect(origin: .zero, size: toast), updates: [],
-                view: { AnyView(ToastLayer(store: $0).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)) },
+                view: { AnyView(NoticeStack(store: $0).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)) },
                 forward: { $0.store.post(.error, notice) },
                 interrupt: (.reverse, { $0.store.dismissNotice() }),
                 interruptAfter: 0.2
             ),
             Scene(
                 name: "toast-out", size: toast, crop: CGRect(origin: .zero, size: toast), updates: [.notice(level: .error, text: notice)],
-                view: { AnyView(ToastLayer(store: $0).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)) },
+                view: { AnyView(NoticeStack(store: $0).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)) },
                 forward: { $0.store.dismissNotice() },
                 interrupt: (.reverse, { $0.store.post(.error, notice) })
             ),

@@ -30,6 +30,37 @@ final class ProvidersSmoke {
         steps = makeSteps()
     }
 
+    static func refusal(agent: String?) -> String? {
+        guard let agent, !agent.isEmpty else {
+            return "EUKHE_CODING_AGENT_DIR must name a scratch agent dir holding its own auth.json ({})"
+        }
+        let auth = (agent as NSString).appendingPathComponent("auth.json")
+        var info = stat()
+        guard lstat(auth, &info) == 0 else {
+            return "\(auth) is missing; this run saves keys, so it needs its own scratch auth.json holding {}"
+        }
+        if info.st_mode & S_IFMT == S_IFLNK {
+            return "\(auth) is a symlink; this run saves keys, so it needs its own scratch auth.json holding {}, never a link to real credentials"
+        }
+        guard info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1 else {
+            return "\(auth) must be a regular file with a single link"
+        }
+        let resolved = URL(fileURLWithPath: agent).resolvingSymlinksInPath().pathComponents
+        if resolved.contains(".pi") || resolved.contains(".eukhe") {
+            return "\(agent) is a real agent dir; run against a scratch agent dir"
+        }
+        guard storedKeys(agent: agent)?.isEmpty == true else {
+            return "\(auth) holds credentials; this run needs a scratch auth.json holding {}"
+        }
+        return nil
+    }
+
+    private static func storedKeys(agent: String) -> [String: Any]? {
+        let auth = (agent as NSString).appendingPathComponent("auth.json")
+        guard let data = FileManager.default.contents(atPath: auth) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
     func start() {
         stub.start()
         subscription = store.didTick.sink { [weak self] in self?.advance() }
@@ -150,6 +181,10 @@ final class ProvidersSmoke {
         }
         if let failure {
             finish(passed: false, failure)
+            return
+        }
+        if let agent = ProcessInfo.processInfo.environment["EUKHE_CODING_AGENT_DIR"], Self.storedKeys(agent: agent)?.isEmpty != true {
+            finish(passed: false, "auth.json still holds keys after the run")
             return
         }
         finish(passed: true, "\(steps.count) provider round-trips through Settings → Providers")

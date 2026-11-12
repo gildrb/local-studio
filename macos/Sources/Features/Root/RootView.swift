@@ -97,7 +97,7 @@ struct RootView: View {
                         }
                     }
                     .overlay { PreviewMiniPlayerView(store: store) }
-                    .overlay(alignment: .top) { notices }
+                    .overlay(alignment: .top) { NoticeStack(store: store) }
                     .frame(maxWidth: .infinity)
                 }
                 if panels.rightPanelOpen {
@@ -107,21 +107,13 @@ struct RootView: View {
             }
             .overlay(alignment: .top) {
                 if panels.rightPanelOpen && panels.rightPanelMaximized {
-                    notices
+                    NoticeStack(store: store)
                 }
             }
         } else {
             PageSeam(store: store, route: shell.route, leadingInset: leading - 16)
-                .overlay(alignment: .top) { notices }
+                .overlay(alignment: .top) { NoticeStack(store: store) }
         }
-    }
-
-    private var notices: some View {
-        VStack(spacing: 8) {
-            ToastLayer(store: store)
-            KernelNotice(store: store)
-        }
-        .padding(.top, Theme.Metrics.titlebarHeight + 6)
     }
 
     private var resize: some Gesture {
@@ -249,6 +241,18 @@ private struct ChromeTrailingProbe: NSViewRepresentable {
             let trailing = convert(bounds, to: nil).maxX.rounded()
             Task { @MainActor [report] in report?(trailing) }
         }
+    }
+}
+
+struct NoticeStack: View {
+    let store: StudioStore
+
+    var body: some View {
+        VStack(spacing: 8) {
+            ToastLayer(store: store)
+            KernelNotice(store: store)
+        }
+        .padding(.top, Theme.Metrics.titlebarHeight + 6)
     }
 }
 

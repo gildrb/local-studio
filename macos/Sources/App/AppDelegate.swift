@@ -43,6 +43,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if stressFlag != nil || keysFlag || logoFlag {
             StressSeed.prepareProcess()
         }
+        if arguments.contains("+smoke-providers"), let refusal = ProvidersSmoke.refusal(agent: ProcessInfo.processInfo.environment["EUKHE_CODING_AGENT_DIR"]) {
+            print("FAIL macOS providers smoke: \(refusal)")
+            exit(1)
+        }
         configureNotifier()
         installKeyMonitors()
         do {

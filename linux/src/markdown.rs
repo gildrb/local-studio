@@ -19,9 +19,9 @@ const HIDDEN: char = '\u{200B}';
 
 enum Kind {
     Text { prefix: String, skip: i32 },
-    Code(usize),
+    Code,
     Header,
-    Cell(bool),
+    Cell,
     Rule,
     Spacer,
 }
@@ -34,7 +34,6 @@ struct Line {
 #[derive(Default)]
 struct Doc {
     lines: Vec<Line>,
-    languages: Vec<Option<String>>,
     links: Vec<(gtk::TextTag, String)>,
     generation: u64,
 }
@@ -212,7 +211,6 @@ struct Builder<'a> {
     buffer: gtk::TextBuffer,
     starts: Vec<(i32, Vec<String>)>,
     lines: Vec<Line>,
-    languages: Vec<Option<String>>,
     links: Vec<(gtk::TextTag, String)>,
     jobs: Vec<Job>,
     group: usize,
@@ -272,22 +270,20 @@ impl Builder<'_> {
             }
             Markdown::Heading(level, spans) => {
                 let name = format!("h{}", (*level).clamp(1, 4));
-                let prefix = format!("{} ", "#".repeat(usize::from(*level)));
-                self.begin(Kind::Text { prefix, skip: 0 }, &[name.as_str()]);
+                self.begin(Kind::Text { prefix: String::new(), skip: 0 }, &[name.as_str()]);
                 self.spans(spans, &[]);
             }
             Markdown::Bullet(depth, marker, spans) => {
                 let name = self.item_tag(*depth);
-                let written = if marker.ends_with('.') { format!("{marker} ") } else { "- ".to_string() };
                 let leader = format!("\t{marker}\t");
                 let skip = i32::try_from(leader.chars().count()).unwrap_or(0);
                 let tags: &[&str] = if joined { &[name.as_str(), "tight"] } else { &[name.as_str()] };
-                self.begin(Kind::Text { prefix: format!("{}{written}", "  ".repeat(*depth)), skip }, tags);
+                self.begin(Kind::Text { prefix: format!("{}{marker} ", "\t".repeat(*depth)), skip }, tags);
                 self.insert(&leader, &["muted"]);
                 self.spans(spans, &[]);
             }
             Markdown::Quote(spans) => {
-                self.begin(Kind::Text { prefix: "> ".to_string(), skip: 0 }, &["quote", "muted"]);
+                self.begin(Kind::Text { prefix: String::new(), skip: 0 }, &["quote", "muted"]);
                 self.spans(spans, &[]);
             }
             Markdown::Code(language, code) => self.code(language.as_deref(), code),
@@ -317,8 +313,6 @@ impl Builder<'_> {
     }
 
     fn code(&mut self, language: Option<&str>, code: &str) {
-        let block = self.languages.len();
-        self.languages.push(language.map(str::to_string));
         if let Some(language) = language {
             self.begin(Kind::Header, &["code-head"]);
             self.insert(language, &[]);
@@ -333,7 +327,7 @@ impl Builder<'_> {
             if index + 1 == lines.len() {
                 tags.push("code-bottom");
             }
-            self.begin(Kind::Code(block), &tags);
+            self.begin(Kind::Code, &tags);
             if index == 0 {
                 start = self.buffer.char_count();
             }
@@ -376,7 +370,7 @@ impl Builder<'_> {
         for (index, row) in rows.iter().enumerate() {
             let header = index == 0;
             let paragraph: &[&str] = if header { &[name.as_str(), "row", "row-head"] } else { &[name.as_str(), "row"] };
-            self.begin(Kind::Cell(header), paragraph);
+            self.begin(Kind::Cell, paragraph);
             for (column, cell) in row.iter().enumerate() {
                 if column > 0 {
                     self.insert("\t", &[]);
@@ -402,7 +396,6 @@ impl Builder<'_> {
         {
             let mut doc = doc.borrow_mut();
             doc.lines = self.lines;
-            doc.languages = self.languages;
             doc.links = self.links;
         }
         for job in self.jobs {
@@ -439,7 +432,6 @@ fn fill(view: &gtk::TextView, doc: &Rc<RefCell<Doc>>, text: &str) {
         buffer,
         starts: Vec::new(),
         lines: Vec::new(),
-        languages: Vec::new(),
         links: Vec::new(),
         jobs: Vec::new(),
         group: 0,
@@ -462,13 +454,9 @@ fn copy_text(buffer: &gtk::TextBuffer, doc: &Doc) -> Option<String> {
     let (from, to) = (start.offset(), end.offset());
     let first = start.line();
     let last = if end.starts_line() && end.line() > first { end.line() - 1 } else { end.line() };
-    let line = |number: i32| usize::try_from(number).ok().and_then(|index| doc.lines.get(index));
-    let fences =
-        (first..=last).filter_map(&line).any(|line| !matches!(line.kind, Kind::Code(_) | Kind::Header | Kind::Spacer));
     let mut parts: Vec<(usize, String)> = Vec::new();
-    let mut code: Option<(usize, usize, Vec<String>)> = None;
     for number in first..=last {
-        let Some(info) = line(number) else { continue };
+        let Some(info) = usize::try_from(number).ok().and_then(|index| doc.lines.get(index)) else { continue };
         let Some(begin) = buffer.iter_at_line(number) else { continue };
         let mut finish = begin;
         if !finish.ends_line() {
@@ -482,32 +470,20 @@ fn copy_text(buffer: &gtk::TextBuffer, doc: &Doc) -> Option<String> {
             }
             buffer.text(&buffer.iter_at_offset(low), &buffer.iter_at_offset(high), false).replace(HIDDEN, "")
         };
-        let continues = matches!(info.kind, Kind::Code(block) if code.as_ref().is_some_and(|open| open.0 == block));
-        if !continues {
-            close(&mut code, &mut parts, doc, fences);
-        }
         match &info.kind {
-            Kind::Spacer | Kind::Header => {}
-            Kind::Code(block) => code.get_or_insert_with(|| (*block, info.group, Vec::new())).2.push(slice(line_start)),
-            Kind::Rule => parts.push((info.group, "---".to_string())),
-            Kind::Cell(header) => {
-                let text = slice(line_start);
-                let cells: Vec<&str> = text.split('\t').map(str::trim).collect();
-                let mut row = format!("| {} |", cells.join(" | "));
-                if *header {
-                    row.push_str("\n|");
-                    row.push_str(&" --- |".repeat(cells.len()));
-                }
-                parts.push((info.group, row));
+            Kind::Spacer | Kind::Header | Kind::Rule => {}
+            Kind::Code => parts.push((info.group, slice(line_start))),
+            Kind::Cell => {
+                let cells: Vec<String> = slice(line_start).split('\t').map(|cell| cell.trim().to_string()).collect();
+                parts.push((info.group, cells.join("\t")));
             }
             Kind::Text { prefix, skip } => {
                 let content = line_start + skip;
-                let lead = if from <= content { prefix.as_str() } else { "" };
+                let lead = if from < content { prefix.as_str() } else { "" };
                 parts.push((info.group, format!("{lead}{}", slice(content))));
             }
         }
     }
-    close(&mut code, &mut parts, doc, fences);
     let mut result = String::new();
     let mut previous = None;
     for (group, text) in parts {
@@ -518,15 +494,4 @@ fn copy_text(buffer: &gtk::TextBuffer, doc: &Doc) -> Option<String> {
         previous = Some(group);
     }
     Some(result)
-}
-
-fn close(code: &mut Option<(usize, usize, Vec<String>)>, parts: &mut Vec<(usize, String)>, doc: &Doc, fences: bool) {
-    let Some((block, group, lines)) = code.take() else { return };
-    let body = lines.join("\n");
-    if fences {
-        let language = doc.languages.get(block).cloned().flatten().unwrap_or_default();
-        parts.push((group, format!("```{language}\n{body}\n```")));
-    } else {
-        parts.push((group, body));
-    }
 }

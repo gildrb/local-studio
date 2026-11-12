@@ -14,7 +14,7 @@ use crate::format;
 use crate::state::Page;
 
 const MINUTE: i64 = 60_000;
-const MARKDOWN: &str = "## Selection across blocks\n\nEach reply is **one** selectable surface, so a drag crosses *paragraphs*, lists, quotes and code. See [the TextView docs](https://docs.gtk.org/gtk4/class.TextView.html).\n\n1. Parse the reply into blocks\n2. Build one `TextBuffer` with tags\n3. Copy the selection as Markdown\n\nThe copy keeps list markers and blank lines between blocks.\n\n- Nested items keep their markers\n  - like this one\n\n> Quotes keep a left margin and the muted color.\n\n```rust\nfn copy(view: &gtk::TextView) {\n    view.emit_copy_clipboard();\n}\n```\n\n| Block | Copied as |\n|-------|-----------|\n| List item | `- item` |\n| Code block | fenced when mixed |\n\n---\n\nThat is all.";
+const MARKDOWN: &str = "## Selection across blocks\n\nEach reply is **one** selectable surface, so a drag crosses *paragraphs*, lists, quotes and code. See [the TextView docs](https://docs.gtk.org/gtk4/class.TextView.html).\n\n1. Parse the reply into blocks\n2. Build one `TextBuffer` with tags\n3. Copy the visible text of the selection\n\nThe copy keeps list markers as shown and blank lines between blocks.\n\n- Nested items keep their markers\n  - like this one\n\n> Quotes keep a left margin and the muted color.\n\n```rust\nfn copy(view: &gtk::TextView) {\n    view.emit_copy_clipboard();\n}\n```\n\n| Block | Copied as |\n|-------|-----------|\n| List item | `• item` |\n| Code block | the code, no fences |\n\n---\n\nThat is all.";
 
 #[allow(clippy::too_many_lines)]
 pub fn stage(app: &Rc<App>, scene: &str) {

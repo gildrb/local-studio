@@ -303,7 +303,7 @@ final class ConversationSmoke {
         guard draft.contexts.count == 1, draft.promptText.contains("Terminal:\n```\n$ make\nok\n```") else { return "attachContext did not add a terminal chip" }
         draft.clear()
         print("ok   attachContext(text:source:) added a terminal context chip")
-        return vimChecks()
+        return vimChecks() ?? copyChecks()
     }
 
     private func vimChecks() -> String? {
@@ -340,6 +340,42 @@ final class ConversationSmoke {
         vim.feed("0", in: textView)
         guard textView.selectedRange().location == 0 else { return "vim 0 put the caret at \(textView.selectedRange().location), expected 0" }
         print("ok   vim composer motions (dw, dd, u, cw, yy p)")
+        return nil
+    }
+
+    private func copyChecks() -> String? {
+        let source = "## Plan\n\nRun **both** steps:\n\n- first `item`\n- second item\n  - nested\n\n1. one\n2. two\n\n> quoted\n\n```swift\nlet x = 1\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+        let view = MarkdownNSTextView()
+        view.show(MarkdownRenderer.rendering(MarkdownSource(text: source, size: 13, secondary: false)))
+        let text = view.string as NSString
+        let cases = [
+            (NSRange(location: 0, length: text.length), "Plan\n\nRun both steps:\n\n• first item\n• second item\n\t◦ nested\n1. one\n2. two\n\nquoted\n\nlet x = 1\n\nA\tB\n1\t2"),
+            (NSRange(location: text.range(of: "cond item").location, length: NSMaxRange(text.range(of: "let x")) - text.range(of: "cond item").location),
+             "cond item\n\t◦ nested\n1. one\n2. two\n\nquoted\n\nlet x"),
+        ]
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name("LocalStudioCopyCheck-\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        for (range, expected) in cases {
+            view.setSelectedRange(range)
+            pasteboard.clearContents()
+            guard view.writeSelection(to: pasteboard, types: view.writablePasteboardTypes) else { return "copying the selection wrote nothing" }
+            let plain = pasteboard.string(forType: .string) ?? ""
+            print("     copied plain text \(plain.debugDescription); flavors \(pasteboard.types?.map(\.rawValue).joined(separator: ", ") ?? "none")")
+            guard plain == expected else { return "copy put \(plain.debugDescription) on the pasteboard, expected the visible text \(expected.debugDescription)" }
+            guard let rtf = pasteboard.data(forType: .rtf), let rich = NSAttributedString(rtf: rtf, documentAttributes: nil),
+                  let html = pasteboard.data(forType: .html), let markup = String(data: html, encoding: .utf8) else { return "copy left out the RTF or HTML flavor" }
+            let code = (rich.string as NSString).range(of: "let x")
+            guard code.location != NSNotFound, (rich.attribute(.font, at: code.location, effectiveRange: nil) as? NSFont)?.isFixedPitch == true,
+                  markup.contains("let x"), !rich.string.contains("```") else { return "the rich copy lost the code formatting" }
+            print("     RTF \(rtf.count) bytes, HTML \(html.count) bytes; code stays monospaced")
+        }
+        let both = text.range(of: "both")
+        view.setSelectedRange(both)
+        pasteboard.clearContents()
+        _ = view.writeSelection(to: pasteboard, types: view.writablePasteboardTypes)
+        guard let rtf = pasteboard.data(forType: .rtf), let rich = NSAttributedString(rtf: rtf, documentAttributes: nil), rich.length > 0,
+              let font = rich.attribute(.font, at: 0, effectiveRange: nil) as? NSFont, font.fontDescriptor.symbolicTraits.contains(.bold) else { return "the rich copy lost bold text" }
+        print("ok   copy puts exactly the visible text on the pasteboard (list markers as shown, no Markdown markers or fences) plus RTF and HTML that keep the formatting")
         return nil
     }
 
