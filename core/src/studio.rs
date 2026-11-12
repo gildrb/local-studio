@@ -406,6 +406,7 @@ impl Studio {
             store,
             saved: HashMap::new(),
             roster: HashMap::new(),
+            first_seen: HashMap::new(),
             children: HashMap::new(),
             threads: HashMap::new(),
             by_active: HashMap::new(),
@@ -644,7 +645,6 @@ struct Thread {
     prompt: Option<String>,
     run_started_at: Option<i64>,
     failed_at: Option<i64>,
-    last_user_at: Option<i64>,
     pending_run: bool,
     reopen: bool,
     ended_by_events: bool,
@@ -669,6 +669,7 @@ struct Actor {
     store: Store,
     saved: HashMap<String, SavedRow>,
     roster: HashMap<String, RosterRow>,
+    first_seen: HashMap<String, i64>,
     children: HashMap<String, ChildRow>,
     threads: HashMap<String, Thread>,
     by_active: HashMap<String, String>,
@@ -1193,6 +1194,16 @@ impl Actor {
         }
     }
 
+    fn note_user_at(&mut self, id: &str, at: Option<i64>) {
+        let Some(at) = at else { return };
+        if self.store.activity_at(id).is_some_and(|known| known >= at) {
+            return;
+        }
+        self.store.update(id, |flags| flags.activity_at = Some(at));
+        self.save();
+        self.dirty = true;
+    }
+
     async fn select(&mut self, thread: Option<String>) {
         if let Some(id) = thread.as_deref() {
             if !self.known(id) {
@@ -1388,7 +1399,7 @@ impl Actor {
         if state.busy {
             thread.run_started_at = thread.run_started_at.or_else(|| transcript.last_user_at()).or(Some(now_ms()));
         }
-        thread.last_user_at = transcript.last_user_at().or(thread.last_user_at);
+        let last_user_at = transcript.last_user_at();
         thread.resources = None;
         thread.live = Some(Live {
             active: attach.active_session_id.clone(),
@@ -1400,6 +1411,7 @@ impl Actor {
             shown: HashMap::new(),
         });
         self.by_active.insert(attach.active_session_id.clone(), id.to_string());
+        self.note_user_at(id, last_user_at);
         for turn in settled.into_iter().filter(|turn| !turn.files.is_empty()) {
             self.workspace.record_turn_files(id.to_string(), turn.turn, turn.files);
         }
@@ -1585,7 +1597,9 @@ impl Actor {
                 ..Thread::default()
             },
         );
+        let now = now_ms();
         self.store.update(&id, |flags| {
+            flags.activity_at = Some(now);
             flags.project.clone_from(&project_path);
             flags.access = Some(settings.access);
             flags.fan_out = fan_out;
@@ -2030,7 +2044,9 @@ impl Actor {
         }
         self.by_active.remove(&active);
         let flags = self.store.flags(id);
+        let now = now_ms();
         self.store.update(&fork_id, |fork| {
+            fork.activity_at = Some(now);
             fork.project = flags.project;
             fork.access = flags.access;
         });
@@ -2445,6 +2461,18 @@ impl Actor {
         match self.call(command).await {
             Ok(data) => {
                 self.saved = threads::saved_rows(&data).into_iter().map(|row| (row.id.clone(), row)).collect();
+                let now = now_ms();
+                let mut seeded = false;
+                for row in self.saved.values() {
+                    if self.store.activity_at(&row.id).is_none() {
+                        let created = row.created.unwrap_or(now);
+                        self.store.update(&row.id, |flags| flags.activity_at = Some(created));
+                        seeded = true;
+                    }
+                }
+                if seeded {
+                    self.save();
+                }
                 self.heads.clear();
                 for thread in self.threads.values_mut() {
                     thread.title = None;
@@ -2717,13 +2745,14 @@ impl Actor {
         let changed = live.state.apply(event);
         let settled = live.transcript.take_settled();
         let mut failure = None;
+        let mut user_at = None;
         match event {
             SessionEvent::AgentStart => {
                 thread.run_started_at = thread.run_started_at.or(Some(now));
                 thread.failed_at = None;
             }
             SessionEvent::MessageStart { message: AgentMessage::User(user), .. } => {
-                thread.last_user_at = Some(i64::try_from(user.timestamp).unwrap_or(now));
+                user_at = Some(i64::try_from(user.timestamp).unwrap_or(now));
             }
             SessionEvent::TurnEnd { error: Some(error), .. } => {
                 thread.failed_at = Some(now);
@@ -2736,6 +2765,7 @@ impl Actor {
             SessionEvent::SessionActionUpdate { .. } => live.sending.clear(),
             _ => {}
         }
+        self.note_user_at(&id, user_at);
         for op in ops {
             self.mailbox.push(Update::Transcript { thread: id.clone(), op });
         }
@@ -2827,6 +2857,9 @@ impl Actor {
             if flags.archived != archived {
                 continue;
             }
+            if self.store.activity_at(&id).is_none() {
+                self.first_seen.entry(id.clone()).or_insert(now);
+            }
             let mut facts = self.facts(&id, now);
             let head = self.heads.entry(facts.cwd.clone()).or_insert_with(|| threads::git_head(&facts.cwd)).clone();
             facts.pull_request =
@@ -2848,8 +2881,7 @@ impl Actor {
             .or_else(|| roster.map(|row| row.cwd.clone()))
             .or_else(|| saved.map(|row| row.cwd.clone()))
             .unwrap_or_default();
-        let updated = saved.map(|row| row.modified).max(roster.and_then(|row| row.updated_at));
-        let activity_at = thread.and_then(|thread| thread.last_user_at).or(updated).unwrap_or(now);
+        let activity_at = self.store.activity_at(id).or_else(|| self.first_seen.get(id).copied()).unwrap_or(now);
         let model = live.and_then(|live| live.state.model.clone());
         Facts {
             id: id.to_string(),

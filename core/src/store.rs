@@ -36,6 +36,8 @@ pub(crate) struct ThreadFlags {
     pub(crate) woke_at: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) done_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) activity_at: Option<i64>,
     pub(crate) archived: bool,
     pub(crate) unread: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -112,6 +114,10 @@ impl Store {
 
     pub(crate) fn flags(&self, thread: &str) -> ThreadFlags {
         self.threads.get(thread).cloned().unwrap_or_default()
+    }
+
+    pub(crate) fn activity_at(&self, thread: &str) -> Option<i64> {
+        self.threads.get(thread).and_then(|flags| flags.activity_at)
     }
 
     pub(crate) fn update(&mut self, thread: &str, change: impl FnOnce(&mut ThreadFlags)) {
