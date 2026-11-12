@@ -48,7 +48,7 @@ enum Theme {
         static let sidebarInset: CGFloat = 8
         static let chromeButton: CGFloat = 28
         static let chromeGlyphInset: CGFloat = 7
-        static let chromeGlyph = CGSize(width: 20, height: 17)
+        static let chromeGlyph = CGSize(width: 16, height: 14)
         static let trailingChromeInset: CGFloat = 76
     }
 }

@@ -20,7 +20,7 @@
 
   | Size | Points | Weight | Use |
   |---|---|---|---|
-  | `.toolbar` | 15 | regular | window and sidebar chrome: `Image.toolbarIcon()` fits the symbol to one 20×17 pt box (`Theme.Metrics.chromeGlyph`), so neighbouring chrome glyphs read the same size; pick symbols of similar mass |
+  | `.toolbar` | 15 | regular | window and sidebar chrome: `Image.toolbarIcon()` fits the symbol to one 16×14 pt box (`Theme.Metrics.chromeGlyph`), so neighbouring chrome glyphs read the same size and none exceeds native toolbar glyphs; pick symbols of similar mass |
   | `.control` | 14 | regular | icon buttons in rows and bars |
   | `.inline` | 12.5 | regular | row glyphs, chevrons, labels (`IconLabel` for label + icon) |
   | `.tile` | fitted to 65 % of the tile | semibold | white glyph in `SettingsTile` |
