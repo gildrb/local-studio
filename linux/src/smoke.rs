@@ -1,5 +1,5 @@
-use std::cell::Cell;
-use std::path::PathBuf;
+use std::cell::{Cell, RefCell};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -522,7 +522,18 @@ fn providers(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, ba
             if stub(&app.state.borrow()).is_some() {
                 return;
             }
-            finish(app, phase, failed, true, "custom endpoint discovered, added and removed through the dialog");
+            let agent = std::env::var_os("EUKHE_CODING_AGENT_DIR");
+            if !agent.is_some_and(|agent| local_studio_core::stored_keys_empty(Path::new(&agent))) {
+                finish(app, phase, failed, false, "auth.json still holds keys after the endpoint was removed");
+                return;
+            }
+            finish(
+                app,
+                phase,
+                failed,
+                true,
+                "custom endpoint discovered, added and removed through the dialog; auth.json holds no keys",
+            );
         }
         _ => {}
     }

@@ -31,7 +31,9 @@ final class Smoke {
         subscription = store.didTick.sink { [weak self] in self?.advance() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in
             guard let self, phase != .finished else { return }
-            finish(passed: false, "timed out while \(phase.rawValue)")
+            let conversation = store.conversation
+            let state = "composer shown \(composerShown), project \(store.inbox.currentProject ?? "none") of \(store.inbox.projects.count), models loaded \(conversation.modelsLoaded) (\(conversation.models.count)), \(SmokeModel.label) configured \(SmokeModel.configured(conversation))"
+            finish(passed: false, "timed out while \(phase.rawValue): \(state)")
         }
     }
 
@@ -93,7 +95,7 @@ final class Smoke {
             guard let self else { return }
             checkComposer()
             guard !composerShown, phase != .finished else { return }
-            let expected = expectedComposer.map(Self.describe) ?? "the settings' default model, which the catalog does not list (set defaultProvider and defaultModel)"
+            let expected = expectedComposer.map(Self.describe) ?? "the default model, which the catalog does not list (set defaultProvider and defaultModel)"
             finish(passed: false, "1 s after the models loaded the composer shows \(Self.describe(store.shell.probe.composer)), expected \(expected)")
         }
     }
@@ -102,8 +104,7 @@ final class Smoke {
         guard phase == .unset else { return }
         let conversation = store.conversation
         let settings = store.pages.settings
-        let daemon = conversation.daemonModel.flatMap { key in conversation.models.first { $0.provider == key.provider && $0.id == key.model } }
-        let expected = daemon.map { ComposerProbe(model: $0.name, thinking: conversation.daemonThinkingLevel.map(ThinkingMenu.title)) }
+        let expected = daemonComposer
         if let key = conversation.daemonModel, key != SmokeModel.key {
             finish(passed: false, "the daemon's default model is \(key.provider)/\(key.model), expected \(SmokeModel.label) (set defaultProvider and defaultModel in the agent settings)")
             return
@@ -134,8 +135,18 @@ final class Smoke {
 
     private var expectedComposer: ComposerProbe? {
         let settings = store.pages.settings
-        let model = store.conversation.models.first { $0.provider == settings?.defaultProvider && $0.id == settings?.defaultModel }
-        return model.map { ComposerProbe(model: $0.name, thinking: settings?.defaultThinkingLevel.map(ThinkingMenu.title)) }
+        let conversation = store.conversation
+        if let provider = settings?.defaultProvider, let id = settings?.defaultModel {
+            let model = conversation.models.first { $0.provider == provider && $0.id == id }
+            return model.map { ComposerProbe(model: $0.name, thinking: settings?.defaultThinkingLevel.map(ThinkingMenu.title)) }
+        }
+        return daemonComposer
+    }
+
+    private var daemonComposer: ComposerProbe? {
+        let conversation = store.conversation
+        let daemon = conversation.daemonModel.flatMap { key in conversation.models.first { $0.provider == key.provider && $0.id == key.model } }
+        return daemon.map { ComposerProbe(model: $0.name, thinking: conversation.daemonThinkingLevel.map(ThinkingMenu.title)) }
     }
 
     private static func describe(_ probe: ComposerProbe?) -> String {

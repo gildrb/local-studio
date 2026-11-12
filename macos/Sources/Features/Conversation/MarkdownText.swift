@@ -42,9 +42,7 @@ final class MarkdownLayoutManager: NSLayoutManager {
 }
 
 extension NSAttributedString.Key {
-    static let markdownPrefix = NSAttributedString.Key("LocalStudioMarkdownPrefix")
     static let markdownMarker = NSAttributedString.Key("LocalStudioMarkdownMarker")
-    static let markdownCode = NSAttributedString.Key("LocalStudioMarkdownCode")
     static let markdownQuote = NSAttributedString.Key("LocalStudioMarkdownQuote")
     static let markdownRule = NSAttributedString.Key("LocalStudioMarkdownRule")
     static let markdownCell = NSAttributedString.Key("LocalStudioMarkdownCell")
@@ -218,26 +216,15 @@ private struct MarkdownStringBuilder {
         if quote > 0 {
             attributes[.markdownQuote] = quote
         }
-        let start = output.length
-        var prefix = String(repeating: "  ", count: max(depth - 1, 0))
         if depth > 0, let marker {
             var markerAttributes = attributes
             markerAttributes[.foregroundColor] = secondaryColor
             markerAttributes[.font] = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
-            markerAttributes[.markdownMarker] = true
+            markerAttributes[.markdownMarker] = depth
             output.append(NSAttributedString(string: "\t\(marker)\t", attributes: markerAttributes))
-            prefix += marker.hasSuffix(".") ? "\(marker) " : "- "
-        } else if depth > 0 {
-            prefix += "  "
-        }
-        if quote > 0 {
-            prefix = String(repeating: "> ", count: quote) + prefix
         }
         append(content, attributes: attributes, font: font)
         output.append(NSAttributedString(string: "\n", attributes: attributes))
-        if !prefix.isEmpty {
-            output.addAttribute(.markdownPrefix, value: prefix, range: NSRange(location: start, length: 1))
-        }
     }
 
     private mutating func heading(_ content: AttributedString, level: Int, spacing: CGFloat) {
@@ -247,10 +234,8 @@ private struct MarkdownStringBuilder {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font, .foregroundColor: textColor, .paragraphStyle: style, .markdownGroup: group,
         ]
-        let start = output.length
         append(content, attributes: attributes, font: font)
         output.append(NSAttributedString(string: "\n", attributes: attributes))
-        output.addAttribute(.markdownPrefix, value: String(repeating: "#", count: level) + " ", range: NSRange(location: start, length: 1))
     }
 
     private mutating func code(_ code: String, language: String?, spacing: CGFloat) {
@@ -276,7 +261,6 @@ private struct MarkdownStringBuilder {
                 .font: font,
                 .foregroundColor: NSColor(Theme.syntax(.plain)),
                 .paragraphStyle: style,
-                .markdownCode: mark,
                 .markdownGroup: group,
             ]
             output.append(NSAttributedString(string: line + "\n", attributes: attributes))
@@ -397,37 +381,60 @@ private struct MarkdownStringBuilder {
 }
 
 enum MarkdownCopy {
-    static func text(_ string: NSAttributedString, range: NSRange) -> String {
-        let source = string.string as NSString
-        var fences = false
-        string.enumerateAttribute(.markdownCode, in: range, options: []) { value, _, stop in
-            if value == nil {
-                fences = true
-                stop.pointee = true
+    static func text(_ string: NSAttributedString, ranges: [NSRange]) -> String {
+        ranges.map { text(string, range: $0) }.joined(separator: "\n")
+    }
+
+    static func rich(_ string: NSAttributedString, ranges: [NSRange], type: NSAttributedString.DocumentType) -> Data? {
+        let output = NSMutableAttributedString()
+        for range in ranges {
+            if output.length > 0 {
+                output.append(NSAttributedString(string: "\n"))
             }
+            output.append(string.attributedSubstring(from: range))
         }
+        let whole = NSRange(location: 0, length: output.length)
+        output.removeAttribute(.foregroundColor, range: whole)
+        output.removeAttribute(.backgroundColor, range: whole)
+        var tables: [ObjectIdentifier: NSTextTable] = [:]
+        output.enumerateAttribute(.paragraphStyle, in: whole, options: []) { value, run, _ in
+            guard let style = (value as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle else { return }
+            style.paragraphSpacingBefore = min(style.paragraphSpacingBefore, 12)
+            style.textBlocks = style.textBlocks.map { block -> NSTextBlock in
+                guard let cell = block as? NSTextTableBlock else { return block }
+                let table = tables[ObjectIdentifier(cell.table)] ?? plainTable(columns: cell.table.numberOfColumns)
+                tables[ObjectIdentifier(cell.table)] = table
+                let copy = NSTextTableBlock(
+                    table: table, startingRow: cell.startingRow, rowSpan: cell.rowSpan, startingColumn: cell.startingColumn, columnSpan: cell.columnSpan
+                )
+                copy.setBorderColor(.gray)
+                copy.setWidth(1, type: .absoluteValueType, for: .border)
+                copy.setWidth(6, type: .absoluteValueType, for: .padding)
+                return copy
+            }
+            output.addAttribute(.paragraphStyle, value: style, range: run)
+        }
+        return try? output.data(from: whole, documentAttributes: [.documentType: type])
+    }
+
+    private static func plainTable(columns: Int) -> NSTextTable {
+        let table = NSTextTable()
+        table.numberOfColumns = columns
+        table.collapsesBorders = true
+        table.hidesEmptyCells = false
+        return table
+    }
+
+    private static func text(_ string: NSAttributedString, range: NSRange) -> String {
+        let source = string.string as NSString
         var parts: [(group: Int, text: String)] = []
-        var openCode: MarkdownCodeMark?
-        var codeLines: [String] = []
-        var codeGroup = 0
         var row: (table: Int, row: Int)?
         var cells: [String] = []
         var rowGroup = 0
 
-        func flushCode() {
-            guard let mark = openCode else { return }
-            let body = codeLines.joined(separator: "\n")
-            parts.append((codeGroup, fences ? "```\(mark.language ?? "")\n\(body)\n```" : body))
-            openCode = nil
-            codeLines = []
-        }
         func flushRow() {
-            guard let current = row else { return }
-            var line = "| " + cells.joined(separator: " | ") + " |"
-            if current.row == 0 {
-                line += "\n|" + String(repeating: " --- |", count: cells.count)
-            }
-            parts.append((rowGroup, line))
+            guard row != nil else { return }
+            parts.append((rowGroup, cells.joined(separator: "\t")))
             row = nil
             cells = []
         }
@@ -437,34 +444,22 @@ enum MarkdownCopy {
             let location = min(paragraph.location, max(source.length - 1, 0))
             let attributes = string.attributes(at: location, effectiveRange: nil)
             let group = attributes[.markdownGroup] as? Int ?? 0
-            let text = visible(string, paragraph)
-            let code = attributes[.markdownCode] as? MarkdownCodeMark
             let cell = attributes[.markdownCell] as? MarkdownCellMark
-            if code !== openCode {
-                flushCode()
-            }
             if let current = row, cell.map({ ($0.table, $0.row) != (current.table, current.row) }) ?? true {
                 flushRow()
             }
-            if let code {
-                openCode = code
-                codeGroup = group
-                codeLines.append(text)
-            } else if let cell {
+            guard attributes[.markdownRule] == nil else { return }
+            let text = visible(string, paragraph)
+            if let cell {
                 if row == nil {
                     row = (cell.table, cell.row)
                     rowGroup = group
                 }
                 cells.append(text.trimmingCharacters(in: .whitespaces))
-            } else if attributes[.markdownRule] != nil {
-                parts.append((group, "---"))
             } else {
-                let starts = paragraph.location == 0 || source.character(at: paragraph.location - 1) == 0x0A
-                let prefix = starts ? attributes[.markdownPrefix] as? String ?? "" : ""
-                parts.append((group, prefix + text))
+                parts.append((group, text))
             }
         }
-        flushCode()
         flushRow()
         var result = ""
         var previous: Int?
@@ -481,8 +476,15 @@ enum MarkdownCopy {
     private static func visible(_ string: NSAttributedString, _ range: NSRange) -> String {
         var text = ""
         string.enumerateAttribute(.markdownMarker, in: range, options: []) { value, run, _ in
-            guard value == nil else { return }
-            text += string.attributedSubstring(from: run).string
+            let piece = string.attributedSubstring(from: run).string
+            guard let depth = value as? Int else {
+                text += piece
+                return
+            }
+            let marker = piece.trimmingCharacters(in: .whitespaces)
+            if !marker.isEmpty {
+                text += String(repeating: "\t", count: max(depth - 1, 0)) + marker + " "
+            }
         }
         return text.replacingOccurrences(of: "\u{2028}", with: "\n").replacingOccurrences(of: "\u{200B}", with: "")
     }
@@ -632,12 +634,24 @@ final class MarkdownNSTextView: NSTextView {
         }
     }
 
-    override func copy(_ sender: Any?) {
-        guard let textStorage else { return }
+    override var writablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        [.string, .rtf, .html]
+    }
+
+    override func writeSelection(to pboard: NSPasteboard, type: NSPasteboard.PasteboardType) -> Bool {
+        guard let textStorage else { return false }
         let ranges = selectedRanges.map(\.rangeValue).filter { $0.length > 0 }
-        guard !ranges.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(ranges.map { MarkdownCopy.text(textStorage, range: $0) }.joined(separator: "\n"), forType: .string)
+        guard !ranges.isEmpty else { return false }
+        switch type {
+        case .string:
+            return pboard.setString(MarkdownCopy.text(textStorage, ranges: ranges), forType: .string)
+        case .rtf:
+            return MarkdownCopy.rich(textStorage, ranges: ranges, type: .rtf).map { pboard.setData($0, forType: .rtf) } ?? false
+        case .html:
+            return MarkdownCopy.rich(textStorage, ranges: ranges, type: .html).map { pboard.setData($0, forType: .html) } ?? false
+        default:
+            return super.writeSelection(to: pboard, type: type)
+        }
     }
 
     override func resignFirstResponder() -> Bool {

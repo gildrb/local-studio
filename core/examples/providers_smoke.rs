@@ -375,6 +375,7 @@ fn main() -> anyhow::Result<()> {
             .open(agent.join(name))?
             .write_all(content.as_bytes())?;
     }
+    local_studio_core::check_scratch_agent(&agent).map_err(anyhow::Error::msg)?;
     let (stub, port) = start_stub()?;
     let outcome = run(&daemon, &custom, Some(port));
     let stopped_stub = stop_stub(stub);
