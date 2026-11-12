@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use local_studio_core::Shelf;
+use local_studio_core::{Shelf, ThreadStatus};
 
 use crate::app::{App, Dirty};
 use crate::state::Page;
@@ -167,12 +167,23 @@ fn bulk(app: &Rc<App>, call: fn(&local_studio_core::Studio, String)) {
 }
 
 fn bulk_delete(app: &Rc<App>) {
-    let count = app.sidebar.marked().len();
-    let dialog = adw::AlertDialog::new(
-        Some(&format!("Delete {count} Threads?")),
-        Some("Their history will be deleted permanently."),
-    );
-    dialog.add_responses(&[("cancel", "Cancel"), ("delete", "Delete")]);
+    let marked = app.sidebar.marked();
+    let count = marked.len();
+    let running = {
+        let state = app.state.borrow();
+        marked.iter().filter(|id| state.row(id).is_some_and(|row| matches!(row.status, ThreadStatus::Working))).count()
+    };
+    let (heading, body, verb) = if running > 0 {
+        (
+            format!("Stop and Delete {count} Threads?"),
+            format!("{running} of them are running and will be stopped. Their history will be deleted permanently."),
+            "Stop and Delete",
+        )
+    } else {
+        (format!("Delete {count} Threads?"), "Their history will be deleted permanently.".to_string(), "Delete")
+    };
+    let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
+    dialog.add_responses(&[("cancel", "Cancel"), ("delete", verb)]);
     dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
     dialog.set_close_response("cancel");
     let weak = Rc::downgrade(app);

@@ -11,12 +11,15 @@ enum PalettePage: Equatable {
 
 enum ShellConfirmation: Equatable {
     case delete([String])
+    case stopAndDelete([String])
     case archive([String])
     case unpin([String])
+    case restartDaemon(UInt32)
 
     var threads: [String] {
         switch self {
-        case .delete(let ids), .archive(let ids), .unpin(let ids): ids
+        case .delete(let ids), .stopAndDelete(let ids), .archive(let ids), .unpin(let ids): ids
+        case .restartDaemon: []
         }
     }
 }

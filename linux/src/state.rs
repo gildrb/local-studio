@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use local_studio_core::{
-    AccessMode, Approval, Connection, GitStatus, KernelState, Keybinding, LocalDashboard, LocalEngine, LocalSnapshot,
-    ModelKey, ModelOption, Project, ProjectScript, ProjectSettings, ProviderStatus, QueuedMessage, Settings,
-    SetupStage, Subagent, ThreadInfo, ThreadRow, UsagePeriod, UsageReport,
+    AccessMode, Approval, Connection, DaemonMismatch, GitStatus, KernelState, Keybinding, LocalDashboard, LocalEngine,
+    LocalSnapshot, ModelKey, ModelOption, Project, ProjectScript, ProjectSettings, ProviderStatus, QueuedMessage,
+    Settings, SetupStage, Subagent, ThreadInfo, ThreadRow, UsagePeriod, UsageReport,
 };
 
 #[derive(Clone, Default)]
@@ -18,6 +18,7 @@ pub struct DaemonInfo {
     pub socket: String,
     pub version: Option<String>,
     pub pid: Option<u32>,
+    pub mismatch: Option<DaemonMismatch>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

@@ -178,7 +178,9 @@ extension StudioStore {
     }
 
     func requestDelete(_ ids: [String]) {
-        if pages.settings?.confirmDelete == false {
+        if ids.contains(where: { inbox.thread($0)?.status == .working }) {
+            shell.confirmation = .stopAndDelete(ids)
+        } else if pages.settings?.confirmDelete == false {
             delete(ids)
         } else {
             shell.confirmation = .delete(ids)
@@ -188,9 +190,10 @@ extension StudioStore {
     func confirm(_ confirmation: ShellConfirmation) {
         shell.confirmation = nil
         switch confirmation {
-        case .delete(let ids): delete(ids)
+        case .delete(let ids), .stopAndDelete(let ids): delete(ids)
         case .archive(let ids): inbox.setArchived(ids, true)
         case .unpin(let ids): inbox.setPinned(ids, false)
+        case .restartDaemon: core.run { $0.restartDaemon(force: true) }
         }
     }
 

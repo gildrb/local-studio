@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use local_studio_core::Shelf;
+use local_studio_core::{Shelf, ThreadStatus};
 
 use crate::app::App;
 use crate::format;
@@ -435,22 +435,29 @@ pub fn undoable(app: &Rc<App>, text: &str, undo: impl Fn(&Rc<App>) + 'static) {
 
 fn delete(app: &Rc<App>, id: String) {
     let confirm = app.state.borrow().settings.confirm_delete;
-    if !confirm {
+    let (title, running) = app
+        .state
+        .borrow()
+        .row(&id)
+        .map(|row| (row.title.clone(), matches!(row.status, ThreadStatus::Working)))
+        .unwrap_or_default();
+    if !confirm && !running {
         app.core.run(|studio| studio.delete_thread(id));
         return;
     }
-    let title = app.state.borrow().row(&id).map(|row| row.title.clone()).unwrap_or_default();
-    confirm_action(
-        app,
-        "Delete Thread?",
-        &format!("“{title}” and its history will be deleted permanently."),
-        "Delete",
-        true,
-        move |app| {
-            let id = id.clone();
-            app.core.run(|studio| studio.delete_thread(id));
-        },
-    );
+    let (heading, body, verb) = if running {
+        (
+            "Stop and Delete Thread?",
+            format!("“{title}” is running. It will be stopped, then it and its history will be deleted permanently."),
+            "Stop and Delete",
+        )
+    } else {
+        ("Delete Thread?", format!("“{title}” and its history will be deleted permanently."), "Delete")
+    };
+    confirm_action(app, heading, &body, verb, true, move |app| {
+        let id = id.clone();
+        app.core.run(|studio| studio.delete_thread(id));
+    });
 }
 
 fn confirm_action(

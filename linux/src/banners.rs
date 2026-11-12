@@ -1,5 +1,5 @@
 use adw::prelude::*;
-use local_studio_core::KernelState;
+use local_studio_core::{DaemonMismatch, KernelState};
 
 use crate::format;
 use crate::state::State;
@@ -8,6 +8,7 @@ pub struct Banners {
     pub notice: adw::Banner,
     pub provider: adw::Banner,
     pub kernel: adw::Banner,
+    pub daemon: adw::Banner,
 }
 
 impl Banners {
@@ -23,7 +24,19 @@ impl Banners {
                 banner.set_revealed(false);
             }
         });
-        Self { notice, provider, kernel }
+        let daemon = adw::Banner::builder().button_label("Restart Daemon").action_name("win.restart-daemon").build();
+        daemon.add_css_class("ls-banner-error");
+        Self { notice, provider, kernel, daemon }
+    }
+
+    pub fn render_daemon(&self, mismatch: Option<&DaemonMismatch>) {
+        match mismatch {
+            Some(mismatch) => {
+                self.daemon.set_title(&format::escape(&mismatch.message));
+                self.daemon.set_revealed(true);
+            }
+            None => self.daemon.set_revealed(false),
+        }
     }
 
     pub fn render_kernel(&self, state: Option<&KernelState>, fresh: bool) {
