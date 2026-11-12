@@ -13,7 +13,7 @@ final class KernelSmoke {
         case finished
     }
 
-    private static let prompt = "List the files here and count them with Python: use the ipython tool once, then reply with only the count."
+    private static let prompt = "List the files here and count them with Python: use the python tool once, then reply with only the count."
     private static let files = ["alpha.txt", "beta.txt", "gamma.txt"]
 
     private let store: StudioStore
@@ -93,13 +93,13 @@ final class KernelSmoke {
             return
         }
         let python = items.contains { item in
-            if case .tool(_, "ipython", _, _, _, .succeeded, _, _, _, _) = item.kind { true } else { false }
+            if case .tool(_, "python", _, _, _, .succeeded, _, _, _, _) = item.kind { true } else { false }
         }
         guard python else {
-            finish(passed: false, "the turn finished without a succeeded ipython call")
+            finish(passed: false, "the turn finished without a succeeded python call")
             return
         }
-        finish(passed: true, "a real ipython call succeeded and the model replied “\(reply)” (\(items.count) transcript items)")
+        finish(passed: true, "a real python call succeeded and the model replied “\(reply)” (\(items.count) transcript items)")
     }
 
     private func makeProject() -> URL? {

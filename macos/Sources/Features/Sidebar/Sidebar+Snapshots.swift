@@ -121,10 +121,10 @@ extension SnapshotCatalog {
                 store.shell.sidebarVisible = false
                 return AnyView(RootView(store: store))
             },
-            SnapshotEntry(name: "shell-window-kernel-installing", size: CGSize(width: 1100, height: 640), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + [.kernel(state: .installing(detail: "Downloading cpython-3.11.15-macos-aarch64-none (17.9MiB)"))]) { store in
+            SnapshotEntry(name: "shell-window-kernel-installing", size: CGSize(width: 1100, height: 640), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + [.kernel(state: .installing(detail: "Fetching Python 3.14.10 for the kernel..."))]) { store in
                 AnyView(RootView(store: store))
             },
-            SnapshotEntry(name: "shell-window-kernel-failed", size: CGSize(width: 1100, height: 640), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + [.kernel(state: .failed(message: "Failed to install the Python kernel: uv could not download cpython-3.11 (network unreachable)."))]) { store in
+            SnapshotEntry(name: "shell-window-kernel-failed", size: CGSize(width: 1100, height: 640), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused + [.kernel(state: .failed(message: "Eukhe could not fetch its Python kernel (network unreachable)."))]) { store in
                 AnyView(RootView(store: store))
             },
             SnapshotEntry(name: "shell-window-palette", size: CGSize(width: 1280, height: 800), focus: "t-active-1", updates: ShellFixtures.updates + ShellFixtures.focused) { store in

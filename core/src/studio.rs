@@ -1357,6 +1357,11 @@ impl Actor {
         let attach = AttachData::deserialize(&data).map_err(|error| format!("Unreadable session snapshot: {error}"))?;
         let mut state = LiveState::default();
         state.merge(&attach.snapshot.state);
+        if let Some(notice) = attach.snapshot.state.get("kernelUnavailable").and_then(Value::as_str) {
+            if eukhe_types::platform::agent_dir().is_none_or(|dir| eukhe_types::kernel_notice::first_showing(&dir)) {
+                self.mailbox.notice(NoticeLevel::Warning, notice.to_string());
+            }
+        }
         let mut transcript = Transcript::default();
         transcript.reset(&attach.snapshot.messages, state.busy);
         let settled = transcript.take_settled();

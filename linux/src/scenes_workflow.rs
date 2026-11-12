@@ -157,7 +157,7 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             conversation(app, false);
             app.panel.show("diff");
             app.panel.diff.set_fixture(&crate::fixtures::diff_files_public(), false);
-            let message = "uv could not download Python (network unreachable)".to_string();
+            let message = "Eukhe could not fetch its Python kernel (network unreachable)".to_string();
             app.banners.render_kernel(Some(&local_studio_core::KernelState::Failed { message }), true);
         }
         _ => crate::scenes_providers::stage(app, scene),

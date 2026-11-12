@@ -1,11 +1,11 @@
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
-use local_studio_core::{ApprovalAnswer, Block, Connection, ItemKind, KernelState, ModelKey, NoticeLevel, ToolState};
+use local_studio_core::{ApprovalAnswer, Block, Connection, ItemKind, KernelState, ModelKey, ToolState};
 
 use crate::app::App;
 
@@ -22,15 +22,12 @@ const FOLLOW_UP: &str = "Smoke follow-up: without using any tools, reply with on
 const REJECTED: &str = "smoke rejected send";
 const MISSING: &str = "smoke-missing-thread";
 const KERNEL_PROMPT: &str =
-    "List the files here and count them with Python: use the ipython tool once, then reply with only the count.";
+    "List the files here and count them with Python: use the python tool once, then reply with only the count.";
 const KERNEL_TIMEOUT: Duration = Duration::from_mins(15);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Kernel,
-    Retry,
-    Reinstalling,
-    Retried,
     Connecting,
     Project,
     Opening,
@@ -91,20 +88,6 @@ pub fn start_kernel(app: &Rc<App>, failed: Rc<Cell<bool>>, expect_install: bool)
     });
 }
 
-pub fn start_kernel_offline(app: &Rc<App>, failed: Rc<Cell<bool>>) {
-    let phase = Rc::new(Cell::new(Phase::Kernel));
-    let uv = std::env::var("LS_SMOKE_UV").unwrap_or_default();
-    if uv.is_empty() {
-        finish(app, &phase, &failed, false, "set LS_SMOKE_UV to a uv binary the smoke links in after the failure");
-        return;
-    }
-    let Some(project) = kernel_project(app, &phase, &failed) else { return };
-    let previous = RefCell::new(None);
-    drive(app, phase, failed, KERNEL_TIMEOUT, move |app, phase, failed| {
-        offline(app, phase, failed, &project, &uv, &previous);
-    });
-}
-
 fn kernel(
     app: &Rc<App>,
     phase: &Rc<Cell<Phase>>,
@@ -159,87 +142,6 @@ fn kernel(
     }
 }
 
-fn offline(
-    app: &Rc<App>,
-    phase: &Rc<Cell<Phase>>,
-    failed: &Rc<Cell<bool>>,
-    project: &str,
-    uv: &str,
-    previous: &RefCell<Option<String>>,
-) {
-    let state = app.state.borrow().kernel.clone();
-    match phase.get() {
-        Phase::Kernel => {
-            if !matches!(app.state.borrow().connection, Some(Connection::Ready)) {
-                return;
-            }
-            match state {
-                Some(KernelState::Failed { message }) => {
-                    println!("ok   the launch's auto-install failed without uv: {message}");
-                    phase.set(Phase::Project);
-                    app.core.run(|studio| studio.add_project(project.to_string()));
-                }
-                Some(KernelState::Installed { .. }) => {
-                    finish(app, phase, failed, false, "the kernel installed although uv was unavailable");
-                }
-                _ => {}
-            }
-        }
-        Phase::Retry | Phase::Reinstalling => match state {
-            Some(KernelState::Installing { .. }) => phase.set(Phase::Reinstalling),
-            Some(KernelState::Installed { python }) => {
-                println!("ok   Retry installed the kernel at {python}");
-                previous.replace(app.state.borrow().selected.clone());
-                send_kernel_prompt(app, phase);
-            }
-            Some(KernelState::Failed { message }) if phase.get() == Phase::Reinstalling => {
-                finish(app, phase, failed, false, &format!("Retry failed: {message}"));
-            }
-            _ => {}
-        },
-        Phase::Project => {
-            previous.replace(app.state.borrow().selected.clone());
-            send_kernel_prompt(app, phase);
-        }
-        Phase::Opening => {
-            let selected = app.state.borrow().selected.clone();
-            if selected.is_some() && selected != *previous.borrow() {
-                phase.set(if previous.borrow().is_some() { Phase::Retried } else { Phase::Replying });
-            }
-        }
-        Phase::Replying => {
-            let Some(items) = turn_done(app) else { return };
-            if items.iter().any(|item| matches!(&item.kind, ItemKind::Tool { name, .. } if name == "ipython")) {
-                finish(app, phase, failed, false, "ipython was offered while the kernel could not start");
-                return;
-            }
-            let notices = items
-                .iter()
-                .filter(|item| {
-                    matches!(&item.kind, ItemKind::Notice { level: NoticeLevel::Warning, text }
-                        if text.to_lowercase().contains("kernel"))
-                })
-                .count();
-            if notices != 1 {
-                finish(app, phase, failed, false, &format!("expected one kernel warning notice, found {notices}"));
-                return;
-            }
-            println!("ok   one kernel warning notice row and no ipython call ({} transcript items)", items.len());
-            let bin = std::env::var_os("HOME").map_or_else(std::env::temp_dir, PathBuf::from).join(".local/bin");
-            let linked = std::fs::create_dir_all(&bin).and_then(|()| std::os::unix::fs::symlink(uv, bin.join("uv")));
-            if let Err(error) = linked {
-                finish(app, phase, failed, false, &format!("link uv into {}: {error}", bin.display()));
-                return;
-            }
-            println!("     uv is now available; pressing Retry");
-            phase.set(Phase::Retry);
-            WidgetExt::activate_action(&app.window, "win.install-kernel", None).ok();
-        }
-        Phase::Retried => kernel_reply(app, phase, failed),
-        _ => {}
-    }
-}
-
 fn send_kernel_prompt(app: &Rc<App>, phase: &Rc<Cell<Phase>>) {
     let first = app.state.borrow().projects.first().map(|project| project.id.clone());
     let Some(first) = first else { return };
@@ -286,11 +188,11 @@ fn kernel_reply(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>)
         finish(app, phase, failed, false, "the transcript reports the Python kernel as not installed");
         return;
     }
-    let python = items.iter().any(
-        |item| matches!(&item.kind, ItemKind::Tool { name, state: ToolState::Succeeded, .. } if name == "ipython"),
-    );
+    let python = items
+        .iter()
+        .any(|item| matches!(&item.kind, ItemKind::Tool { name, state: ToolState::Succeeded, .. } if name == "python"));
     if !python {
-        finish(app, phase, failed, false, "the turn finished without a succeeded ipython call");
+        finish(app, phase, failed, false, "the turn finished without a succeeded python call");
         return;
     }
     finish(
@@ -298,7 +200,7 @@ fn kernel_reply(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>)
         phase,
         failed,
         true,
-        &format!("kernel: a real ipython call succeeded ({} transcript items)", items.len()),
+        &format!("kernel: a real python call succeeded ({} transcript items)", items.len()),
     );
 }
 
@@ -411,15 +313,7 @@ fn advance(app: &Rc<App>, phase: &Rc<Cell<Phase>>, failed: &Rc<Cell<bool>>, proj
         }
         Phase::Terminal | Phase::Typing | Phase::Chat => terminal(app, phase),
         Phase::Keys => keys(app, phase, failed),
-        Phase::Endpoint
-        | Phase::Discovering
-        | Phase::Adding
-        | Phase::Removing
-        | Phase::Kernel
-        | Phase::Retry
-        | Phase::Reinstalling
-        | Phase::Retried
-        | Phase::Finished => {}
+        Phase::Endpoint | Phase::Discovering | Phase::Adding | Phase::Removing | Phase::Kernel | Phase::Finished => {}
     }
 }
 

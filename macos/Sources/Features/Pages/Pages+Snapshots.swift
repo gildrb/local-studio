@@ -14,13 +14,13 @@ extension SnapshotCatalog {
             SnapshotEntry(
                 name: "pages-settings-kernel-installed",
                 size: settingsSize,
-                updates: PagesFixtures.base + [.kernel(state: .installed(python: "/Users/demo/.eukhe/kernel-venv/bin/python"))],
+                updates: PagesFixtures.base + [.kernel(state: .installed(python: "/Users/demo/.eukhe/kernel/envs/fc4dd972f4a11311/bin/python (Python 3.14.10)"))],
                 view: { store in AnyView(SettingsView(store: store, pane: .general, query: "python")) }
             ),
             SnapshotEntry(
                 name: "pages-settings-kernel-failed",
                 size: settingsSize,
-                updates: PagesFixtures.base + [.kernel(state: .failed(message: "uv is required to set up the Python kernel; install it with your package manager (`brew install uv`)"))],
+                updates: PagesFixtures.base + [.kernel(state: .failed(message: "Eukhe could not fetch its Python kernel: error sending request for url (https://github.com/astral-sh/uv/releases/download/0.13.7/uv-aarch64-apple-darwin.tar.gz)"))],
                 view: { store in AnyView(SettingsView(store: store, pane: .general, query: "python")) }
             ),
             SnapshotEntry(

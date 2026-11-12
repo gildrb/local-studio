@@ -3,7 +3,7 @@ use std::process::Stdio;
 use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use super::model::KernelState;
@@ -104,37 +104,36 @@ impl Workspace {
         *self.inner.kernel.install.lock().unwrap_or_else(PoisonError::into_inner) = child.id();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
+        let mut python = None;
         let mut errors = Vec::new();
         let read_stdout = async {
-            let mut text = String::new();
-            if let Some(mut stdout) = stdout {
-                stdout.read_to_string(&mut text).await.ok();
+            let Some(stdout) = stdout else { return };
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                let line = line.trim();
+                if let Some(ready) = ready(line) {
+                    python = Some(ready.to_string());
+                } else if !line.is_empty() && !line.starts_with("unused: ") {
+                    self.set_kernel(KernelState::Installing { detail: Some(line.to_string()) });
+                }
             }
-            text
         };
         let read_stderr = async {
             let Some(stderr) = stderr else { return };
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 let line = line.rsplit('\r').next().unwrap_or_default().trim().to_string();
-                if line.is_empty() {
-                    continue;
+                if !line.is_empty() {
+                    errors.push(line);
                 }
-                self.set_kernel(KernelState::Installing { detail: Some(line.clone()) });
-                errors.push(line);
             }
         };
-        let (text, ()) = tokio::join!(read_stdout, read_stderr);
+        tokio::join!(read_stdout, read_stderr);
         let status = child.wait().await;
         self.inner.kernel.install.lock().unwrap_or_else(PoisonError::into_inner).take();
         let status = status.map_err(|error| format!("The install stopped: {error}"))?;
         if status.success() {
-            return text
-                .lines()
-                .rev()
-                .find_map(python_path)
-                .map(str::to_string)
-                .ok_or_else(|| format!("The install finished without naming its Python: {}", text.trim()));
+            return python.ok_or_else(|| "The install finished without naming its Python.".to_string());
         }
         Err(failure(&errors, status.code()))
     }
@@ -151,9 +150,9 @@ async fn check(program: &Path) -> Check {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let line = stdout.lines().next().unwrap_or_default().trim();
     if output.status.success() {
-        return python_path(line).map_or(Check::Missing, |python| Check::Ready(python.to_string()));
+        return ready(line).map_or(Check::Missing, |python| Check::Ready(python.to_string()));
     }
-    if line.starts_with("not installed") || line.starts_with("out of date") {
+    if line.starts_with("not fetched") {
         return Check::Missing;
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -171,16 +170,8 @@ fn command(program: &Path, args: &[&str]) -> Command {
     command
 }
 
-fn python_path(line: &str) -> Option<&str> {
-    let line = line.trim();
-    line.strip_prefix("installed: ")
-        .or_else(|| line.strip_prefix("already installed: "))
-        .or_else(|| {
-            line.split_once(" the kernel uses ")
-                .and_then(|(_, rest)| rest.split_once(" and eukhe"))
-                .map(|(path, _)| path)
-        })
-        .filter(|path| !path.is_empty())
+fn ready(line: &str) -> Option<&str> {
+    line.trim().strip_prefix("ready: ").map(str::trim).filter(|python| !python.is_empty())
 }
 
 fn failure(lines: &[String], code: Option<i32>) -> String {

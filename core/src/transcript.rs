@@ -646,7 +646,7 @@ pub(crate) fn classify(name: &str, args: &Value) -> ToolKind {
         "edit" | "write" => ToolKind::Edit,
         "grep" | "glob" | "find" | "search" => ToolKind::Search,
         "bash" => ToolKind::Command,
-        "ipython" => {
+        "python" | "ipython" => {
             let code = args.get("code").and_then(Value::as_str).unwrap_or_default();
             if code.contains("rlm.spawn") {
                 ToolKind::Agent
@@ -669,7 +669,7 @@ pub(crate) fn summarize(name: &str, args: &Value) -> String {
         "edit" => text("input").map(edited_paths).filter(|paths| !paths.is_empty()),
         "grep" => text("pattern").map(str::to_string),
         "glob" => text("pattern").or_else(|| text("path")).map(str::to_string),
-        "ipython" => {
+        "python" | "ipython" => {
             if text("code").is_some_and(|code| code.contains("rlm.spawn")) {
                 text("i").map(str::to_string)
             } else {
