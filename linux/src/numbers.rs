@@ -267,6 +267,16 @@ pub fn loaded(milliseconds: i64) -> String {
     format!("Loaded {} {unit}{plural} ago", count(amount.unsigned_abs()))
 }
 
+pub fn ago(milliseconds: i64) -> String {
+    let seconds = (crate::format::now_ms() - milliseconds).max(0) / 1000;
+    match seconds {
+        0..=59 => format!("{seconds} s ago"),
+        60..=3599 => format!("{} min ago", seconds / 60),
+        3600..=86_399 => format!("{} h ago", seconds / 3600),
+        _ => format!("{} d ago", seconds / 86_400),
+    }
+}
+
 pub fn gigabytes(bytes: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let value = bytes as f64 / 1_073_741_824.0;

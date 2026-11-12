@@ -4,7 +4,10 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::glib;
-use local_studio_core::{LocalAction, LocalController, LocalRecord, LocalShare, LocalSnapshot, LocalUsage};
+use local_studio_core::{
+    LocalAction, LocalController, LocalEndpoint, LocalEngineState, LocalMachineStatus, LocalRecord, LocalShare,
+    LocalSnapshot, LocalUsage,
+};
 
 use crate::app::App;
 use crate::format;
@@ -178,7 +181,7 @@ impl Inner {
             group.add(&adw::ActionRow::builder().title("Loading machines…").build());
             return group;
         };
-        if snapshot.controllers.is_empty() {
+        if !snapshot.controllers.iter().any(|controller| controller.has_controller) {
             group.add(
                 &adw::ActionRow::builder()
                     .title("No machines yet")
@@ -186,37 +189,27 @@ impl Inner {
                     .build(),
             );
         }
-        for controller in &snapshot.controllers {
+        for controller in snapshot.controllers.iter().filter(|controller| controller.has_controller) {
             group.add(&self.controller_row(controller));
         }
         group
     }
 
     fn controller_row(self: &Rc<Self>, controller: &LocalController) -> adw::ExpanderRow {
-        let loading = controller.jobs.iter().find(|job| !job.failed);
-        let (dot, subtitle) = if !controller.reachable {
-            ("offline", controller.error.clone().unwrap_or_else(|| "Offline".to_string()))
-        } else if let Some(job) = loading {
-            ("loading", format!("Loading {} · {}", job.recipe_id, job.detail))
-        } else if controller.endpoints.iter().any(|endpoint| endpoint.live) {
-            (
-                "serving",
-                controller
-                    .endpoints
-                    .iter()
-                    .flat_map(|endpoint| endpoint.models.iter().cloned())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            )
-        } else {
-            ("idle", "No model loaded".to_string())
+        let dot = match controller.status {
+            LocalMachineStatus::Offline => "offline",
+            LocalMachineStatus::Loading => "loading",
+            LocalMachineStatus::Serving if controller.endpoints.iter().any(|endpoint| endpoint.stale) => "unreachable",
+            LocalMachineStatus::Serving => "serving",
+            LocalMachineStatus::EngineUnreachable => "unreachable",
+            LocalMachineStatus::NoModel => "idle",
         };
+        let subtitle = &controller.summary;
         let mut title = format::escape(&controller.name);
         if controller.local {
             title.push_str("  <span size=\"small\" alpha=\"55%\">this machine</span>");
         }
-        let row =
-            adw::ExpanderRow::builder().title(title).subtitle(format::escape(&subtitle)).subtitle_lines(1).build();
+        let row = adw::ExpanderRow::builder().title(title).subtitle(format::escape(subtitle)).subtitle_lines(1).build();
         let status = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         status.add_css_class("ls-dot");
         status.add_css_class(dot);
@@ -241,7 +234,7 @@ impl Inner {
             row.add_row(&child);
         }
         for endpoint in &controller.endpoints {
-            row.add_row(&self.endpoint_row(controller, endpoint.port, &endpoint.models.join(", "), endpoint.live));
+            row.add_row(&self.endpoint_row(controller, endpoint));
         }
         for job in &controller.jobs {
             row.add_row(&self.job_row(controller, job));
@@ -261,17 +254,29 @@ impl Inner {
         row
     }
 
-    fn endpoint_row(
-        self: &Rc<Self>,
-        controller: &LocalController,
-        port: u16,
-        models: &str,
-        live: bool,
-    ) -> adw::ActionRow {
-        let endpoint_row = adw::ActionRow::builder()
-            .title(format::escape(models))
-            .subtitle(format!(":{port}{}", if live { "" } else { " · starting" }))
-            .build();
+    fn endpoint_row(self: &Rc<Self>, controller: &LocalController, endpoint: &LocalEndpoint) -> adw::ActionRow {
+        let port = endpoint.port;
+        let state = match endpoint.state {
+            LocalEngineState::Loaded if endpoint.stale => " · not confirmed recently",
+            LocalEngineState::Loaded => "",
+            LocalEngineState::Empty => " · no model loaded",
+            LocalEngineState::Unreachable => " · not answering",
+        };
+        let place = if endpoint.controller_id.is_empty() { endpoint.address.clone() } else { format!(":{port}") };
+        let mut subtitle = format!("{place}{state}");
+        if let Some(error) =
+            endpoint.error.as_deref().filter(|_| endpoint.state != LocalEngineState::Loaded || endpoint.stale)
+        {
+            subtitle.push_str(" · ");
+            subtitle.push_str(error);
+        }
+        let models =
+            if endpoint.models.is_empty() { "No models listed".to_string() } else { endpoint.models.join(", ") };
+        let endpoint_row =
+            adw::ActionRow::builder().title(format::escape(&models)).subtitle(format::escape(&subtitle)).build();
+        if endpoint.state != LocalEngineState::Loaded || endpoint.controller_id.is_empty() {
+            return endpoint_row;
+        }
         let armed_key = format!("{}:{port}", controller.target);
         let armed = self.armed.borrow().as_deref() == Some(armed_key.as_str());
         let unload = gtk::Button::with_label(if armed { "Confirm unload" } else { "Unload" });
@@ -357,7 +362,10 @@ impl Inner {
         let ids: Vec<String> = ready.iter().map(|recipe| recipe.id.clone()).collect();
         let weak = Rc::downgrade(self);
         let target = controller.target.clone();
-        let replace = !controller.endpoints.is_empty();
+        let replace = controller
+            .endpoints
+            .iter()
+            .any(|endpoint| endpoint.state == LocalEngineState::Loaded && !endpoint.controller_id.is_empty());
         let picker = combo.clone();
         load.connect_clicked(move |button| {
             let Some(fleet) = weak.upgrade() else { return };

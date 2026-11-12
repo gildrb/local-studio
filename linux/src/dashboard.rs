@@ -4,10 +4,14 @@ use std::rc::{Rc, Weak};
 
 use adw::prelude::*;
 use gtk::{glib, pango};
-use local_studio_core::{LocalAction, LocalController, LocalDashboard, LocalGpuTelemetry, LocalRecipe};
+use local_studio_core::{
+    LocalAction, LocalController, LocalDashboard, LocalEndpoint, LocalEngineState, LocalGpuTelemetry,
+    LocalMachineStatus, LocalRecipe,
+};
 
 use crate::app::App;
 use crate::dashboard_charts::{Heatmap, Sparkline};
+use crate::dashboard_engines::{self as engines, ElsewhereLink, EngineView};
 use crate::dashboard_parts::{self as parts, label, Figure, FigureView, Hero, TokenSummary, Tone};
 use crate::format;
 use crate::numbers;
@@ -15,41 +19,19 @@ use crate::state::{Page, State};
 
 const DEFAULT_CONTROLLER: &str = "http://127.0.0.1:18091";
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Machine {
-    Serving,
-    Loading,
-    Idle,
-    Offline,
-}
-
-impl Machine {
-    fn of(controller: &LocalController) -> Self {
-        if !controller.reachable {
-            Self::Offline
-        } else if !controller.endpoints.is_empty() {
-            Self::Serving
-        } else if controller.jobs.iter().any(|job| !job.failed) {
-            Self::Loading
-        } else {
-            Self::Idle
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Serving => "serving",
-            Self::Loading => "loading",
-            Self::Idle => "idle",
-            Self::Offline => "offline",
-        }
-    }
+fn serving(controller: &LocalController) -> Vec<&LocalEndpoint> {
+    controller
+        .endpoints
+        .iter()
+        .filter(|endpoint| endpoint.state == LocalEngineState::Loaded && !endpoint.controller_id.is_empty())
+        .collect()
 }
 
 struct View {
     root: gtk::Box,
     model: gtk::Label,
     detail: gtk::Label,
+    elsewhere: ElsewhereLink,
     switch: adw::ButtonContent,
     switch_button: gtk::Button,
     stop: adw::ButtonContent,
@@ -66,17 +48,20 @@ struct View {
 impl View {
     #[allow(clippy::too_many_lines)]
     fn build(app: &Weak<App>) -> Self {
-        let model = label("No model loaded", &["ls-dash-model"]);
+        let model = label(" ", &["ls-dash-model"]);
         model.set_ellipsize(pango::EllipsizeMode::Middle);
         model.set_selectable(true);
         let detail = label(" ", &["dim-label", "ls-dash-label"]);
         detail.set_wrap(true);
         detail.set_lines(2);
         detail.set_ellipsize(pango::EllipsizeMode::End);
+        detail.set_selectable(true);
+        let elsewhere = ElsewhereLink::build(app);
         let titles = gtk::Box::new(gtk::Orientation::Vertical, 5);
         titles.set_hexpand(true);
         titles.append(&model);
         titles.append(&detail);
+        titles.append(&elsewhere.button);
         let switch =
             adw::ButtonContent::builder().icon_name("media-playlist-repeat-symbolic").label("Switch model…").build();
         let switch_button = parts::button(&switch, true);
@@ -135,6 +120,7 @@ impl View {
             root,
             model,
             detail,
+            elsewhere,
             switch,
             switch_button,
             stop,
@@ -150,20 +136,11 @@ impl View {
     }
 
     fn fill(&self, controller: &LocalController, dashboard: Option<&LocalDashboard>, loading: bool, unloading: bool) {
-        let endpoint = controller.endpoints.first();
-        let job = controller.jobs.first();
-        let model = endpoint.map(|endpoint| endpoint.models.join(", "));
-        self.model.set_label(&model.clone().unwrap_or_else(|| {
-            job.map_or_else(|| "No model loaded".to_string(), |job| format!("Loading {}", job.recipe_id))
-        }));
-        self.detail.set_label(&header_detail(controller, dashboard));
-        if job.is_some_and(|job| job.failed) && endpoint.is_none() {
-            self.detail.remove_css_class("dim-label");
-            self.detail.add_css_class("error");
-        } else {
-            self.detail.remove_css_class("error");
-            self.detail.add_css_class("dim-label");
-        }
+        let endpoint = serving(controller).first().copied();
+        self.model.set_label(&controller.headline);
+        self.detail.set_label(&header_detail(controller, endpoint, dashboard));
+        engines::set_tone(&self.detail, controller);
+        self.elsewhere.set(controller.elsewhere.as_ref());
         self.switch.set_label(if loading {
             "Switching…"
         } else if endpoint.is_none() {
@@ -172,7 +149,7 @@ impl View {
             "Switch model…"
         });
         self.switch_button.set_sensitive(!loading);
-        self.stop_button.set_visible(model.is_some());
+        self.stop_button.set_visible(endpoint.is_some());
         self.stop.set_label(if unloading { "Stopping…" } else { "Stop model…" });
         self.stop_button.set_sensitive(!unloading);
         let error = dashboard.and_then(|dashboard| dashboard.error.as_deref());
@@ -195,23 +172,20 @@ impl View {
     }
 }
 
-fn header_detail(controller: &LocalController, dashboard: Option<&LocalDashboard>) -> String {
-    if let Some(endpoint) = controller.endpoints.first() {
-        let loaded = dashboard
+fn header_detail(
+    controller: &LocalController,
+    endpoint: Option<&LocalEndpoint>,
+    dashboard: Option<&LocalDashboard>,
+) -> String {
+    let loaded = endpoint.filter(|endpoint| !endpoint.stale).and_then(|endpoint| {
+        dashboard
             .and_then(|dashboard| dashboard.engines.iter().find(|engine| engine.port == endpoint.port))
             .and_then(|engine| engine.loaded_at_ms)
-            .map_or_else(|| format!("Serving on port {}", endpoint.port), numbers::loaded);
-        let others = controller.endpoints.len() - 1;
-        return if others > 0 {
-            format!("{loaded} · {others} more engine{} running", if others == 1 { "" } else { "s" })
-        } else {
-            loaded
-        };
+    });
+    match loaded {
+        Some(at) => format!("{} · {}", numbers::loaded(at), controller.detail),
+        None => controller.detail.clone(),
     }
-    if let Some(job) = controller.jobs.first() {
-        return job.detail.clone();
-    }
-    format!("{} is idle. Load a model from the registry to serve it.", controller.name)
 }
 
 fn decode_hint(dashboard: Option<&LocalDashboard>) -> String {
@@ -368,13 +342,13 @@ pub struct LocalPage {
     notice: gtk::Label,
     tabs: gtk::Box,
     tab_buttons: RefCell<Vec<(String, gtk::ToggleButton)>>,
-    tab_keys: RefCell<Vec<(String, String, Machine)>>,
+    tab_keys: RefCell<Vec<(String, String, LocalMachineStatus)>>,
     stack: gtk::Stack,
     empty: adw::StatusPage,
     offline: adw::StatusPage,
     view: View,
+    engines: EngineView,
     selected: RefCell<Option<String>>,
-    last_models: RefCell<HashMap<String, String>>,
     shown: RefCell<Option<LocalController>>,
     desired: RefCell<Option<String>>,
     watching: RefCell<Option<String>>,
@@ -396,6 +370,7 @@ impl LocalPage {
         notice.set_margin_top(10);
         notice.set_visible(false);
         let view = View::build(&app);
+        let engines = EngineView::build(&app);
         let empty = adw::StatusPage::builder()
             .icon_name("network-server-symbolic")
             .title("Contacting the Local controller…")
@@ -406,6 +381,7 @@ impl LocalPage {
         let stack = gtk::Stack::new();
         stack.set_vhomogeneous(false);
         stack.add_named(&view.root, Some("dashboard"));
+        stack.add_named(&engines.root, Some("engines"));
         stack.add_named(&offline, Some("offline"));
         stack.add_named(&empty, Some("empty"));
         stack.set_visible_child_name("empty");
@@ -442,8 +418,8 @@ impl LocalPage {
             empty,
             offline,
             view,
+            engines,
             selected: RefCell::new(None),
-            last_models: RefCell::new(HashMap::new()),
             shown: RefCell::new(None),
             desired: RefCell::new(None),
             watching: RefCell::new(None),
@@ -523,41 +499,34 @@ impl LocalPage {
 
     pub fn render(&self, state: &State) {
         let controllers = state.local.as_ref().map_or(&[][..], |snapshot| snapshot.controllers.as_slice());
-        {
-            let mut last_models = self.last_models.borrow_mut();
-            for controller in controllers {
-                if let Some(model) = controller.endpoints.first().and_then(|endpoint| endpoint.models.first()) {
-                    last_models.insert(controller.url.clone(), model.clone());
-                }
-            }
-        }
         let current = self.current(controllers);
         self.render_bar(state, controllers, current);
         match current {
             None => self.render_empty(state),
+            Some(controller) if !controller.has_controller => {
+                self.engines.fill(controller);
+                self.stack.set_visible_child_name("engines");
+            }
             Some(controller) if controller.reachable => {
                 let dashboard = state.dashboard.as_ref().filter(|dashboard| dashboard.controller == controller.target);
                 let loading = self.is_pending(&format!("load:{}", controller.target));
-                let unloading = controller.endpoints.first().is_some_and(|endpoint| {
+                let unloading = serving(controller).first().is_some_and(|endpoint| {
                     self.is_pending(&format!("unload:{}:{}", controller.target, endpoint.port))
                 });
                 self.view.fill(controller, dashboard, loading, unloading);
                 self.stack.set_visible_child_name("dashboard");
             }
             Some(controller) => {
-                self.offline.set_title(&format!("{} is offline", controller.name));
-                let reconnect = "It shows live figures again once it reconnects.";
-                self.offline.set_description(Some(&format::escape(
-                    &match self.last_models.borrow().get(&controller.url) {
-                        Some(model) => format!("It last ran {model}. {reconnect}"),
-                        None => reconnect.to_string(),
-                    },
-                )));
+                self.offline.set_title(&controller.headline);
+                self.offline.set_description(Some(&format::escape(&controller.detail)));
                 self.stack.set_visible_child_name("offline");
             }
         }
-        self.desired
-            .replace(current.filter(|controller| controller.reachable).map(|controller| controller.target.clone()));
+        self.desired.replace(
+            current
+                .filter(|controller| controller.reachable && controller.has_controller)
+                .map(|controller| controller.target.clone()),
+        );
         self.shown.replace(current.cloned());
         self.watch(self.root.is_mapped());
     }
@@ -567,7 +536,7 @@ impl LocalPage {
         controllers
             .iter()
             .find(|controller| selected.as_deref() == Some(controller.url.as_str()))
-            .or_else(|| controllers.iter().find(|controller| controller.reachable && !controller.endpoints.is_empty()))
+            .or_else(|| controllers.iter().find(|controller| controller.status == LocalMachineStatus::Serving))
             .or_else(|| controllers.iter().find(|controller| controller.reachable))
             .or_else(|| controllers.first())
     }
@@ -588,9 +557,9 @@ impl LocalPage {
             .and_then(|snapshot| snapshot.error.as_deref());
         self.notice.set_visible(error.is_some());
         self.notice.set_label(error.unwrap_or_default());
-        let keys: Vec<(String, String, Machine)> = controllers
+        let keys: Vec<(String, String, LocalMachineStatus)> = controllers
             .iter()
-            .map(|controller| (controller.url.clone(), controller.name.clone(), Machine::of(controller)))
+            .map(|controller| (controller.url.clone(), controller.name.clone(), controller.status))
             .collect();
         if *self.tab_keys.borrow() != keys {
             self.rebuild_tabs(&keys);
@@ -603,21 +572,20 @@ impl LocalPage {
         self.building.set(false);
     }
 
-    fn rebuild_tabs(&self, keys: &[(String, String, Machine)]) {
+    fn rebuild_tabs(&self, keys: &[(String, String, LocalMachineStatus)]) {
         while let Some(child) = self.tabs.first_child() {
             self.tabs.remove(&child);
         }
         let mut buttons: Vec<(String, gtk::ToggleButton)> = Vec::new();
-        for (url, name, machine) in keys {
-            let dot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-            dot.add_css_class("ls-machine-dot");
-            dot.add_css_class(machine.label());
-            dot.set_valign(gtk::Align::Center);
+        for (url, name, status) in keys {
             let content = gtk::Box::new(gtk::Orientation::Horizontal, 7);
-            content.append(&dot);
+            content.append(&engines::dot(*status));
             content.append(&gtk::Label::new(Some(name.as_str())));
             let button = parts::tab(&content);
-            button.update_property(&[gtk::accessible::Property::Label(&format!("{name}, {}", machine.label()))]);
+            button.update_property(&[gtk::accessible::Property::Label(&format!(
+                "{name}, {}",
+                engines::status_label(*status)
+            ))]);
             if let Some((_, leader)) = buttons.first() {
                 button.set_group(Some(leader));
             }
@@ -653,7 +621,7 @@ impl LocalPage {
     fn open_switch(&self, app: &Rc<App>) {
         let Some(controller) = self.shown.borrow().clone() else { return };
         let ready: Vec<LocalRecipe> = controller.recipes.iter().filter(|recipe| recipe.fits).cloned().collect();
-        let replacing = !controller.endpoints.is_empty();
+        let replacing = !serving(&controller).is_empty();
         let heading = if replacing {
             format!("Switch the model on {}", controller.name)
         } else {
@@ -670,7 +638,7 @@ impl LocalPage {
             }
         } else if replacing {
             let models: Vec<String> =
-                controller.endpoints.iter().flat_map(|endpoint| endpoint.models.iter().cloned()).collect();
+                serving(&controller).iter().flat_map(|endpoint| endpoint.models.iter().cloned()).collect();
             format!("Switching stops {} first; its requests in flight end.", models.join(", "))
         } else {
             String::new()
@@ -699,7 +667,7 @@ impl LocalPage {
 
     fn confirm_stop(&self, app: &Rc<App>) {
         let Some(controller) = self.shown.borrow().clone() else { return };
-        let Some(endpoint) = controller.endpoints.first() else { return };
+        let Some(endpoint) = serving(&controller).first().copied().cloned() else { return };
         let model = endpoint.models.join(", ");
         let running = app
             .state

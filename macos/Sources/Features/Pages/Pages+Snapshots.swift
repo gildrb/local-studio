@@ -107,6 +107,18 @@ extension SnapshotCatalog {
                 view: { store in AnyView(LocalPage(store: store)) }
             ),
             SnapshotEntry(
+                name: "pages-local-elsewhere",
+                size: dashboardSize,
+                updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.engineSnapshot)],
+                view: { store in AnyView(LocalPage(store: store, selected: PagesFixtures.rtxPod.url)) }
+            ),
+            SnapshotEntry(
+                name: "pages-local-engine-machine",
+                size: CGSize(width: 1100, height: 640),
+                updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.engineSnapshot)],
+                view: { store in AnyView(LocalPage(store: store)) }
+            ),
+            SnapshotEntry(
                 name: "pages-local-unreachable",
                 size: CGSize(width: 1000, height: 560),
                 updates: PagesFixtures.base + [.local(request: "fixture", snapshot: PagesFixtures.offlineSnapshot)],
@@ -448,7 +460,7 @@ extension SnapshotCatalog {
         store.pages.refreshLocal()
         pump(90) { store.pages.local != nil || store.pages.localError != nil }
         let controllers = store.pages.local?.controllers ?? []
-        guard let machine = controllers.first(where: { $0.reachable && !$0.endpoints.isEmpty }) ?? controllers.first(where: \.reachable) else {
+        guard let machine = controllers.first(where: { $0.hasController && $0.status == .serving }) ?? controllers.first(where: { $0.hasController && $0.reachable }) else {
             store.stop()
             return
         }
