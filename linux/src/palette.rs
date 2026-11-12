@@ -1,8 +1,8 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::{gdk, gio, glib};
+use gtk::{gdk, gio, glib, graphene};
 
 use crate::app::App;
 use crate::format;
@@ -28,21 +28,38 @@ impl Entry {
 }
 
 pub fn open(app: &Rc<App>) {
-    let entries = entries(&app.state.borrow());
-    let dialog = adw::Dialog::builder().title("Command Palette").content_width(600).content_height(460).build();
-    let search =
-        gtk::SearchEntry::builder().placeholder_text("Search actions, threads and projects").hexpand(true).build();
+    let mut entries = entries(&app.state.borrow());
+    entries.retain(|entry| enabled(app, &entry.action));
+    let search = gtk::SearchEntry::builder()
+        .placeholder_text("Search actions, threads and projects")
+        .search_delay(0)
+        .hexpand(true)
+        .build();
+    search.add_css_class("ls-palette-search");
     let list = gtk::ListBox::new();
-    list.add_css_class("navigation-sidebar");
-    list.set_selection_mode(gtk::SelectionMode::Browse);
-    let scroller =
-        gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&list).build();
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&search));
-    let view = adw::ToolbarView::new();
-    view.add_top_bar(&header);
-    view.set_content(Some(&scroller));
-    dialog.set_child(Some(&view));
+    list.add_css_class("ls-palette-list");
+    list.set_selection_mode(gtk::SelectionMode::Single);
+    list.set_focusable(false);
+    let scroller = gtk::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk::PolicyType::Never)
+        .propagate_natural_height(true)
+        .max_content_height(400)
+        .child(&list)
+        .build();
+    let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    column.set_size_request(600, -1);
+    column.append(&search);
+    column.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+    column.append(&scroller);
+    let popover =
+        gtk::Popover::builder().child(&column).has_arrow(false).position(gtk::PositionType::Bottom).build();
+    popover.add_css_class("ls-palette");
+    popover.set_parent(&app.toasts);
+    popover.set_pointing_to(Some(&gdk::Rectangle::new(app.toasts.width() / 2, 60, 1, 1)));
+    popover.connect_closed(|popover| {
+        let popover = popover.clone();
+        glib::idle_add_local_once(move || popover.unparent());
+    });
 
     let visible: Rc<RefCell<Vec<Entry>>> = Rc::default();
     let headers = Rc::clone(&visible);
@@ -63,31 +80,74 @@ pub fn open(app: &Rc<App>) {
             None => row.set_header(None::<&gtk::Widget>),
         }
     });
-    fill(&list, &entries, "", &visible);
+    fill(&list, &scroller, &entries, "", &visible);
     let refill_list = list.clone();
+    let refill_scroller = scroller.clone();
     let refill_visible = Rc::clone(&visible);
     search.connect_search_changed(move |search| {
-        fill(&refill_list, &entries, &search.text().to_lowercase(), &refill_visible);
+        fill(&refill_list, &refill_scroller, &entries, &search.text().to_lowercase(), &refill_visible);
     });
+
     let keys = gtk::EventControllerKey::new();
-    let move_list = list.clone();
-    keys.connect_key_pressed(move |_, key, _, _| {
-        let step = match key {
-            gdk::Key::Down => 1,
-            gdk::Key::Up => -1,
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let key_list = list.clone();
+    let key_scroller = scroller.clone();
+    let key_popover = popover.clone();
+    let key_visible = Rc::clone(&visible);
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
+        let current = key_list.selected_row().map_or(0, |row| row.index());
+        let last = i32::try_from(key_visible.borrow().len()).unwrap_or(i32::MAX) - 1;
+        let page = page_rows(&key_list, &key_scroller);
+        let target = match key {
+            gdk::Key::Escape => {
+                key_popover.popdown();
+                return glib::Propagation::Stop;
+            }
+            gdk::Key::Down | gdk::Key::KP_Down => current + 1,
+            gdk::Key::Up | gdk::Key::KP_Up => current - 1,
+            gdk::Key::n | gdk::Key::N if control => current + 1,
+            gdk::Key::p | gdk::Key::P if control => current - 1,
+            gdk::Key::Page_Down | gdk::Key::KP_Page_Down => current + page,
+            gdk::Key::Page_Up | gdk::Key::KP_Page_Up => current - page,
+            gdk::Key::Home | gdk::Key::KP_Home => 0,
+            gdk::Key::End | gdk::Key::KP_End => last,
             _ => return glib::Propagation::Proceed,
         };
-        let current = move_list.selected_row().map_or(-1, |row| row.index());
-        if let Some(row) = move_list.row_at_index((current + step).max(0)) {
-            move_list.select_row(Some(&row));
-            row.grab_focus();
+        if last >= 0 {
+            select(&key_list, &key_scroller, target.clamp(0, last));
         }
         glib::Propagation::Stop
     });
     search.add_controller(keys);
+
+    let pointer: Rc<Cell<Option<(f64, f64)>>> = Rc::default();
+    let motion = gtk::EventControllerMotion::new();
+    let resting = Rc::clone(&pointer);
+    motion.connect_enter(move |_, x, y| {
+        resting.set(Some((x, y)));
+    });
+    let hover_list = list.clone();
+    let hover_column = column.clone();
+    motion.connect_motion(move |_, x, y| {
+        let previous = pointer.replace(Some((x, y)));
+        if previous.is_none_or(|point| point == (x, y)) {
+            return;
+        }
+        #[allow(clippy::cast_possible_truncation)]
+        let point = graphene::Point::new(x as f32, y as f32);
+        let Some(point) = hover_column.compute_point(&hover_list, &point) else { return };
+        #[allow(clippy::cast_possible_truncation)]
+        let row = hover_list.row_at_y(point.y() as i32);
+        if let Some(row) = row.filter(|row| !row.is_selected()) {
+            hover_list.select_row(Some(&row));
+        }
+    });
+    column.add_controller(motion);
+
     let weak = Rc::downgrade(app);
-    let run = Rc::new(move |dialog: &adw::Dialog, entry: &Entry| {
-        dialog.close();
+    let run = Rc::new(move |popover: &gtk::Popover, entry: &Entry| {
+        popover.popdown();
         if let Some(app) = weak.upgrade() {
             let detailed = format!("win.{}", entry.action);
             let (name, parsed) = gio::Action::parse_detailed_name(&detailed)
@@ -98,38 +158,74 @@ pub fn open(app: &Rc<App>) {
     });
     let activate_list = list.clone();
     let activate_visible = Rc::clone(&visible);
-    let activate_dialog = dialog.clone();
+    let activate_popover = popover.clone();
     let activate_run = Rc::clone(&run);
     search.connect_activate(move |_| {
         let index = activate_list.selected_row().map_or(0, |row| row.index());
         let entry = usize::try_from(index).ok().and_then(|index| activate_visible.borrow().get(index).cloned());
         if let Some(entry) = entry {
-            activate_run(&activate_dialog, &entry);
+            activate_run(&activate_popover, &entry);
         }
     });
-    let row_dialog = dialog.clone();
+    let row_popover = popover.clone();
     list.connect_row_activated(move |_, row| {
         let entry = usize::try_from(row.index()).ok().and_then(|index| visible.borrow().get(index).cloned());
         if let Some(entry) = entry {
-            run(&row_dialog, &entry);
+            run(&row_popover, &entry);
         }
     });
-    dialog.present(Some(&app.window));
+    popover.popup();
     search.grab_focus();
 }
 
-fn fill(list: &gtk::ListBox, entries: &[Entry], query: &str, visible: &Rc<RefCell<Vec<Entry>>>) {
+fn enabled(app: &App, action: &str) -> bool {
+    let name = action.split("::").next().unwrap_or(action);
+    app.window.lookup_action(name).is_some_and(|action| action.is_enabled())
+}
+
+fn page_rows(list: &gtk::ListBox, scroller: &gtk::ScrolledWindow) -> i32 {
+    let height = list.row_at_index(0).map_or(1, |row| row.height().max(1));
+    #[allow(clippy::cast_possible_truncation)]
+    let rows = (scroller.vadjustment().page_size() / f64::from(height)).floor() as i32;
+    rows.max(1)
+}
+
+fn select(list: &gtk::ListBox, scroller: &gtk::ScrolledWindow, index: i32) {
+    let Some(row) = list.row_at_index(index) else { return };
+    list.select_row(Some(&row));
+    let Some(bounds) = row.compute_bounds(list) else { return };
+    let adjustment = scroller.vadjustment();
+    let header = row.header().map_or(0, |header| header.height());
+    let top = f64::from(bounds.y()) - f64::from(header);
+    let bottom = f64::from(bounds.y() + bounds.height());
+    let (value, page) = (adjustment.value(), adjustment.page_size());
+    if index == 0 || top < value {
+        adjustment.set_value(if index == 0 { 0.0 } else { top });
+    } else if bottom > value + page {
+        adjustment.set_value(bottom - page);
+    }
+}
+
+fn fill(
+    list: &gtk::ListBox,
+    scroller: &gtk::ScrolledWindow,
+    entries: &[Entry],
+    query: &str,
+    visible: &Rc<RefCell<Vec<Entry>>>,
+) {
     list.remove_all();
     let matched: Vec<Entry> = entries.iter().filter(|entry| entry.matches(query)).take(80).cloned().collect();
     visible.borrow_mut().clone_from(&matched);
     for entry in &matched {
         let row = adw::ActionRow::builder().title(format::escape(&entry.title)).activatable(true).build();
+        row.set_focusable(false);
         if !entry.subtitle.is_empty() {
             row.set_subtitle(&format::escape(&entry.subtitle));
         }
         list.append(&row);
     }
     list.invalidate_headers();
+    scroller.vadjustment().set_value(0.0);
     if let Some(first) = list.row_at_index(0) {
         list.select_row(Some(&first));
     }
