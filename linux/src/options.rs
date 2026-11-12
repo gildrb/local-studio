@@ -5,6 +5,7 @@ use local_studio_core::{Goal, ModelKey};
 
 use crate::app::App;
 use crate::format;
+use crate::icons;
 use crate::picker::{Picker, Row, Spec};
 use crate::state::State;
 
@@ -41,19 +42,15 @@ impl Options {
         body.append(&hint);
         body.append(&compare_list);
         let popover = gtk::Popover::builder().child(&body).build();
-        let compare = gtk::MenuButton::builder()
-            .icon_name("view-dual-symbolic")
-            .tooltip_text("Compare Models (fan out)")
-            .popover(&popover)
-            .build();
+        let compare = gtk::MenuButton::builder().icon_name(icons::SPLIT).popover(&popover).build();
+        icons::describe(&compare, "Compare Models (fan out)");
         compare.add_css_class("flat");
         let tier = tier_picker(app);
         tier.button.set_visible(false);
         let goal = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         goal.add_css_class("ls-goal");
         goal.set_visible(false);
-        let icon = gtk::Image::from_icon_name("mark-location-symbolic");
-        icon.add_css_class("accent");
+        let icon = icons::styled(icons::GOAL, "accent");
         let goal_label = gtk::Label::new(None);
         goal_label.set_xalign(0.0);
         goal_label.set_hexpand(true);
@@ -117,7 +114,7 @@ impl Options {
             self.compare.set_label(&format!("+{count}"));
             self.compare.add_css_class("ls-compare-on");
         } else {
-            self.compare.set_icon_name("view-dual-symbolic");
+            self.compare.set_icon_name(icons::SPLIT);
             self.compare.remove_css_class("ls-compare-on");
         }
         while let Some(child) = self.compare_list.first_child() {
@@ -143,7 +140,7 @@ impl Options {
                     app.composer.options.compare.set_label(&format!("+{count}"));
                     app.composer.options.compare.add_css_class("ls-compare-on");
                 } else {
-                    app.composer.options.compare.set_icon_name("view-dual-symbolic");
+                    app.composer.options.compare.set_icon_name(icons::SPLIT);
                     app.composer.options.compare.remove_css_class("ls-compare-on");
                 }
             });

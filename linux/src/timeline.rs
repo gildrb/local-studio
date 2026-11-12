@@ -8,6 +8,7 @@ use local_studio_core::{Block, FileChange, Item, ItemKind, TranscriptOp};
 
 use crate::app::App;
 use crate::format;
+use crate::icons;
 use crate::markdown::Views;
 
 const THINKING_KEY: u64 = 1 << 63;
@@ -90,7 +91,7 @@ impl Timeline {
         let follow = Rc::new(Cell::new(true));
         let pill = gtk::Button::builder().tooltip_text("Scroll to End").build();
         let pill_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        pill_box.append(&gtk::Image::from_icon_name("go-down-symbolic"));
+        pill_box.append(&icons::image(icons::DOWN));
         pill_box.append(&gtk::Label::new(Some("Scroll to end")));
         pill.set_child(Some(&pill_box));
         pill.add_css_class("osd");
@@ -453,7 +454,11 @@ fn item_widget(app: &Weak<App>, item: &Item, expanded: &HashSet<u64>, views: &Re
             let open = expanded.contains(&item.id);
             let header = toggle_row(app, item.id, format::tool_icon(*kind), title, open, "ls-tool");
             if let Some((icon, class)) = format::tool_state(*state) {
-                header.1.insert_child_after(&small_icon(icon, class), Some(&header.2));
+                let image = icons::image(icon);
+                if let Some(class) = class {
+                    image.add_css_class(class);
+                }
+                header.1.insert_child_after(&image, Some(&header.2));
             }
             if let Some(change) = file_change {
                 header.1.insert_child_after(&diff_stat(change.additions, change.deletions), Some(&header.2));
@@ -498,7 +503,7 @@ fn item_widget(app: &Weak<App>, item: &Item, expanded: &HashSet<u64>, views: &Re
         ItemKind::Notice { level, text } => {
             let (icon, class) = format::notice(*level);
             let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-            row.append(&small_icon(icon, class));
+            row.append(&icons::styled(icon, class));
             let label = wrapped_label(&format::escape(text));
             label.add_css_class(class);
             row.append(&label);
@@ -517,7 +522,7 @@ fn item_widget(app: &Weak<App>, item: &Item, expanded: &HashSet<u64>, views: &Re
                 gtk::Label::new(Some(&format!("Context compacted · {} tokens", format::tokens(*tokens_before))));
             label.set_tooltip_text(Some(summary));
             row.append(&left);
-            row.append(&small_icon("view-restore-symbolic", "dim-label"));
+            row.append(&icons::styled(icons::COMPACTED, "dim-label"));
             row.append(&label);
             row.append(&right);
             row.upcast()
@@ -579,14 +584,12 @@ fn user_widget(
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     actions.add_css_class("ls-row-actions");
     actions.set_halign(gtk::Align::End);
-    let copy = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text("Copy").build();
-    copy.add_css_class("flat");
+    let copy = icons::flat(icons::COPY, "Copy");
     let copied = text.to_string();
     copy.connect_clicked(move |button| button.clipboard().set_text(&copied));
     actions.append(&copy);
     if let Some(entry) = entry {
-        let edit = gtk::Button::builder().icon_name("edit-undo-symbolic").tooltip_text("Edit from Here").build();
-        edit.add_css_class("flat");
+        let edit = icons::flat(icons::EDIT, "Edit from Here");
         let weak = app.clone();
         let entry = entry.to_string();
         edit.connect_clicked(move |_| {
@@ -718,14 +721,14 @@ fn toggle_row(
 ) -> (gtk::Button, gtk::Box, gtk::Label) {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     if !icon.is_empty() {
-        row.append(&small_icon(icon, "dim-label"));
+        row.append(&icons::image(icon));
     }
     let label = gtk::Label::new(Some(text));
     label.set_xalign(0.0);
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     label.set_hexpand(true);
     row.append(&label);
-    row.append(&small_icon(if open { "pan-down-symbolic" } else { "pan-end-symbolic" }, "dim-label"));
+    row.append(&icons::image(if open { icons::EXPANDED } else { icons::COLLAPSED }));
     let button = gtk::Button::builder().child(&row).build();
     button.add_css_class("flat");
     button.add_css_class(class);
@@ -845,11 +848,8 @@ fn minimap(list: &gtk::ListView, scroller: &gtk::ScrolledWindow) -> (gtk::Box, g
     column.set_margin_top(8);
     column.set_margin_bottom(70);
     column.set_margin_end(18);
-    for (icon, tooltip, forward) in
-        [("go-up-symbolic", "Previous Message", false), ("go-down-symbolic", "Next Message", true)]
-    {
-        let button = gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).build();
-        button.add_css_class("flat");
+    for (icon, tooltip, forward) in [(icons::UP, "Previous Message", false), (icons::DOWN, "Next Message", true)] {
+        let button = icons::flat(icon, tooltip);
         button.add_css_class("ls-minimap-button");
         let (target, scroll) = (list.clone(), scroller.clone());
         button.connect_clicked(move |_| {
@@ -870,13 +870,6 @@ fn minimap(list: &gtk::ListView, scroller: &gtk::ScrolledWindow) -> (gtk::Box, g
         column.append(&button);
     }
     (column, area)
-}
-
-fn small_icon(name: &str, class: &str) -> gtk::Image {
-    let image = gtk::Image::from_icon_name(name);
-    image.set_pixel_size(14);
-    image.add_css_class(class);
-    image
 }
 
 fn install_keys(app: &Weak<App>, list: &gtk::ListView) {

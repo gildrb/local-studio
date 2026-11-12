@@ -6,6 +6,7 @@ use gtk::glib;
 use local_studio_core::{Branch, NewThreadWorkspace, WorktreeChoice};
 
 use crate::app::{App, Target};
+use crate::icons;
 use crate::picker::{Picker, Row, Spec};
 use crate::state::{Page, State};
 
@@ -96,7 +97,7 @@ impl BranchBar {
             let create = Pick::Create(query.clone());
             items.push(
                 Row::new(choices.len().to_string(), format!("Create branch “{query}”"))
-                    .icon("list-add-symbolic")
+                    .icon(icons::ADD)
                     .checked(pick == create),
             );
             choices.push(create);
@@ -133,11 +134,11 @@ impl BranchBar {
         }
         let worktree = self.worktree();
         self.mode.set_rows(vec![
-            Row::new(LOCAL, "Local checkout").icon("folder-symbolic").checked(!worktree),
-            Row::new(WORKTREE, "New worktree").icon("folder-new-symbolic").checked(worktree),
+            Row::new(LOCAL, "Local checkout").icon(icons::FOLDER).checked(!worktree),
+            Row::new(WORKTREE, "New worktree").icon(icons::FOLDER_NEW).checked(worktree),
         ]);
         self.mode.set_label(if worktree { "New worktree" } else { "Local checkout" });
-        self.mode.set_icon(Some(if worktree { "folder-new-symbolic" } else { "folder-symbolic" }));
+        self.mode.set_icon(Some(if worktree { icons::FOLDER_NEW } else { icons::FOLDER }));
         let current =
             project.as_deref().and_then(|project| state.git.get(project)).and_then(|status| status.branch.clone());
         if worktree {
@@ -248,7 +249,7 @@ fn branch_picker(app: Weak<App>) -> Picker {
         let state = app.state.borrow();
         app.branches.render(&state);
     });
-    picker.set_icon(Some("media-record-symbolic"));
+    picker.set_icon(Some(icons::BRANCH));
     picker.label.add_css_class("ls-mono");
     let weak = app.clone();
     picker.popover.connect_show(move |_| {

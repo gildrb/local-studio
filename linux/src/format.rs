@@ -3,6 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use gtk::glib;
 use local_studio_core::{AccessMode, NoticeLevel, ThreadStatus, ToolKind, ToolState};
 
+use crate::icons;
+
 pub const ACCESS_MODES: [AccessMode; 4] =
     [AccessMode::Supervised, AccessMode::AutoAcceptEdits, AccessMode::Auto, AccessMode::FullAccess];
 
@@ -96,41 +98,41 @@ pub fn access_index(mode: AccessMode) -> u32 {
 pub fn status(status: ThreadStatus) -> Option<(&'static str, &'static str, &'static str)> {
     match status {
         ThreadStatus::Idle => None,
-        ThreadStatus::Working => Some(("content-loading-symbolic", "Working", "status-working")),
-        ThreadStatus::Approval => Some(("dialog-question-symbolic", "Approval", "status-approval")),
-        ThreadStatus::Failed => Some(("dialog-error-symbolic", "Failed", "status-failed")),
-        ThreadStatus::Done => Some(("object-select-symbolic", "Done", "status-done")),
-        ThreadStatus::Woke => Some(("alarm-symbolic", "Woke", "status-woke")),
-        ThreadStatus::Monitoring => Some(("view-reveal-symbolic", "Monitoring", "status-monitoring")),
+        ThreadStatus::Working => Some((icons::WORKING, "Working", "status-working")),
+        ThreadStatus::Approval => Some((icons::APPROVAL, "Approval", "status-approval")),
+        ThreadStatus::Failed => Some((icons::ERROR, "Failed", "status-failed")),
+        ThreadStatus::Done => Some((icons::DONE, "Done", "status-done")),
+        ThreadStatus::Woke => Some((icons::TIME, "Woke", "status-woke")),
+        ThreadStatus::Monitoring => Some((icons::WATCH, "Monitoring", "status-monitoring")),
     }
 }
 
 pub fn tool_icon(kind: ToolKind) -> &'static str {
     match kind {
-        ToolKind::Read => "view-reveal-symbolic",
-        ToolKind::Edit => "document-edit-symbolic",
-        ToolKind::Command => "utilities-terminal-symbolic",
-        ToolKind::Search => "system-search-symbolic",
-        ToolKind::Web => "web-browser-symbolic",
-        ToolKind::Agent => "avatar-default-symbolic",
-        ToolKind::Other => "applications-engineering-symbolic",
+        ToolKind::Read => icons::WATCH,
+        ToolKind::Edit => icons::EDIT,
+        ToolKind::Command => icons::TERMINAL,
+        ToolKind::Search => icons::SEARCH,
+        ToolKind::Web => icons::WEB,
+        ToolKind::Agent => icons::AGENT,
+        ToolKind::Other => icons::TOOL,
     }
 }
 
-pub fn tool_state(state: ToolState) -> Option<(&'static str, &'static str)> {
+pub fn tool_state(state: ToolState) -> Option<(&'static str, Option<&'static str>)> {
     match state {
-        ToolState::Pending | ToolState::Running => Some(("content-loading-symbolic", "status-working")),
+        ToolState::Pending | ToolState::Running => Some((icons::WORKING, Some("status-working"))),
         ToolState::Succeeded => None,
-        ToolState::Failed => Some(("window-close-symbolic", "status-failed")),
-        ToolState::Aborted => Some(("media-playback-stop-symbolic", "dim-label")),
+        ToolState::Failed => Some((icons::ERROR, Some("status-failed"))),
+        ToolState::Aborted => Some((icons::STOP, None)),
     }
 }
 
 pub fn notice(level: NoticeLevel) -> (&'static str, &'static str) {
     match level {
-        NoticeLevel::Info => ("dialog-information-symbolic", "dim-label"),
-        NoticeLevel::Warning => ("dialog-warning-symbolic", "warning"),
-        NoticeLevel::Error => ("dialog-error-symbolic", "error"),
+        NoticeLevel::Info => (icons::INFO, "dim-label"),
+        NoticeLevel::Warning => (icons::WARNING, "warning"),
+        NoticeLevel::Error => (icons::ERROR, "error"),
     }
 }
 

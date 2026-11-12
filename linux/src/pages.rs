@@ -6,6 +6,7 @@ use local_studio_core::{UsageDay, UsagePeriod};
 
 use crate::app::App;
 use crate::dashboard_parts as parts;
+use crate::icons;
 use crate::state::State;
 use crate::usage_dashboard::{LimitsView, Metric, UsageView};
 
@@ -49,8 +50,7 @@ impl UsagePage {
         let limits = LimitsView::build();
         let loading = adw::StatusPage::builder().title("Loading usage…").build();
         loading.set_size_request(-1, 360);
-        let failure =
-            adw::StatusPage::builder().icon_name("dialog-warning-symbolic").title("Couldn’t load usage").build();
+        let failure = adw::StatusPage::builder().icon_name(icons::WARNING).title("Couldn’t load usage").build();
         failure.set_size_request(-1, 360);
         let stack = gtk::Stack::new();
         stack.set_vhomogeneous(false);

@@ -4,6 +4,7 @@ use adw::prelude::*;
 use gtk::{gdk, glib};
 
 use crate::app::App;
+use crate::icons;
 
 pub fn show(app: &Rc<App>, data: &[u8]) {
     let Ok(texture) = gdk::Texture::from_bytes(&glib::Bytes::from(data)) else {
@@ -16,7 +17,7 @@ pub fn show(app: &Rc<App>, data: &[u8]) {
     picture.set_vexpand(true);
     let view = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
-    let copy = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text("Copy Image").build();
+    let copy = icons::button(icons::COPY, "Copy Image");
     let copied = texture.clone();
     copy.connect_clicked(move |button| button.clipboard().set_texture(&copied));
     header.pack_start(&copy);

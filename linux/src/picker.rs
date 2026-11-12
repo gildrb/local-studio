@@ -6,6 +6,7 @@ use adw::prelude::*;
 use gtk::{gdk, glib, pango};
 
 use crate::app::{App, Dirty};
+use crate::icons;
 use crate::state::State;
 
 type Handler = Box<dyn Fn(&str)>;
@@ -128,6 +129,7 @@ struct Inner {
 impl Picker {
     pub fn new(spec: &Spec, choose: impl Fn(&str) + 'static) -> Self {
         let icon = gtk::Image::new();
+        icon.set_pixel_size(icons::SIZE);
         icon.set_visible(false);
         let label = gtk::Label::new(None);
         label.set_ellipsize(pango::EllipsizeMode::Middle);
@@ -488,8 +490,7 @@ impl Inner {
         }
         widget.set_sensitive(!row.disabled);
         if let Some(icon) = row.icon {
-            let image = gtk::Image::from_icon_name(icon);
-            image.add_css_class("ls-picker-icon");
+            let image = icons::styled(icon, "ls-picker-icon");
             image.set_valign(if tall { gtk::Align::Start } else { gtk::Align::Center });
             widget.append(&image);
         }
@@ -499,8 +500,7 @@ impl Inner {
             label.add_css_class("ls-picker-detail");
             widget.append(&label);
         }
-        let check = gtk::Image::from_icon_name("object-select-symbolic");
-        check.add_css_class("ls-picker-check");
+        let check = icons::styled(icons::DONE, "ls-picker-check");
         check.set_opacity(if row.checked { 1.0 } else { 0.0 });
         widget.append(&check);
         if row.removable {
@@ -532,14 +532,10 @@ impl Inner {
     }
 
     fn remove_button(self: &Rc<Self>, id: &str) -> gtk::Button {
-        let button = gtk::Button::builder()
-            .icon_name("window-close-symbolic")
-            .tooltip_text("Discard")
-            .valign(gtk::Align::Center)
-            .focusable(false)
-            .focus_on_click(false)
-            .build();
-        button.add_css_class("flat");
+        let button = icons::flat(icons::CLOSE, "Discard");
+        button.set_valign(gtk::Align::Center);
+        button.set_focusable(false);
+        button.set_focus_on_click(false);
         button.add_css_class("ls-picker-remove");
         let weak = Rc::downgrade(self);
         let id = id.to_string();
@@ -598,7 +594,7 @@ pub fn projects(app: &Weak<App>) -> Picker {
         app.branches.reset();
         app.render(Dirty::all());
     });
-    picker.set_icon(Some("folder-symbolic"));
+    picker.set_icon(Some(icons::FOLDER));
     picker
 }
 
@@ -610,19 +606,14 @@ pub fn render_projects(picker: &Picker, state: &State) {
         .iter()
         .map(|project| {
             Row::new(&project.id, &project.name)
-                .icon("folder-symbolic")
+                .icon(icons::FOLDER)
                 .subtitle(tilde(&home, &project.path))
                 .checked(current == Some(project.id.as_str()))
                 .section("Projects")
         })
         .collect();
-    rows.push(
-        Row::new(NO_PROJECT, "No project")
-            .icon("action-unavailable-symbolic")
-            .checked(current.is_none())
-            .section("Projects"),
-    );
-    rows.push(Row::new(ADD_PROJECT, "Add Project…").icon("list-add-symbolic"));
+    rows.push(Row::new(NO_PROJECT, "No project").icon(icons::NONE).checked(current.is_none()).section("Projects"));
+    rows.push(Row::new(ADD_PROJECT, "Add Project…").icon(icons::FOLDER_NEW));
     picker.set_rows(rows);
     let name = current.and_then(|project| state.project_name(Some(project)));
     picker.set_label(name.as_deref().unwrap_or("No project"));

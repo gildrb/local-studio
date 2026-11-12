@@ -23,6 +23,7 @@ mod format;
 mod goto;
 mod header;
 mod highlight;
+mod icons;
 mod images;
 mod keyboard;
 mod markdown;

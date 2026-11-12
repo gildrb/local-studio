@@ -8,6 +8,7 @@ use local_studio_core::{AccessMode, ApprovalAnswer, Connection, ModelKey, Prompt
 use crate::app::{App, Dirty};
 use crate::extras::Extras;
 use crate::format;
+use crate::icons;
 use crate::picker::{Picker, Row, Spec};
 use crate::state::State;
 
@@ -59,8 +60,7 @@ impl Composer {
         approval.add_css_class("ls-approval");
         approval.set_visible(false);
         let approval_top = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        let shield = gtk::Image::from_icon_name("dialog-question-symbolic");
-        shield.add_css_class("status-approval");
+        let shield = icons::styled(icons::APPROVAL, "status-approval");
         let approval_kind = gtk::Label::new(None);
         approval_kind.add_css_class("kind");
         approval_kind.set_xalign(0.0);
@@ -135,11 +135,10 @@ impl Composer {
         )));
         let thinking = thinking_picker(&app);
         let access = access_picker(&app);
-        let stop =
-            gtk::Button::builder().icon_name("media-playback-stop-symbolic").tooltip_text("Stop Generation").build();
+        let stop = icons::button(icons::STOP, "Stop Generation");
         stop.add_css_class("ls-stop");
         stop.set_visible(false);
-        let send = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text("Send Message").build();
+        let send = icons::button(icons::UP, "Send Message");
         send.add_css_class("ls-send");
         send.add_css_class("suggested-action");
         let extras = Extras::new(app.clone());
@@ -644,10 +643,10 @@ fn access_rows(current: AccessMode) -> Vec<Row> {
 
 fn access_icon(mode: AccessMode) -> &'static str {
     match mode {
-        AccessMode::Supervised => "changes-prevent-symbolic",
-        AccessMode::AutoAcceptEdits => "document-edit-symbolic",
-        AccessMode::Auto => "emblem-ok-symbolic",
-        AccessMode::FullAccess => "changes-allow-symbolic",
+        AccessMode::Supervised => icons::LOCKED,
+        AccessMode::AutoAcceptEdits => icons::EDIT,
+        AccessMode::Auto => icons::RUN,
+        AccessMode::FullAccess => icons::UNLOCKED,
     }
 }
 
@@ -664,8 +663,7 @@ fn sending_row(text: &str) -> gtk::Widget {
     row.add_css_class("ls-bubble");
     row.add_css_class("queued");
     row.set_halign(gtk::Align::End);
-    let icon = gtk::Image::from_icon_name("alarm-symbolic");
-    icon.add_css_class("dim-label");
+    let icon = icons::styled(icons::TIME, "dim-label");
     row.append(&icon);
     let label = gtk::Label::new(Some(text));
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -683,8 +681,7 @@ fn queued_row(app: &Weak<App>, state: &State, id: &str, text: &str, sending: boo
     row.add_css_class("ls-bubble");
     row.add_css_class("queued");
     row.set_halign(gtk::Align::End);
-    let icon = gtk::Image::from_icon_name("alarm-symbolic");
-    icon.add_css_class("dim-label");
+    let icon = icons::styled(icons::TIME, "dim-label");
     row.append(&icon);
     let label = gtk::Label::new(Some(text));
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -702,10 +699,9 @@ fn queued_row(app: &Weak<App>, state: &State, id: &str, text: &str, sending: boo
     row.append(&status);
     let thread = state.selected.clone().unwrap_or_default();
     for (icon, tooltip, now) in
-        [("go-up-symbolic", "Send Now", true), ("window-close-symbolic", "Cancel and Return to the Composer", false)]
+        [(icons::UP, "Send Now", true), (icons::CLOSE, "Cancel and Return to the Composer", false)]
     {
-        let button = gtk::Button::builder().icon_name(icon).tooltip_text(tooltip).build();
-        button.add_css_class("flat");
+        let button = icons::flat(icon, tooltip);
         button.add_css_class("circular");
         let thread = thread.clone();
         let id = id.to_string();

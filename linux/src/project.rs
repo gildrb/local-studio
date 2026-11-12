@@ -6,6 +6,7 @@ use local_studio_core::{NewThreadWorkspace, Project, ProjectScript, ProjectSetti
 
 use crate::app::App;
 use crate::format;
+use crate::icons;
 
 const ICONS: [&str; 12] = ["🧪", "🚀", "🛠", "📦", "🧠", "🌿", "🔥", "🎛", "🧩", "📊", "🖥", "🌙"];
 
@@ -30,12 +31,8 @@ pub fn present(app: &Rc<App>, project: &str) {
     let dialog = adw::PreferencesDialog::builder().title(format::escape(&info.name)).content_width(600).build();
     dialog.add(&identity_page(app, &info, &dialog));
     let defaults =
-        adw::PreferencesPage::builder().name("defaults").title("Defaults").icon_name("emblem-system-symbolic").build();
-    let scripts = adw::PreferencesPage::builder()
-        .name("scripts")
-        .title("Scripts")
-        .icon_name("utilities-terminal-symbolic")
-        .build();
+        adw::PreferencesPage::builder().name("defaults").title("Defaults").icon_name(icons::SETTINGS).build();
+    let scripts = adw::PreferencesPage::builder().name("scripts").title("Scripts").icon_name(icons::TERMINAL).build();
     dialog.add(&defaults);
     dialog.add(&scripts);
     let open = Rc::new(Open {
@@ -99,7 +96,7 @@ fn rebuild(app: &Rc<App>, open: &Rc<Open>) {
 
 #[allow(clippy::too_many_lines)]
 fn identity_page(app: &Rc<App>, info: &Project, dialog: &adw::PreferencesDialog) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder().title("Project").icon_name("folder-symbolic").build();
+    let page = adw::PreferencesPage::builder().title("Project").icon_name(icons::FOLDER).build();
     let identity = adw::PreferencesGroup::builder().title("Project").build();
     let name = adw::EntryRow::builder().title("Name").text(&info.name).show_apply_button(true).build();
     let weak = Rc::downgrade(app);
@@ -375,8 +372,7 @@ fn scripts_group(app: &Rc<App>, open: &Rc<Open>, scripts: &[ProjectScript]) -> a
         .tooltip_text("Import scripts from local-studio.json at the project root")
         .build();
     import.add_css_class("flat");
-    let add = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text("Add Script").build();
-    add.add_css_class("flat");
+    let add = icons::flat(icons::ADD, "Add Script");
     buttons.append(&import);
     buttons.append(&add);
     group.set_header_suffix(Some(&buttons));
@@ -426,12 +422,8 @@ fn scripts_group(app: &Rc<App>, open: &Rc<Open>, scripts: &[ProjectScript]) -> a
             tag.set_tooltip_text(Some("Runs when a thread gets a new worktree"));
             row.add_suffix(&tag);
         }
-        let run = gtk::Button::builder()
-            .icon_name("media-playback-start-symbolic")
-            .tooltip_text("Run in the Terminal Drawer")
-            .valign(gtk::Align::Center)
-            .build();
-        run.add_css_class("flat");
+        let run = icons::flat(icons::RUN, &format!("Run {} in the Terminal Drawer", script.name));
+        run.set_valign(gtk::Align::Center);
         let (weak, project, id) = (Rc::downgrade(app), open.project.clone(), script.id.clone());
         run.connect_clicked(move |_| {
             if let Some(app) = weak.upgrade() {

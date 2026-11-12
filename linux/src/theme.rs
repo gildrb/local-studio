@@ -26,7 +26,6 @@ window, dialog { font-size: 13px; }
 .ls-meta { font-size: 11.5px; color: alpha(currentColor, 0.55); }
 .ls-tile { min-width: 18px; min-height: 18px; border-radius: 5px; background: alpha(currentColor, 0.08); font-size: 10px; font-weight: 700; }
 .ls-footer { padding: 6px; border-top: 1px solid var(--border-color); }
-.ls-footer button { min-width: 30px; min-height: 30px; }
 .ls-pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: alpha(currentColor, 0.08); }
 .ls-add { color: #3fb950; font-family: monospace; font-size: 11px; }
 .ls-del { color: #f85149; font-family: monospace; font-size: 11px; }
@@ -40,9 +39,6 @@ window, dialog { font-size: 13px; }
 .ls-crumb-title { font-weight: 600; }
 .ls-bubble { background: alpha(currentColor, 0.08); border-radius: 16px; padding: 9px 13px; }
 .ls-bubble.queued { background: transparent; border: 1px dashed alpha(currentColor, 0.25); }
-.ls-user-row .ls-row-actions { opacity: 0; }
-.ls-user-row:hover .ls-row-actions { opacity: 1; }
-.ls-row-actions button { min-height: 22px; min-width: 22px; padding: 0 4px; }
 .ls-assistant label { font-size: 13.5px; }
 .ls-assistant .heading { font-weight: 700; }
 .ls-markdown, .ls-markdown > text { background: transparent; font-size: 13.5px; }
@@ -81,39 +77,31 @@ window, dialog { font-size: 13px; }
 .ls-user-row { margin-top: 14px; }
 .ls-thread.marked { background: alpha(var(--accent-bg-color), 0.10); border-color: alpha(var(--accent-bg-color), 0.30); }
 .ls-bulk { padding: 4px 6px 4px 14px; border-top: 1px solid var(--border-color); }
-.ls-bulk button { min-width: 28px; min-height: 28px; }
 .ls-hint { font-family: monospace; font-size: 10px; padding: 0 5px; }
 .ls-rename { min-height: 26px; padding: 0 6px; }
 .ls-menu { border-bottom: 1px solid var(--border-color); margin-bottom: 4px; padding-bottom: 4px; }
 .ls-menu row { border-radius: 8px; }
 .ls-chip { background: alpha(currentColor, 0.06); border-radius: 8px; padding: 2px 4px 2px 8px; }
-.ls-chip-remove { min-width: 18px; min-height: 18px; padding: 0; margin: 2px; }
 .ls-thumb { border-radius: 8px; }
 .ls-branchbar dropdown > button, .ls-branchbar menubutton > button { min-height: 26px; padding: 0 8px; font-size: 12px; font-weight: normal; }
 .ls-branchbar label { font-weight: normal; }
 .ls-search-hit .title { font-family: monospace; font-size: 12px; }
 .ls-drawer { border-top: 1px solid var(--border-color); background: #0d0d0d; }
 .ls-drawer-bar { padding: 2px 6px 2px 12px; border-bottom: 1px solid var(--border-color); }
-.ls-drawer-bar button { min-width: 26px; min-height: 26px; padding: 0; }
 .ls-terminal { padding: 0; }
 .ls-terminal-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: alpha(currentColor, 0.08); color: alpha(currentColor, 0.7); }
 .ls-provider-warning { color: var(--warning-color); }
 .ls-provider-error { color: var(--error-color); }
 .ls-panel-bar { padding: 6px 6px 6px 8px; }
-.ls-panel-bar button { min-width: 28px; min-height: 28px; }
 .ls-tab { border-radius: 8px; padding: 2px 4px 2px 8px; min-height: 26px; }
 .ls-tab:hover { background: alpha(currentColor, 0.05); }
 .ls-tab.active { background: alpha(currentColor, 0.10); }
 .ls-tab label { font-size: 12px; }
-.ls-tab-close { min-width: 18px; min-height: 18px; padding: 0; }
 .ls-launcher button { padding: 6px 10px; border-radius: 8px; }
 .ls-launcher button label { font-weight: normal; }
 .ls-keycap { font-family: monospace; font-size: 11px; padding: 0 6px; border-radius: 5px; border: 1px solid alpha(currentColor, 0.2); color: alpha(currentColor, 0.7); }
 .ls-badge { background: var(--accent-bg-color); color: white; border-radius: 999px; font-size: 9px; font-weight: 700; min-width: 14px; min-height: 14px; padding: 0 3px; margin: 2px; }
 .ls-scroll-pill { padding: 4px 14px; }
-.ls-minimap { opacity: 0.55; }
-.ls-minimap:hover { opacity: 1; }
-.ls-minimap-button { min-width: 18px; min-height: 18px; padding: 0; }
 .ls-small-toggle { font-size: 12px; font-weight: normal; min-height: 24px; padding: 0 8px; }
 .ls-setup { background: var(--card-bg-color); border: 1px solid var(--border-color); border-radius: 12px; padding: 10px 12px; }
 .ls-drop-hint { margin: 10px; border: 2px dashed alpha(var(--accent-bg-color), 0.7); border-radius: 16px; background: alpha(var(--accent-bg-color), 0.08); font-weight: 600; }
@@ -178,10 +166,8 @@ popover.ls-picker > contents { padding: 0; }
 .ls-picker-row:disabled { opacity: 0.45; }
 .ls-picker-title { font-size: 13px; }
 .ls-picker-subtitle, .ls-picker-detail { font-size: 11.5px; color: alpha(currentColor, 0.55); }
-.ls-picker-icon { color: alpha(currentColor, 0.6); min-width: 16px; }
 .ls-picker-row.destructive .ls-picker-title, .ls-picker-row.destructive .ls-picker-icon { color: var(--destructive-color); }
 .ls-picker-check { color: var(--accent-color); }
-.ls-picker-remove { min-width: 20px; min-height: 20px; padding: 0; }
 .ls-picker-empty { font-size: 12.5px; color: alpha(currentColor, 0.55); padding: 20px; }
 .ls-picker-note { padding: 2px 12px 8px 12px; }
 .ls-list:focus-visible, .ls-timeline:focus-visible { outline-style: none; }
@@ -227,6 +213,7 @@ pub fn install() {
     let base = gtk::CssProvider::new();
     base.load_from_string(BASE);
     gtk::style_context_add_provider_for_display(&display, &base, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+    crate::icons::install(&display);
     let dark = gtk::CssProvider::new();
     dark.load_from_string(DARK);
     let manager = adw::StyleManager::default();

@@ -8,6 +8,7 @@ use webkit::prelude::*;
 
 use crate::app::{App, Target};
 use crate::format;
+use crate::icons;
 use crate::pulls::{pull_row, PullDetail};
 
 fn header(back: Option<&gtk::Button>, title: &gtk::Label, extra: Option<&gtk::Widget>) -> gtk::Box {
@@ -30,9 +31,7 @@ fn header(back: Option<&gtk::Button>, title: &gtk::Label, extra: Option<&gtk::Wi
 }
 
 fn back_button() -> gtk::Button {
-    let button = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back").build();
-    button.add_css_class("flat");
-    button
+    icons::flat(icons::BACK, "Back")
 }
 
 fn message(text: &str) -> gtk::Label {
@@ -58,8 +57,7 @@ pub struct FilesSurface {
 
 impl FilesSurface {
     pub fn new(app: &Weak<App>) -> Self {
-        let up = gtk::Button::builder().icon_name("go-up-symbolic").tooltip_text("Parent Folder").build();
-        up.add_css_class("flat");
+        let up = icons::flat(icons::UP, "Parent Folder");
         let path = gtk::Label::new(Some("/"));
         let list = gtk::ListBox::new();
         list.add_css_class("navigation-sidebar");
@@ -158,11 +156,7 @@ impl FilesSurface {
         self.status.set_label("This folder is empty.");
         for entry in entries {
             let row = adw::ActionRow::builder().title(format::escape(&entry.name)).activatable(true).build();
-            row.add_prefix(&gtk::Image::from_icon_name(if entry.directory {
-                "folder-symbolic"
-            } else {
-                "text-x-generic-symbolic"
-            }));
+            row.add_prefix(&icons::image(if entry.directory { icons::FOLDER } else { icons::FILE }));
             if !entry.directory {
                 let size = gtk::Label::new(Some(&size(entry.size)));
                 size.add_css_class("ls-meta");
@@ -393,16 +387,14 @@ impl AgentsSurface {
                 .title(format::escape(if agent.title.is_empty() { &agent.id } else { &agent.title }))
                 .subtitle(format::escape(&subtitle.join(" · ")))
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("avatar-default-symbolic"));
+            row.add_prefix(&icons::image(icons::AGENT));
             let pill = gtk::Label::new(Some(label));
             pill.add_css_class("ls-pill");
             pill.add_css_class(class);
             pill.set_valign(gtk::Align::Center);
             row.add_suffix(&pill);
             if agent.running {
-                let cancel =
-                    gtk::Button::builder().icon_name("process-stop-symbolic").tooltip_text("Cancel Subagent").build();
-                cancel.add_css_class("flat");
+                let cancel = icons::flat(icons::STOP, "Cancel Subagent");
                 cancel.set_valign(gtk::Align::Center);
                 let (weak, thread, child) = (std::rc::Rc::downgrade(app), thread.clone(), agent.id.clone());
                 cancel.connect_clicked(move |_| {
@@ -482,7 +474,7 @@ impl DevicesSurface {
                 .title(format::escape(&device.name))
                 .subtitle(format::escape(&subtitle.join(" · ")))
                 .build();
-            row.add_prefix(&gtk::Image::from_icon_name("phone-symbolic"));
+            row.add_prefix(&icons::image(icons::DEVICE));
             let running = matches!(device.state.to_lowercase().as_str(), "booted" | "running" | "device" | "online");
             let pill = gtk::Label::new(Some(&format::capitalize(&device.state)));
             pill.add_css_class("ls-pill");
@@ -531,15 +523,14 @@ impl BrowserSurface {
         let view = webkit::WebView::new();
         view.set_vexpand(true);
         let address = gtk::Entry::builder().placeholder_text("Enter a URL, e.g. localhost:3000").hexpand(true).build();
-        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back").build();
-        let forward = gtk::Button::builder().icon_name("go-next-symbolic").tooltip_text("Forward").build();
-        let reload = gtk::Button::builder().icon_name("view-refresh-symbolic").tooltip_text("Reload").build();
+        let back = icons::flat(icons::BACK, "Back");
+        let forward = icons::flat(icons::FORWARD, "Forward");
+        let reload = icons::flat(icons::REFRESH, "Reload");
         let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
         bar.set_margin_start(8);
         bar.set_margin_end(8);
         bar.set_margin_bottom(6);
         for button in [&back, &forward, &reload] {
-            button.add_css_class("flat");
             bar.append(button);
         }
         bar.append(&address);

@@ -10,6 +10,7 @@ use local_studio_core::{
 
 use crate::app::App;
 use crate::format;
+use crate::icons;
 use crate::state::{short_path, Page, State};
 
 const CLEANUP_DAYS: [Option<u32>; 6] = [None, Some(1), Some(3), Some(7), Some(14), Some(30)];
@@ -48,16 +49,16 @@ impl SettingsDialog {
         diagnostics.add(&kernel);
         dialog.add(&general);
         dialog.add(&appearance_page(&weak));
-        let keys_page = page("keybindings", "Keybindings", "input-keyboard-symbolic");
+        let keys_page = page("keybindings", "Keybindings", icons::KEYBOARD);
         dialog.add(&keys_page);
-        let providers_page = page("providers", "Providers", "application-x-addon-symbolic");
+        let providers_page = page("providers", "Providers", icons::PROVIDERS);
         dialog.add(&providers_page);
         dialog.add(&source_control_page(&weak, &state));
         dialog.add(&storage_page(&weak));
         let fleet = crate::fleet::Fleet::new(&weak);
         fleet.render(&state);
         dialog.add(&local_page(&weak, &fleet));
-        let archive_page = page("archive", "Archive", "folder-download-symbolic");
+        let archive_page = page("archive", "Archive", icons::ARCHIVE);
         dialog.add(&archive_page);
         drop(state);
         let settings = Self {
@@ -245,12 +246,8 @@ impl SettingsDialog {
                 None => row.add_suffix(&dim("Unbound")),
             }
             let customized = binding.shortcut != binding.default_shortcut;
-            let record = gtk::Button::builder()
-                .icon_name("input-keyboard-symbolic")
-                .tooltip_text("Record Shortcut")
-                .valign(gtk::Align::Center)
-                .build();
-            record.add_css_class("flat");
+            let record = icons::flat(icons::KEYBOARD, &format!("Record Shortcut for {}", binding.title));
+            record.set_valign(gtk::Align::Center);
             let weak = app.clone();
             let (command, title) = (binding.command.clone(), binding.title.clone());
             record.connect_clicked(move |_| {
@@ -259,12 +256,15 @@ impl SettingsDialog {
                 }
             });
             row.add_suffix(&record);
-            let button = gtk::Button::builder()
-                .icon_name(if customized { "edit-undo-symbolic" } else { "edit-clear-symbolic" })
-                .tooltip_text(if customized { "Reset to Default" } else { "Remove" })
-                .valign(gtk::Align::Center)
-                .build();
-            button.add_css_class("flat");
+            let button = icons::flat(
+                if customized { icons::RESET } else { icons::CLOSE },
+                &if customized {
+                    format!("Reset {} to Default", binding.title)
+                } else {
+                    format!("Remove Shortcut for {}", binding.title)
+                },
+            );
+            button.set_valign(gtk::Align::Center);
             button.set_sensitive(customized || binding.shortcut.is_some());
             let weak = app.clone();
             let command = binding.command.clone();
@@ -313,12 +313,8 @@ impl SettingsDialog {
                 unarchive.set_valign(gtk::Align::Center);
                 unarchive.set_action_name(Some("win.thread-unarchive"));
                 unarchive.set_action_target_value(Some(&thread.id.to_variant()));
-                let delete = gtk::Button::builder()
-                    .icon_name("user-trash-symbolic")
-                    .tooltip_text("Delete")
-                    .valign(gtk::Align::Center)
-                    .build();
-                delete.add_css_class("flat");
+                let delete = icons::flat(icons::DELETE, "Delete");
+                delete.set_valign(gtk::Align::Center);
                 delete.set_action_name(Some("win.thread-delete"));
                 delete.set_action_target_value(Some(&thread.id.to_variant()));
                 row.add_suffix(&unarchive);
@@ -331,7 +327,7 @@ impl SettingsDialog {
         if stored.is_empty() {
             let group = adw::PreferencesGroup::new();
             let status = adw::StatusPage::builder()
-                .icon_name("folder-download-symbolic")
+                .icon_name(icons::ARCHIVE)
                 .title("No archived threads")
                 .description("Archived threads appear here, grouped by project.")
                 .build();
@@ -505,7 +501,7 @@ fn model_combo(
 
 #[allow(clippy::too_many_lines)]
 fn general_page(app: &Weak<App>, state: &State) -> adw::PreferencesPage {
-    let page = page("general", "General", "emblem-system-symbolic");
+    let page = page("general", "General", icons::SETTINGS);
     let defaults = group(&page, "Project defaults");
     model_combo(
         &defaults,
@@ -875,7 +871,7 @@ fn general_page(app: &Weak<App>, state: &State) -> adw::PreferencesPage {
 
 #[allow(clippy::too_many_lines)]
 fn appearance_page(app: &Weak<App>) -> adw::PreferencesPage {
-    let page = page("appearance", "Appearance", "applications-graphics-symbolic");
+    let page = page("appearance", "Appearance", icons::APPEARANCE);
     let themes = group(&page, "Theme");
     let names: Vec<String> = crate::themes::all(&current(app)).into_iter().map(|theme| theme.name).collect();
     let mut labels = vec!["Default (follows color scheme)".to_string()];
@@ -1132,7 +1128,7 @@ fn appearance_page(app: &Weak<App>) -> adw::PreferencesPage {
 }
 
 fn source_control_page(app: &Weak<App>, state: &State) -> adw::PreferencesPage {
-    let page = page("source-control", "Source Control", "preferences-system-sharing-symbolic");
+    let page = page("source-control", "Source Control", icons::PULL_REQUESTS);
     let sync = group(&page, "Sync");
     switch(
         &sync,
@@ -1232,7 +1228,7 @@ fn source_control_page(app: &Weak<App>, state: &State) -> adw::PreferencesPage {
 }
 
 fn storage_page(app: &Weak<App>) -> adw::PreferencesPage {
-    let page = page("storage", "Storage", "drive-harddisk-symbolic");
+    let page = page("storage", "Storage", icons::STORAGE);
     let cleanup = group(&page, "Worktree cleanup");
     combo(
         &cleanup,
@@ -1276,14 +1272,14 @@ fn storage_page(app: &Weak<App>) -> adw::PreferencesPage {
     cleanup.set_description(Some(
         "Only worktrees Local Studio created, never ones with uncommitted changes or used by an active thread. Branches are kept.",
     ));
-    let now = adw::ButtonRow::builder().title("Clean Up Now").start_icon_name("edit-clear-all-symbolic").build();
+    let now = adw::ButtonRow::builder().title("Clean Up Now").start_icon_name(icons::DELETE).build();
     now.set_action_name(Some("win.cleanup-worktrees"));
     cleanup.add(&now);
     page
 }
 
 fn local_page(app: &Weak<App>, fleet: &crate::fleet::Fleet) -> adw::PreferencesPage {
-    let page = page("local", "Local", "network-server-symbolic");
+    let page = page("local", "Local", icons::SERVER);
     let controller = group(&page, "Controller");
     controller.set_description(Some("The Local controller serves models on this machine and links your fleet."));
     let open = gtk::Button::with_label("Open Local");
@@ -1342,11 +1338,11 @@ fn model_row(app: &Weak<App>, state: &State, model: &ModelOption) -> adw::Action
         .subtitle(format::escape(&format!("{} · {} context", model.id, format::tokens(model.context_window))))
         .build();
     let star = gtk::ToggleButton::builder()
-        .icon_name(if favorite { "starred-symbolic" } else { "non-starred-symbolic" })
-        .tooltip_text("Favorite")
+        .icon_name(if favorite { icons::STARRED } else { icons::STAR_ADD })
         .active(favorite)
-        .valign(gtk::Align::Center)
         .build();
+    icons::describe(&star, "Favorite");
+    star.set_valign(gtk::Align::Center);
     star.add_css_class("flat");
     let weak = app.clone();
     let (provider, id) = (model.provider.clone(), model.id.clone());

@@ -7,6 +7,7 @@ use local_studio_core::{PullRequest, PullRequestDetail};
 
 use crate::app::{App, Target};
 use crate::format;
+use crate::icons;
 use crate::timeline::diff_stat;
 
 pub struct PullDetail {
@@ -91,13 +92,11 @@ impl PullDetail {
             for check in &detail.checks {
                 let row = adw::ActionRow::builder().title(format::escape(&check.name)).build();
                 let (icon, class) = match check.state.to_lowercase().as_str() {
-                    "success" | "passing" | "pass" | "completed" => ("object-select-symbolic", "status-done"),
-                    "failure" | "failing" | "fail" | "error" => ("dialog-error-symbolic", "status-failed"),
-                    _ => ("content-loading-symbolic", "status-working"),
+                    "success" | "passing" | "pass" | "completed" => (icons::DONE, "status-done"),
+                    "failure" | "failing" | "fail" | "error" => (icons::ERROR, "status-failed"),
+                    _ => (icons::WORKING, "status-working"),
                 };
-                let image = gtk::Image::from_icon_name(icon);
-                image.add_css_class(class);
-                row.add_prefix(&image);
+                row.add_prefix(&icons::styled(icon, class));
                 row.add_suffix(&meta_label(&check.state));
                 group.add(&row);
             }

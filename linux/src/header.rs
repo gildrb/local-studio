@@ -1,6 +1,7 @@
 use adw::prelude::*;
 
 use crate::actions;
+use crate::icons;
 use crate::state::{Page, State};
 
 pub struct Header {
@@ -26,17 +27,12 @@ impl Header {
     #[allow(clippy::too_many_lines)]
     pub fn build(editors: &gtk::gio::Menu) -> Self {
         let bar = adw::HeaderBar::new();
-        let toggle = gtk::ToggleButton::builder()
-            .icon_name("sidebar-show-symbolic")
-            .tooltip_text("Toggle Sidebar (Ctrl+B)")
-            .build();
+        let toggle = gtk::ToggleButton::builder().icon_name(icons::SIDEBAR).build();
+        icons::describe(&toggle, "Toggle Sidebar (Ctrl+B)");
         bar.pack_start(&toggle);
-        let back = gtk::Button::builder()
-            .icon_name("go-previous-symbolic")
-            .tooltip_text("Back to Threads")
-            .action_name("win.back-to-thread")
-            .visible(false)
-            .build();
+        let back = icons::button(icons::BACK, "Back to Threads");
+        back.set_action_name(Some("win.back-to-thread"));
+        back.set_visible(false);
         bar.pack_start(&back);
         let project = gtk::Label::new(None);
         project.add_css_class("ls-crumb-project");
@@ -46,8 +42,7 @@ impl Header {
         title.add_css_class("ls-crumb-title");
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.set_max_width_chars(48);
-        let chevron = gtk::Image::from_icon_name("pan-down-symbolic");
-        chevron.add_css_class("dim-label");
+        let chevron = icons::image(icons::EXPANDED);
         let crumb_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         crumb_box.append(&project);
         crumb_box.append(&slash);
@@ -62,16 +57,10 @@ impl Header {
         titles.append(&page_title);
         bar.set_title_widget(Some(&titles));
         bar.set_centering_policy(adw::CenteringPolicy::Loose);
-        let terminal = gtk::Button::builder()
-            .icon_name("utilities-terminal-symbolic")
-            .tooltip_text("Terminal (Ctrl+J)")
-            .action_name("win.toggle-terminal")
-            .build();
-        let panel_button = gtk::Button::builder()
-            .icon_name("sidebar-show-right-symbolic")
-            .tooltip_text("Right Panel (Ctrl+Alt+B)")
-            .action_name("win.toggle-panel")
-            .build();
+        let terminal = icons::button(icons::TERMINAL, "Terminal (Ctrl+J)");
+        terminal.set_action_name(Some("win.toggle-terminal"));
+        let panel_button = icons::button(icons::PANEL, "Right Panel (Ctrl+Alt+B)");
+        panel_button.set_action_name(Some("win.toggle-panel"));
         let badge = gtk::Label::new(None);
         badge.add_css_class("ls-badge");
         badge.set_halign(gtk::Align::End);
@@ -102,11 +91,8 @@ impl Header {
         bar.pack_end(&panel);
         bar.pack_end(&terminal);
         bar.pack_end(&git);
-        let scripts = gtk::MenuButton::builder()
-            .icon_name("media-playback-start-symbolic")
-            .tooltip_text("Run Project Script")
-            .visible(false)
-            .build();
+        let scripts = gtk::MenuButton::builder().icon_name(icons::RUN).visible(false).build();
+        icons::describe(&scripts, "Run Project Script");
         bar.pack_end(&scripts);
         bar.pack_end(&open);
         bar.pack_end(&branch);
