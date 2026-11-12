@@ -8,7 +8,7 @@ Native Mac and Linux app for running many coding-agent threads at once on local 
 nu macos/build.nu --configuration Release
 ```
 
-Needs Xcode 26+, Rust 1.98, and Nushell; the build fetches the pinned Eukhe release (v0.10.69). Linux: see [linux/AGENTS.md](linux/AGENTS.md).
+Needs Xcode 26+, Rust 1.98, and Nushell; the build fetches the pinned Eukhe release (v0.10.70). Linux: see [linux/AGENTS.md](linux/AGENTS.md).
 
 ## Use
 
