@@ -20,6 +20,7 @@ Needs Xcode 26+, Rust 1.98, and Nushell; the build fetches the pinned Eukhe rele
 
 - Every thread across every project in one sidebar, with live status (working, needs approval, done).
 - Threads keep running in the Eukhe daemon when the window closes; the Eukhe TUI sees the same sessions.
+- Working follows the daemon: a thread whose session worker stopped, passivated or crashed leaves Working, Stop escalates to stopping the worker when a run does not end within seconds, and a running thread offers Stop and Delete. When the daemon on the socket runs another Eukhe version than the app bundles, a banner offers Restart Daemon.
 
 ## Providers
 

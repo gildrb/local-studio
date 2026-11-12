@@ -12,10 +12,11 @@ type AppAction = fn(&Rc<App>);
 type StringAction = fn(&Rc<App>, String);
 
 pub fn install(app: &Rc<App>) {
-    let plain: [(&str, AppAction); 4] = [
+    let plain: [(&str, AppAction); 5] = [
         ("clone-project", clone_project),
         ("provider-settings", |app| app.open_settings(Some("providers"))),
         ("install-kernel", |app| app.core.run(local_studio_core::Studio::install_kernel)),
+        ("restart-daemon", restart_daemon),
         ("cleanup-worktrees", |app| {
             let request = app.core.request();
             app.toast("Cleaning up worktrees…");
@@ -64,6 +65,36 @@ pub fn install(app: &Rc<App>) {
         });
         app.window.add_action(&action);
     }
+}
+
+fn restart_daemon(app: &Rc<App>) {
+    let busy = app
+        .state
+        .borrow()
+        .daemon
+        .as_ref()
+        .and_then(|daemon| daemon.mismatch.as_ref())
+        .map_or(0, |mismatch| mismatch.busy_sessions);
+    if busy == 0 {
+        app.core.run(|studio| studio.restart_daemon(false));
+        return;
+    }
+    let dialog = adw::AlertDialog::new(
+        Some("Restart the Eukhe Daemon?"),
+        Some(&format!(
+            "{busy} Eukhe sessions are running. Restarting stops their runs; their threads stay saved and reopen on the new daemon."
+        )),
+    );
+    dialog.add_responses(&[("cancel", "Cancel"), ("restart", "Restart")]);
+    dialog.set_response_appearance("restart", adw::ResponseAppearance::Destructive);
+    dialog.set_close_response("cancel");
+    let weak = Rc::downgrade(app);
+    dialog.connect_response(Some("restart"), move |_, _| {
+        if let Some(app) = weak.upgrade() {
+            app.core.run(|studio| studio.restart_daemon(true));
+        }
+    });
+    dialog.present(Some(&app.window));
 }
 
 pub fn new_thread_in_on_shift(app: &Weak<App>, button: &gtk::Button) {

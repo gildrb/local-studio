@@ -162,6 +162,7 @@ impl App {
             conversation.add_named(&timeline.root, Some("timeline"));
             conversation.set_vexpand(true);
             let chat = gtk::Box::new(gtk::Orientation::Vertical, 0);
+            chat.append(&banners.daemon);
             chat.append(&banners.kernel);
             chat.append(&conversation);
             chat.append(&composer.root);
@@ -606,8 +607,9 @@ impl App {
                 self.state.borrow_mut().setup.insert(thread, crate::state::Setup { stages, done, error });
                 dirty.composer = true;
             }
-            Update::Daemon { socket, version, pid } => {
-                self.state.borrow_mut().daemon = Some(crate::state::DaemonInfo { socket, version, pid });
+            Update::Daemon { socket, version, pid, mismatch } => {
+                self.banners.render_daemon(mismatch.as_ref());
+                self.state.borrow_mut().daemon = Some(crate::state::DaemonInfo { socket, version, pid, mismatch });
                 dirty.settings = true;
             }
             Update::Kernel { state } => {
