@@ -35,6 +35,7 @@ struct ComposerControls: View {
             .opacity(compact ? 0 : 1)
             .allowsHitTesting(!compact)
             .accessibilityHidden(compact)
+            .layoutPriority(1)
             Spacer(minLength: 8)
             if settings?.contextWindowMeter ?? true {
                 ContextMeter(store: store)
@@ -42,25 +43,41 @@ struct ComposerControls: View {
                     .allowsHitTesting(!compact)
                     .accessibilityHidden(compact)
             }
+            if compact {
+                actions(labels: false)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    actions(labels: true)
+                    actions(labels: false)
+                }
+            }
+        }
+        .frame(height: 30)
+        .onChange(of: ComposerProbe(model: title, thinking: levels.first.map { ThinkingMenu.title(level ?? $0) }), initial: true) { _, probe in
+            store.shell.probe.composer = probe
+        }
+    }
+
+    @ViewBuilder private func actions(labels: Bool) -> some View {
+        let conversation = store.conversation
+        let steers = store.pages.settings?.followUpBehavior == .steer
+        HStack(spacing: 0) {
             if conversation.busy {
-                RoundActionButton(title: "Stop generation", label: compact ? nil : "Stop", symbol: "stop.fill", fill: .red, enabled: true) {
+                RoundActionButton(title: "Stop generation", label: labels ? "Stop" : nil, symbol: "stop.fill", fill: .red, enabled: true) {
                     conversation.abort()
                 }
                 .keyboardShortcut(".", modifiers: .command)
             }
             RoundActionButton(
-                title: sendTitle(busy: conversation.busy, steers: settings?.followUpBehavior == .steer),
-                label: compact ? nil : sendLabel(busy: conversation.busy, steers: settings?.followUpBehavior == .steer),
+                title: sendTitle(busy: conversation.busy, steers: steers),
+                label: labels ? sendLabel(busy: conversation.busy, steers: steers) : nil,
                 symbol: "arrow.up",
                 fill: Theme.primary,
                 enabled: canSend,
                 action: send
             )
         }
-        .frame(height: 30)
-        .onChange(of: ComposerProbe(model: title, thinking: levels.first.map { ThinkingMenu.title(level ?? $0) }), initial: true) { _, probe in
-            store.shell.probe.composer = probe
-        }
+        .fixedSize()
     }
 
     private var modelTitle: String {
