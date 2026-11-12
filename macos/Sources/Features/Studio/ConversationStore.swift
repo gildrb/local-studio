@@ -50,6 +50,7 @@ final class ConversationStore {
     @ObservationIgnored private var sentPrompts: [String] = []
     private(set) var outgoing: [String: [OutgoingMessage]] = [:]
     @ObservationIgnored var onSendFailure: ((String) -> Void)?
+    @ObservationIgnored private var held: [TranscriptOp]?
 
     init(core: CoreHandle, requests: RequestCenter) {
         self.core = core
@@ -352,6 +353,7 @@ final class ConversationStore {
     }
 
     private func park() {
+        _ = releaseHeld()
         guard let thread, !entries.isEmpty else { return }
         transcripts[thread] = CachedTranscript(
             entries: entries, rows: rows, anchors: anchors, expandedFolds: expandedFolds, approvals: approvals, queued: queued,
@@ -432,8 +434,50 @@ final class ConversationStore {
         return start
     }
 
+    func holdTranscript(_ holding: Bool) -> String? {
+        if holding {
+            if held == nil {
+                held = []
+            }
+            return nil
+        }
+        let problem = releaseHeld()
+        held = nil
+        return problem
+    }
+
+    func releaseHeld() -> String? {
+        guard let ops = held, !ops.isEmpty, let thread else { return nil }
+        held = []
+        var problem: String?
+        for op in ops {
+            if let failed = perform(thread: thread, op: op), problem == nil {
+                problem = failed
+            }
+        }
+        return problem
+    }
+
     func apply(thread: String, op: TranscriptOp) -> String? {
         guard thread == self.thread else { return nil }
+        guard var queue = held else { return perform(thread: thread, op: op) }
+        switch op {
+        case .reset:
+            queue = [op]
+        case .update(let index, _):
+            if case .update(let last, _)? = queue.last, last == index {
+                queue[queue.count - 1] = op
+            } else {
+                queue.append(op)
+            }
+        case .insert:
+            queue.append(op)
+        }
+        held = queue
+        return nil
+    }
+
+    private func perform(thread: String, op: TranscriptOp) -> String? {
         if loading {
             loading = false
         }

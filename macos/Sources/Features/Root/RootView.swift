@@ -319,6 +319,7 @@ struct ToastLayer: View {
 struct ToastView: View {
     let notice: StudioNotice
     let dismiss: () -> Void
+    @Environment(\.windowActivity) private var activity
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -340,7 +341,7 @@ struct ToastView: View {
         .padding(.vertical, 10)
         .frame(maxWidth: 520)
         .fixedSize(horizontal: false, vertical: true)
-        .background(Theme.overlay, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(Theme.overlay(activity), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
         .shadow(color: Theme.shadow, radius: 14, y: 6)
         .task(id: notice.id) {

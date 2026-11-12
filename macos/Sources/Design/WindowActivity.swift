@@ -13,7 +13,13 @@ struct WindowActivity: Equatable {
     var lowPower = false
 
     @MainActor static var pinned: WindowActivity?
+    @MainActor static var lowPowerOverride: Bool?
+    @MainActor static var reduceTransparencyOverride: Bool?
     @MainActor fileprivate(set) static var main = WindowActivity()
+
+    @MainActor static var reducesTransparency: Bool {
+        reduceTransparencyOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+    }
 
     var visible: Bool { presence != .hidden }
     var live: Bool { presence == .key }
@@ -32,8 +38,8 @@ struct WindowActivity: Equatable {
     static func of(_ window: NSWindow?) -> WindowActivity {
         if let pinned { return pinned }
         var activity = WindowActivity(
-            reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency,
-            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled
+            reduceTransparency: reducesTransparency,
+            lowPower: lowPowerOverride ?? ProcessInfo.processInfo.isLowPowerModeEnabled
         )
         guard let window, window.isVisible, !window.isMiniaturized, !NSApp.isHidden, window.occlusionState.contains(.visible) else {
             activity.presence = .hidden

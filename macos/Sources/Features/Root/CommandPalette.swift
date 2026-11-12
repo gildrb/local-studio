@@ -56,6 +56,7 @@ struct CommandPalette: View {
     let store: StudioStore
     let page: PalettePage
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.windowActivity) private var activity
     @State private var query = ""
     @State private var selection = PaletteSelection()
     @State private var request: String?
@@ -99,7 +100,7 @@ struct CommandPalette: View {
             PaletteList(items: items, selection: selection, empty: emptyText)
         }
         .frame(width: 600)
-        .background(Theme.overlay, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Theme.overlay(activity), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
         .shadow(color: Theme.shadow, radius: 24, y: 10)
         .task(id: SearchToken(page: page, query: query)) {

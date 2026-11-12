@@ -68,10 +68,16 @@ final class StudioStore {
 
     func windowActivityChanged(_ activity: WindowActivity) {
         pump?.pace(activity.updateInterval)
+        if let problem = conversation.holdTranscript(!activity.visible) {
+            post(.error, problem)
+        }
     }
 
     func windowRevealing() {
         pump?.flush()
+        if let problem = conversation.releaseHeld() {
+            post(.error, problem)
+        }
     }
 
     func select(_ id: String?) {

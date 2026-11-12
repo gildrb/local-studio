@@ -153,9 +153,12 @@ final class ThemeTokens: @unchecked Sendable {
 
     private(set) var revision = 0
     @ObservationIgnored private let cache = Mutex<[ThemeToken: Color]>([:])
+    @ObservationIgnored private let opaqueOverlay = Mutex<Color>(.clear)
 
     private init() {
-        cache.withLock { $0 = Self.colors([.dark: LegacyPalette.dark, .light: LegacyPalette.light]) }
+        let palettes: [ThemeAppearance: ThemePalette] = [.dark: LegacyPalette.dark, .light: LegacyPalette.light]
+        cache.withLock { $0 = Self.colors(palettes) }
+        opaqueOverlay.withLock { $0 = Self.opaque(palettes) }
     }
 
     func color(_ token: ThemeToken) -> Color {
@@ -163,10 +166,24 @@ final class ThemeTokens: @unchecked Sendable {
         return cache.withLock { $0[token] } ?? .clear
     }
 
+    func solidOverlay() -> Color {
+        _ = revision
+        return opaqueOverlay.withLock { $0 }
+    }
+
     @MainActor func publish(_ palettes: [ThemeAppearance: ThemePalette]) {
         let colors = Self.colors(palettes)
         cache.withLock { $0 = colors }
+        opaqueOverlay.withLock { $0 = Self.opaque(palettes) }
         revision += 1
+    }
+
+    private static func opaque(_ palettes: [ThemeAppearance: ThemePalette]) -> Color {
+        let dark = (palettes[.dark]?[.overlay].nsColor ?? .clear).withAlphaComponent(1)
+        let light = (palettes[.light]?[.overlay].nsColor ?? .clear).withAlphaComponent(1)
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+        })
     }
 
     private static func colors(_ palettes: [ThemeAppearance: ThemePalette]) -> [ThemeToken: Color] {
@@ -287,7 +304,7 @@ final class ThemeStore {
                 ? LegacyPalette.palette(appearance)
                 : Self.resolve(theme, appearance)
             palette = Self.adjust(palette, contrast: Double(contrast), appearance: appearance)
-            let opaque = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            let opaque = WindowActivity.reducesTransparency
             palette.colors[.overlay]?.alpha = opaque ? 1 : 0.7 + 0.3 * Double(min(glass, 100)) / 100
             next[appearance] = palette
         }

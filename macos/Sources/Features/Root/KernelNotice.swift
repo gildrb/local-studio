@@ -17,6 +17,7 @@ private struct KernelNoticeContent {
 
 struct KernelNotice: View {
     let store: StudioStore
+    @Environment(\.windowActivity) private var activity
 
     var body: some View {
         if !store.kernelNoticeHidden, let content {
@@ -50,7 +51,7 @@ struct KernelNotice: View {
             .padding(.vertical, 10)
             .frame(maxWidth: 460)
             .fixedSize(horizontal: false, vertical: true)
-            .background(Theme.overlay, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .background(Theme.overlay(activity), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline))
             .shadow(color: Theme.shadow, radius: 14, y: 6)
         }

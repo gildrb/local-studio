@@ -9,7 +9,7 @@ struct MarkdownView: View {
     var secondary = false
 
     var body: some View {
-        MarkdownText(rendering: MarkdownRenderer.rendering(MarkdownSource(text: text, size: size, secondary: secondary)))
+        MarkdownText(source: MarkdownSource(text: text, size: size, secondary: secondary))
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
@@ -117,6 +117,7 @@ struct MessageActionButton: View {
 
 struct MarkdownDocument {
     let blocks: [MarkdownBlock]
+    var endsInList = false
 }
 
 struct MarkdownBlock: Identifiable {
@@ -133,31 +134,12 @@ struct MarkdownBlock: Identifiable {
     let spacing: CGFloat
 }
 
-@MainActor
-enum MarkdownCache {
-    private final class Box {
-        let document: MarkdownDocument
-
-        init(_ document: MarkdownDocument) {
-            self.document = document
-        }
-    }
-
-    private static let storage: NSCache<NSString, Box> = {
-        let cache = NSCache<NSString, Box>()
-        cache.countLimit = 400
-        return cache
-    }()
-
-    static func document(for text: String) -> MarkdownDocument {
-        let key = text as NSString
-        if let box = storage.object(forKey: key) {
-            return box.document
-        }
-        let document = MarkdownParser.parse(text)
-        storage.setObject(Box(document), forKey: key)
-        return document
-    }
+struct MarkdownContext: Equatable {
+    var started = false
+    var afterList = false
+    var groups = 0
+    var tables = 0
+    var codes = 0
 }
 
 enum MarkdownParser {
@@ -168,23 +150,24 @@ enum MarkdownParser {
         var table: (row: Int, column: Int)?
     }
 
-    static func parse(_ text: String) -> MarkdownDocument {
+    static func parse(_ text: String, context: MarkdownContext = MarkdownContext()) -> MarkdownDocument {
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .full,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
         guard let parsed = try? AttributedString(markdown: text, options: options) else {
-            return MarkdownDocument(blocks: [MarkdownBlock(id: 0, kind: .paragraph(AttributedString(text), depth: 0, marker: nil, quote: 0), spacing: 0)])
+            let block = MarkdownBlock(id: 0, kind: .paragraph(AttributedString(text), depth: 0, marker: nil, quote: 0), spacing: context.started ? 12 : 0)
+            return MarkdownDocument(blocks: [block])
         }
         var blocks: [MarkdownBlock] = []
         var pending: Pending?
         var seenItems = Set<Int>()
-        var previousList: Int?
+        var previousList: Int? = context.afterList ? -1 : nil
 
         func flush() {
             guard let current = pending else { return }
             let spacing: CGFloat
-            if blocks.isEmpty {
+            if blocks.isEmpty, !context.started {
                 spacing = 0
             } else if current.list != nil, previousList != nil {
                 spacing = 5
@@ -273,7 +256,7 @@ enum MarkdownParser {
             }
             return MarkdownBlock(id: block.id, kind: .code(language, body), spacing: block.spacing)
         }
-        return MarkdownDocument(blocks: trimmed)
+        return MarkdownDocument(blocks: trimmed, endsInList: previousList != nil)
     }
 
     private static func appendCell(

@@ -19,6 +19,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     override init() {
         UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
+        if CommandLine.arguments.contains("+low-power") {
+            WindowActivity.lowPowerOverride = true
+        }
+        if CommandLine.arguments.contains("+reduce-transparency") {
+            WindowActivity.reduceTransparencyOverride = true
+        }
         store = StudioStore(launch: Self.bundledDaemon(), controllerMain: Self.bundledController())
         commandRefresh = CommandRefresh(store: store)
         super.init()

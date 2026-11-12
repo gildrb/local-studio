@@ -25,6 +25,9 @@ enum Theme {
     static var working: Color { ThemeTokens.shared.color(.working) }
     static var woke: Color { ThemeTokens.shared.color(.woke) }
     static var overlay: Color { ThemeTokens.shared.color(.overlay) }
+    static func overlay(_ activity: WindowActivity) -> Color {
+        activity.flatGlass ? ThemeTokens.shared.solidOverlay() : overlay
+    }
     static var shadow: Color { ThemeTokens.shared.color(.shadow) }
     static var code: Color { ThemeTokens.shared.color(.code) }
     static var codeText: Color { ThemeTokens.shared.color(.codeText) }

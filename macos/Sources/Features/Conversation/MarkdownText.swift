@@ -88,19 +88,206 @@ struct MarkdownSource: Hashable {
     let secondary: Bool
 }
 
-final class MarkdownRendering {
-    let source: MarkdownSource
+final class MarkdownPart {
+    let start: Int
+    let end: Int
+    let last: Bool
+    let context: MarkdownContext
+    let next: MarkdownContext
     let string: NSAttributedString
     let codeBlocks: [MarkdownCodeBlock]
     let pending: [HighlightKey]
     let revision: Int
 
-    init(source: MarkdownSource, string: NSAttributedString, codeBlocks: [MarkdownCodeBlock], pending: [HighlightKey], revision: Int) {
-        self.source = source
-        self.string = string
-        self.codeBlocks = codeBlocks
-        self.pending = pending
+    @MainActor
+    init(text: String, start: Int, end: Int, last: Bool, context: MarkdownContext, size: CGFloat, secondary: Bool, revision: Int) {
+        self.start = start
+        self.end = end
+        self.last = last
+        self.context = context
         self.revision = revision
+        let document = MarkdownParser.parse(text, context: context)
+        var builder = MarkdownStringBuilder(size: size, secondary: secondary, context: context)
+        builder.build(document, trim: last)
+        string = builder.output
+        codeBlocks = builder.codeBlocks
+        pending = builder.pending
+        next = MarkdownContext(
+            started: context.started || !document.blocks.isEmpty,
+            afterList: document.endsInList,
+            groups: builder.group,
+            tables: builder.tables,
+            codes: context.codes + builder.codeBlocks.count
+        )
+    }
+
+    @MainActor
+    func current(_ revision: Int) -> Bool {
+        revision == self.revision && !pending.contains(where: SyntaxHighlighter.shared.contains)
+    }
+}
+
+final class MarkdownRendering {
+    let source: MarkdownSource
+    let parts: [MarkdownPart]
+    let scan: MarkdownScan
+    let codeBlocks: [MarkdownCodeBlock]
+    let pending: [HighlightKey]
+    let revision: Int
+
+    init(source: MarkdownSource, parts: [MarkdownPart], scan: MarkdownScan, revision: Int) {
+        self.source = source
+        self.parts = parts
+        self.scan = scan
+        self.revision = revision
+        var blocks: [MarkdownCodeBlock] = []
+        var location = 0
+        for part in parts {
+            for block in part.codeBlocks {
+                blocks.append(MarkdownCodeBlock(range: NSRange(location: block.range.location + location, length: block.range.length), mark: block.mark))
+            }
+            location += part.string.length
+        }
+        codeBlocks = blocks
+        pending = parts.flatMap(\.pending)
+    }
+
+    @MainActor
+    func current(_ revision: Int) -> Bool {
+        revision == self.revision && !pending.contains(where: SyntaxHighlighter.shared.contains)
+    }
+}
+
+struct MarkdownScan {
+    private(set) var offset = 0
+    private(set) var boundaries: [Int] = []
+    private(set) var references = false
+    private var blank = false
+    private var fence: (marker: UInt8, count: Int)?
+    private var html: [UInt8]?
+
+    private static let space: UInt8 = 0x20
+    private static let tab: UInt8 = 0x09
+    private static let htmlBlocks: [(open: [UInt8], close: [UInt8])] = [
+        ("<!--", "-->"), ("<?", "?>"), ("<![CDATA[", "]]>"),
+        ("<script", "</script>"), ("<pre", "</pre>"), ("<style", "</style>"), ("<textarea", "</textarea>"),
+    ].map { (Array($0.0.utf8), Array($0.1.utf8)) }
+
+    mutating func advance(_ bytes: UnsafeBufferPointer<UInt8>) {
+        var start = offset
+        var index = offset
+        while index < bytes.count {
+            if bytes[index] == 0x0A {
+                line(bytes, start, index)
+                start = index + 1
+            }
+            index += 1
+        }
+        offset = start
+    }
+
+    private mutating func line(_ bytes: UnsafeBufferPointer<UInt8>, _ start: Int, _ end: Int) {
+        var first = start
+        while first < end, bytes[first] == Self.space, first - start < 4 {
+            first += 1
+        }
+        let indent = first - start
+        let shallow = indent <= 3 && (first == end || bytes[first] != Self.tab)
+        if let open = fence {
+            if shallow, closes(open, bytes, first, end) {
+                fence = nil
+            }
+            blank = false
+            return
+        }
+        if let close = html {
+            if Self.find(close, bytes, first, end) {
+                html = nil
+            }
+            blank = false
+            return
+        }
+        if (start ..< end).allSatisfy({ Self.isBlank(bytes[$0]) }) {
+            blank = true
+            return
+        }
+        if blank, indent == 0, bytes[start] != Self.tab, Self.opensBlock(bytes, start, end) {
+            boundaries.append(start)
+        }
+        blank = false
+        guard shallow else { return }
+        let marker = bytes[first]
+        if marker == 0x60 || marker == 0x7E {
+            var count = 0
+            while first + count < end, bytes[first + count] == marker {
+                count += 1
+            }
+            if count >= 3, marker == 0x7E || !(first + count ..< end).contains(where: { bytes[$0] == 0x60 }) {
+                fence = (marker, count)
+            }
+        } else if marker == 0x3C {
+            for block in Self.htmlBlocks where Self.matches(block.open, bytes, first, end) {
+                if !Self.find(block.close, bytes, first + block.open.count, end) {
+                    html = block.close
+                }
+                return
+            }
+            if first + 2 < end, bytes[first + 1] == 0x21, (bytes[first + 2] | 0x20) >= 0x61, (bytes[first + 2] | 0x20) <= 0x7A,
+               !Self.find([0x3E], bytes, first + 2, end) {
+                html = [0x3E]
+            }
+        } else if marker == 0x5B, Self.find([0x5D, 0x3A], bytes, first, end) {
+            references = true
+        }
+    }
+
+    private func closes(_ open: (marker: UInt8, count: Int), _ bytes: UnsafeBufferPointer<UInt8>, _ first: Int, _ end: Int) -> Bool {
+        var index = first
+        while index < end, bytes[index] == open.marker {
+            index += 1
+        }
+        guard index - first >= open.count else { return false }
+        return (index ..< end).allSatisfy { Self.isBlank(bytes[$0]) }
+    }
+
+    private static func opensBlock(_ bytes: UnsafeBufferPointer<UInt8>, _ start: Int, _ end: Int) -> Bool {
+        let first = bytes[start]
+        let after: (Int) -> Bool = { $0 >= end || isBlank(bytes[$0]) }
+        switch first {
+        case 0x2D, 0x2B, 0x2A:
+            return !after(start + 1)
+        case 0x3C:
+            return false
+        case 0x30 ... 0x39:
+            var index = start
+            while index < end, index - start < 9, (0x30 ... 0x39).contains(bytes[index]) {
+                index += 1
+            }
+            return !(index < end && (bytes[index] == 0x2E || bytes[index] == 0x29) && after(index + 1))
+        default:
+            return true
+        }
+    }
+
+    private static func isBlank(_ byte: UInt8) -> Bool {
+        byte == space || byte == tab || byte == 0x0D
+    }
+
+    private static func matches(_ needle: [UInt8], _ bytes: UnsafeBufferPointer<UInt8>, _ at: Int, _ end: Int) -> Bool {
+        guard end - at >= needle.count else { return false }
+        for (offset, byte) in needle.enumerated() where (bytes[at + offset] | (byte >= 0x61 ? 0x20 : 0)) != byte {
+            return false
+        }
+        return true
+    }
+
+    private static func find(_ needle: [UInt8], _ bytes: UnsafeBufferPointer<UInt8>, _ from: Int, _ end: Int) -> Bool {
+        var index = from
+        while index + needle.count <= end {
+            if matches(needle, bytes, index, end) { return true }
+            index += 1
+        }
+        return false
     }
 }
 
@@ -127,20 +314,61 @@ enum MarkdownRenderer {
         return cache
     }()
 
-    static func rendering(_ source: MarkdownSource) -> MarkdownRendering {
+    static func rendering(_ source: MarkdownSource, after previous: MarkdownRendering? = nil) -> MarkdownRendering {
         let revision = ThemeTokens.shared.revision
+        if let previous, previous.source == source, previous.current(revision) {
+            return previous
+        }
         let key = "\(source.size)|\(source.secondary)|\(source.text)" as NSString
-        if let cached = storage.object(forKey: key), cached.revision == revision,
-           !cached.pending.contains(where: SyntaxHighlighter.shared.contains) {
+        if let cached = storage.object(forKey: key), cached.current(revision) {
             return cached
         }
-        var builder = MarkdownStringBuilder(size: source.size, secondary: source.secondary)
-        builder.build(MarkdownCache.document(for: source.text))
-        let rendering = MarkdownRendering(
-            source: source, string: builder.output, codeBlocks: builder.codeBlocks, pending: builder.pending, revision: revision
-        )
+        let base = previous.flatMap { $0.source.size == source.size && $0.source.secondary == source.secondary ? $0 : nil }
+        var text = source.text
+        let rendering = text.withUTF8 { build(source, $0, base: base, revision: revision) }
         storage.setObject(rendering, forKey: key)
         return rendering
+    }
+
+    private static func build(_ source: MarkdownSource, _ bytes: UnsafeBufferPointer<UInt8>, base: MarkdownRendering?, revision: Int) -> MarkdownRendering {
+        var scan = MarkdownScan()
+        var matched = 0
+        if let base {
+            var old = base.source.text
+            matched = old.withUTF8 { old in
+                if shares(bytes, old, old.count) { return old.count }
+                return shares(bytes, old, base.scan.offset) ? base.scan.offset : 0
+            }
+            if matched >= base.scan.offset {
+                scan = base.scan
+            }
+        }
+        scan.advance(bytes)
+        let starts = scan.references ? [0] : [0] + scan.boundaries
+        var parts: [MarkdownPart] = []
+        var context = MarkdownContext()
+        for (index, start) in starts.enumerated() {
+            let last = index == starts.count - 1
+            let end = last ? bytes.count : starts[index + 1]
+            if let base, index < base.parts.count, case let old = base.parts[index],
+               old.start == start, old.end == end, end <= matched, old.last == last, old.context == context, old.current(revision) {
+                parts.append(old)
+            } else {
+                let text = String(bytes: UnsafeBufferPointer(rebasing: bytes[start ..< end]), encoding: .utf8) ?? ""
+                parts.append(MarkdownPart(
+                    text: text, start: start, end: end, last: last, context: context,
+                    size: source.size, secondary: source.secondary, revision: revision
+                ))
+            }
+            context = parts[parts.count - 1].next
+        }
+        return MarkdownRendering(source: source, parts: parts, scan: scan, revision: revision)
+    }
+
+    private static func shares(_ bytes: UnsafeBufferPointer<UInt8>, _ old: UnsafeBufferPointer<UInt8>, _ count: Int) -> Bool {
+        guard count > 0 else { return true }
+        guard bytes.count >= count, old.count >= count, let lhs = bytes.baseAddress, let rhs = old.baseAddress else { return false }
+        return memcmp(lhs, rhs, count) == 0
     }
 }
 
@@ -151,23 +379,27 @@ private struct MarkdownStringBuilder {
     let output = NSMutableAttributedString()
     var codeBlocks: [MarkdownCodeBlock] = []
     var pending: [HighlightKey] = []
-    private var group = 0
-    private var tables = 0
+    private(set) var group: Int
+    private(set) var tables: Int
+    private let codeBase: Int
     private let textColor: NSColor
     private let secondaryColor: NSColor
     private let inlineCodeBackground: NSColor
     private let linkColor: NSColor
 
-    init(size: CGFloat, secondary: Bool) {
+    init(size: CGFloat, secondary: Bool, context: MarkdownContext) {
         self.size = size
         self.secondary = secondary
+        group = context.groups
+        tables = context.tables
+        codeBase = context.codes
         secondaryColor = NSColor(Theme.secondaryText)
         textColor = secondary ? secondaryColor : .labelColor
         inlineCodeBackground = NSColor(Theme.message)
         linkColor = NSColor(Theme.primary)
     }
 
-    mutating func build(_ document: MarkdownDocument) {
+    mutating func build(_ document: MarkdownDocument, trim: Bool) {
         for block in document.blocks {
             if block.spacing != 5 {
                 group += 1
@@ -185,7 +417,7 @@ private struct MarkdownStringBuilder {
                 table(rows, spacing: block.spacing)
             }
         }
-        if output.length > 0, output.string.hasSuffix("\n") {
+        if trim, output.length > 0, output.string.hasSuffix("\n") {
             output.deleteCharacters(in: NSRange(location: output.length - 1, length: 1))
         }
     }
@@ -239,7 +471,7 @@ private struct MarkdownStringBuilder {
     }
 
     private mutating func code(_ code: String, language: String?, spacing: CGFloat) {
-        let mark = MarkdownCodeMark(index: codeBlocks.count, language: language, code: code)
+        let mark = MarkdownCodeMark(index: codeBase + codeBlocks.count, language: language, code: code)
         let lines = (code.isEmpty ? "\u{200B}" : code).components(separatedBy: "\n")
         let font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let key = HighlightKey(text: code, language: language, path: nil)
@@ -491,28 +723,95 @@ enum MarkdownCopy {
 }
 
 struct MarkdownText: NSViewRepresentable {
-    let rendering: MarkdownRendering
+    let source: MarkdownSource
 
     func makeNSView(context: Context) -> MarkdownNSTextView {
         MarkdownNSTextView()
     }
 
     func updateNSView(_ view: MarkdownNSTextView, context: Context) {
-        view.show(rendering)
+        view.show(source)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: MarkdownNSTextView, context: Context) -> CGSize? {
-        view.show(rendering)
+        view.show(source)
         let width = proposal.width.flatMap { $0.isFinite && $0 > 0 ? $0 : nil } ?? 680
         return CGSize(width: width, height: view.height(for: width))
     }
 }
 
+@MainActor
+private final class MarkdownMeasure {
+    static let probes = 3
+
+    let layout: NSLayoutManager
+    let container: NSTextContainer
+    private var boxes: [NSRect] = []
+    private var boxWidth: CGFloat = 0
+    private var measured: (width: CGFloat, height: CGFloat, offset: CGFloat)?
+
+    init(layout: NSLayoutManager, container: NSTextContainer) {
+        self.layout = layout
+        self.container = container
+    }
+
+    func invalidate(codes: Int) {
+        measured = nil
+        if boxes.count > codes {
+            boxes.removeSubrange(codes...)
+        }
+    }
+
+    func measure(_ width: CGFloat, _ blocks: [MarkdownCodeBlock]) -> (height: CGFloat, offset: CGFloat) {
+        if let measured, measured.width == width { return (measured.height, measured.offset) }
+        if container.size.width != width {
+            container.size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        }
+        layout.ensureLayout(for: container)
+        let boxes = rawBoxes(blocks)
+        let offset = max(0, -(boxes.first?.minY ?? 0))
+        let bottom = max(layout.usedRect(for: container).maxY, boxes.last?.maxY ?? 0)
+        let height = ceil(bottom + offset)
+        measured = (width, height, offset)
+        return (height, offset)
+    }
+
+    func rawBoxes(_ blocks: [MarkdownCodeBlock]) -> [NSRect] {
+        let width = container.size.width
+        if width != boxWidth {
+            boxes = []
+            boxWidth = width
+        }
+        if boxes.count > blocks.count {
+            boxes.removeSubrange(blocks.count...)
+        }
+        while boxes.count < blocks.count {
+            let lines = lineBounds(blocks[boxes.count].range)
+            boxes.append(lines.isNull ? .null : NSRect(
+                x: 0, y: lines.minY - MarkdownMetrics.codeTop,
+                width: width, height: lines.height + MarkdownMetrics.codeTop + MarkdownMetrics.codeBottom
+            ))
+        }
+        return boxes.filter { !$0.isNull }
+    }
+
+    func lineBounds(_ range: NSRange) -> NSRect {
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var result = NSRect.null
+        layout.enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, _, _ in
+            result = result.union(used)
+        }
+        return result
+    }
+}
+
 final class MarkdownNSTextView: NSTextView {
     private(set) var rendering: MarkdownRendering?
-    private var measured: (width: CGFloat, height: CGFloat)?
     private var offset: CGFloat = 0
     private var headers: [NSHostingView<CodeBlockHeader>] = []
+    private let main: MarkdownMeasure
+    private var probes: [MarkdownMeasure] = []
+    private var framed = false
     private var highlighting = false
 
     init() {
@@ -525,6 +824,7 @@ final class MarkdownNSTextView: NSTextView {
         container.lineFragmentPadding = 0
         container.widthTracksTextView = true
         layout.addTextContainer(container)
+        main = MarkdownMeasure(layout: layout, container: container)
         super.init(frame: NSRect(x: 0, y: 0, width: 600, height: 20), textContainer: container)
         isEditable = false
         isSelectable = true
@@ -548,42 +848,87 @@ final class MarkdownNSTextView: NSTextView {
         NSPoint(x: 0, y: offset)
     }
 
+    func show(_ source: MarkdownSource) {
+        show(MarkdownRenderer.rendering(source, after: rendering))
+    }
+
     func show(_ next: MarkdownRendering) {
-        guard next !== rendering else { return }
+        guard next !== rendering, let textStorage else { return }
         let previous = rendering
         rendering = next
-        let selection = selectedRanges
-        textStorage?.setAttributedString(next.string)
-        if previous?.string.length == next.string.length {
-            selectedRanges = selection
+        var shared = 0
+        var location = 0
+        var codes = 0
+        if let previous {
+            let limit = min(previous.parts.count, next.parts.count)
+            while shared < limit, previous.parts[shared] === next.parts[shared] {
+                location += next.parts[shared].string.length
+                codes += next.parts[shared].codeBlocks.count
+                shared += 1
+            }
         }
-        measured = nil
-        syncHeaders()
+        let top = lineTop(location)
+        let replacement = NSMutableAttributedString()
+        for part in next.parts[shared...] {
+            replacement.append(part.string)
+        }
+        textStorage.replaceCharacters(in: NSRange(location: location, length: textStorage.length - location), with: replacement)
+        main.invalidate(codes: codes)
+        for probe in probes {
+            probe.invalidate(codes: codes)
+        }
+        syncHeaders(from: codes)
         needsLayout = true
-        needsDisplay = true
+        setNeedsDisplay(NSRect(x: 0, y: top, width: bounds.width, height: max(bounds.height - top, 0)))
         highlightPending()
     }
 
     func height(for width: CGFloat) -> CGFloat {
-        if let measured, measured.width == width { return measured.height }
-        guard let layoutManager, let textContainer else { return 0 }
-        textContainer.size = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        layoutManager.ensureLayout(for: textContainer)
-        let boxes = rawCodeBoxes()
-        offset = max(0, -(boxes.map(\.minY).min() ?? 0))
+        let blocks = rendering?.codeBlocks ?? []
+        guard !framed || width == main.container.size.width else {
+            return probe(width).measure(width, blocks).height
+        }
+        let (height, next) = main.measure(width, blocks)
+        if next != offset {
+            offset = next
+            needsDisplay = true
+        }
         (layoutManager as? MarkdownLayoutManager)?.containerOrigin = NSPoint(x: 0, y: offset)
-        let bottom = max(layoutManager.usedRect(for: textContainer).maxY, boxes.map(\.maxY).max() ?? 0)
-        let height = ceil(bottom + offset)
-        measured = (width, height)
         return height
     }
 
+    private func probe(_ width: CGFloat) -> MarkdownMeasure {
+        if let index = probes.firstIndex(where: { $0.container.size.width == width }) {
+            let probe = probes.remove(at: index)
+            probes.insert(probe, at: 0)
+            return probe
+        }
+        if probes.count >= MarkdownMeasure.probes {
+            textStorage?.removeLayoutManager(probes.removeLast().layout)
+        }
+        let layout = NSLayoutManager()
+        layout.allowsNonContiguousLayout = false
+        layout.backgroundLayoutEnabled = false
+        textStorage?.addLayoutManager(layout)
+        let container = NSTextContainer(size: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        layout.addTextContainer(container)
+        let probe = MarkdownMeasure(layout: layout, container: container)
+        probes.insert(probe, at: 0)
+        return probe
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
-        let changed = newSize.width != frame.width
+        let old = frame.size
         super.setFrameSize(newSize)
-        if changed {
+        if window != nil {
+            framed = true
+        }
+        if newSize.width != old.width {
             _ = height(for: newSize.width)
             needsLayout = true
+        } else if newSize.height > old.height {
+            setNeedsDisplay(NSRect(x: 0, y: old.height, width: newSize.width, height: newSize.height - old.height))
         }
     }
 
@@ -592,13 +937,16 @@ final class MarkdownNSTextView: NSTextView {
         let boxes = codeBoxes()
         for (index, header) in headers.enumerated() {
             guard index < boxes.count else { break }
-            header.frame = NSRect(x: boxes[index].minX, y: boxes[index].minY, width: boxes[index].width, height: MarkdownMetrics.codeHeader)
+            let frame = NSRect(x: boxes[index].minX, y: boxes[index].minY, width: boxes[index].width, height: MarkdownMetrics.codeHeader)
+            if header.frame != frame {
+                header.frame = frame
+            }
         }
     }
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard let rendering, let layoutManager else { return }
+        guard let layoutManager, let textContainer, let textStorage else { return }
         let hairline = NSColor(Theme.hairline)
         let code = NSColor(Theme.code)
         for box in codeBoxes() where box.intersects(rect) {
@@ -611,13 +959,18 @@ final class MarkdownNSTextView: NSTextView {
             hairline.setFill()
             NSRect(x: box.minX, y: box.minY + MarkdownMetrics.codeHeader, width: box.width, height: 1).fill()
         }
-        let string = rendering.string
-        let whole = NSRange(location: 0, length: string.length)
+        let whole = NSRange(location: 0, length: textStorage.length)
         let origin = textContainerOrigin
+        let glyphs = layoutManager.glyphRange(forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y), in: textContainer)
+        let visible = layoutManager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         NSColor(Theme.input).setFill()
-        string.enumerateAttribute(.markdownQuote, in: whole, options: []) { value, range, _ in
-            guard let depth = value as? Int else { return }
-            let lines = self.lineBounds(range)
+        var drawn = NSRange(location: NSNotFound, length: 0)
+        textStorage.enumerateAttribute(.markdownQuote, in: visible, options: .longestEffectiveRangeNotRequired) { value, range, _ in
+            guard let depth = value as? Int, !NSLocationInRange(range.location, drawn) else { return }
+            var full = range
+            _ = textStorage.attribute(.markdownQuote, at: range.location, longestEffectiveRange: &full, in: whole)
+            drawn = full
+            let lines = self.main.lineBounds(full)
             guard !lines.isNull else { return }
             for level in 0 ..< depth {
                 let bar = NSRect(x: origin.x + CGFloat(level) * MarkdownMetrics.quoteIndent, y: lines.minY + origin.y, width: 2.5, height: lines.height)
@@ -625,7 +978,7 @@ final class MarkdownNSTextView: NSTextView {
             }
         }
         hairline.setFill()
-        string.enumerateAttribute(.markdownRule, in: whole, options: []) { value, range, _ in
+        textStorage.enumerateAttribute(.markdownRule, in: visible, options: .longestEffectiveRangeNotRequired) { value, range, _ in
             guard value != nil else { return }
             let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
             guard glyphs.length > 0 else { return }
@@ -662,40 +1015,24 @@ final class MarkdownNSTextView: NSTextView {
         return resigned
     }
 
-    private func lineBounds(_ range: NSRange) -> NSRect {
-        guard let layoutManager else { return .null }
-        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-        var result = NSRect.null
-        layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { _, used, _, _, _ in
-            result = result.union(used)
-        }
-        return result
-    }
-
-    private func rawCodeBoxes() -> [NSRect] {
-        guard let rendering, let textContainer else { return [] }
-        return rendering.codeBlocks.compactMap { block in
-            let lines = lineBounds(block.range)
-            guard !lines.isNull else { return nil }
-            return NSRect(
-                x: 0, y: lines.minY - MarkdownMetrics.codeTop,
-                width: textContainer.size.width, height: lines.height + MarkdownMetrics.codeTop + MarkdownMetrics.codeBottom
-            )
-        }
+    private func lineTop(_ location: Int) -> CGFloat {
+        guard location > 0, let layoutManager else { return 0 }
+        let glyph = layoutManager.glyphIndexForCharacter(at: location - 1)
+        return max(layoutManager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY + textContainerOrigin.y, 0)
     }
 
     private func codeBoxes() -> [NSRect] {
         let origin = textContainerOrigin
-        return rawCodeBoxes().map { $0.offsetBy(dx: origin.x, dy: origin.y) }
+        return main.rawBoxes(rendering?.codeBlocks ?? []).map { $0.offsetBy(dx: origin.x, dy: origin.y) }
     }
 
-    private func syncHeaders() {
+    private func syncHeaders(from first: Int) {
         let blocks = rendering?.codeBlocks ?? []
         while headers.count > blocks.count {
             headers.removeLast().removeFromSuperview()
         }
-        for (index, block) in blocks.enumerated() {
-            let header = CodeBlockHeader(language: block.mark.language, code: block.mark.code)
+        for index in min(first, headers.count) ..< blocks.count {
+            let header = CodeBlockHeader(language: blocks[index].mark.language, code: blocks[index].mark.code)
             if index < headers.count {
                 if headers[index].rootView != header {
                     headers[index].rootView = header
@@ -720,7 +1057,7 @@ final class MarkdownNSTextView: NSTextView {
             guard let self else { return }
             highlighting = false
             if let current = self.rendering {
-                show(MarkdownRenderer.rendering(current.source))
+                show(MarkdownRenderer.rendering(current.source, after: current))
             }
         }
     }
