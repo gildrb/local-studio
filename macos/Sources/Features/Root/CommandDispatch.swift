@@ -105,7 +105,7 @@ extension StudioStore {
         case "chat.newTab": return { self.newThreadTab() }
         case "thread.close":
             if let window = NSApp.keyWindow, window !== mainWindow { return { window.performClose(nil) } }
-            guard !panels.rightPanelOpen else { return nil }
+            guard !(onThread && panels.rightPanelOpen) else { return nil }
             guard shell.route == .thread, conversation.selectedID != nil else { return { self.mainWindow?.performClose(nil) } }
             return { self.closeThread() }
         case "thread.recentNext": return { self.cycleRecent(1) }
