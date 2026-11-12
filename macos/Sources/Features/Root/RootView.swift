@@ -36,17 +36,12 @@ struct RootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .overlay(alignment: .topTrailing) {
-            PanelToggles(store: store)
+            if shell.route == .thread {
+                PanelToggles(store: store)
+            }
         }
         .overlay(alignment: .top) {
-            if let page = shell.palette {
-                ZStack(alignment: .top) {
-                    Color.black.opacity(0.001)
-                        .onTapGesture { shell.palette = nil }
-                    CommandPalette(store: store, page: page)
-                        .padding(.top, 72)
-                }
-            }
+            PaletteLayer(store: store)
         }
         .background(Theme.canvas)
         .ignoresSafeArea(.container, edges: .top)
@@ -169,6 +164,22 @@ struct RootView: View {
         switch confirmation {
         case .delete: .destructive
         case .archive, .unpin: nil
+        }
+    }
+}
+
+private struct PaletteLayer: View {
+    let store: StudioStore
+
+    var body: some View {
+        if let page = store.shell.palette {
+            ZStack(alignment: .top) {
+                Color.black.opacity(0.001)
+                    .onTapGesture { store.shell.palette = nil }
+                CommandPalette(store: store, page: page)
+                    .id(page)
+                    .padding(.top, 72)
+            }
         }
     }
 }
