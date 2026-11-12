@@ -31,9 +31,9 @@ extension StudioStore {
     }
 
     func canDispatch(_ command: String) -> Bool {
-        if builtin(command) != nil || commands.isRegistered(command) { return true }
+        if builtin(command) != nil || commands.canPerform(command) { return true }
         guard let chord = binding(command)?.shortcut else { return false }
-        return pages.keybindingIndex.sharing(chord).contains { $0.command != command && commands.isRegistered($0.command) }
+        return pages.keybindingIndex.sharing(chord).contains { $0.command != command && commands.canPerform($0.command) }
     }
 
     func menuShortcut(_ command: String) -> KeyboardShortcut? {
@@ -69,6 +69,7 @@ extension StudioStore {
 
     func builtin(_ command: String) -> (@MainActor () -> Void)? {
         let row = focusedRow
+        let onThread = shell.route == .thread
         switch command {
         case "sidebar.toggle": return { self.toggleSidebar() }
         case "navigation.back":
@@ -77,13 +78,19 @@ extension StudioStore {
         case "navigation.forward":
             guard shell.canGoForward else { return nil }
             return { self.goForward() }
-        case "terminal.toggle": return { self.panels.toggleTerminal() }
-        case "rightPanel.toggle": return { self.panels.toggleRightPanel() }
+        case "terminal.toggle":
+            guard onThread else { return nil }
+            return { self.panels.toggleTerminal() }
+        case "rightPanel.toggle":
+            guard onThread else { return nil }
+            return { self.panels.toggleRightPanel() }
         case "rightPanel.close":
             if let window = NSApp.keyWindow, window !== mainWindow { return { window.performClose(nil) } }
-            guard panels.rightPanelOpen else { return nil }
+            guard onThread, panels.rightPanelOpen else { return nil }
             return { self.panels.closeActiveSurface() }
-        case "diff.toggle": return { self.panels.toggleDiff() }
+        case "diff.toggle":
+            guard onThread else { return nil }
+            return { self.panels.toggleDiff() }
         case "commandPalette.toggle": return { self.togglePalette(.root) }
         case "filePicker.toggle": return { self.togglePalette(.goToFile) }
         case "projectSearch.toggle": return { self.togglePalette(.searchProject) }
@@ -109,10 +116,10 @@ extension StudioStore {
             guard shell.route == .thread else { return nil }
             return { self.focus(.composer) }
         case "rightPanel.previousTab":
-            guard panels.rightPanelOpen, panels.surfaces.count > 1 else { return nil }
+            guard onThread, panels.rightPanelOpen, panels.surfaces.count > 1 else { return nil }
             return { self.stepPanelTab(-1) }
         case "rightPanel.nextTab":
-            guard panels.rightPanelOpen, panels.surfaces.count > 1 else { return nil }
+            guard onThread, panels.rightPanelOpen, panels.surfaces.count > 1 else { return nil }
             return { self.stepPanelTab(1) }
         case "timeline.copyMessage":
             guard shell.region == .timeline, shell.timelineCursor != nil else { return nil }

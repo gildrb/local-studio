@@ -704,6 +704,11 @@ impl App {
             Page::PullRequests => "pulls",
         };
         self.stack.set_visible_child_name(page);
+        for name in ["toggle-panel", "toggle-terminal", "toggle-diff"] {
+            if let Some(action) = self.window.lookup_action(name).and_downcast::<gio::SimpleAction>() {
+                action.set_enabled(state.page == Page::Thread);
+            }
+        }
         let show_hero = state.selected.is_none();
         self.conversation.set_visible_child_name(if show_hero { "hero" } else { "timeline" });
         if show_hero {

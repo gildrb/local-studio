@@ -41,11 +41,19 @@ struct UsagePage: View {
     }
 
     @ViewBuilder private var content: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
             ForEach(UsageMode.allCases, id: \.self) { tab in
                 DashboardTab(title: tab.title, active: mode == tab) { mode = tab }
             }
+            Spacer(minLength: 12)
+            if mode != .limits, let report = pages.usage {
+                Text(TokenSummary.since(report.lifetime))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Theme.secondaryText)
+                    .lineLimit(1)
+            }
         }
+        .padding(.leading, -7)
         if let report = pages.usage {
             if mode == .limits {
                 UsageLimits(limits: report.limits, providers: pages.providers)

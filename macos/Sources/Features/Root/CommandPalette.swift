@@ -18,15 +18,49 @@ struct PaletteItem: Identifiable {
     let action: @MainActor () -> Void
 }
 
+@MainActor
+@Observable
+final class PaletteSelection {
+    var index = 0
+    private(set) var reveal = 0
+    @ObservationIgnored private var anchor = PaletteSelection.pointer
+
+    func move(to target: Int, count: Int) {
+        guard count > 0 else { return }
+        let clamped = min(max(target, 0), count - 1)
+        if index != clamped { index = clamped }
+        anchor = Self.pointer
+        reveal += 1
+    }
+
+    func reset() {
+        if index != 0 { index = 0 }
+        anchor = Self.pointer
+        reveal += 1
+    }
+
+    func hover(_ offset: Int) {
+        guard let event = NSApp.currentEvent, event.type == .mouseMoved, event.locationInWindow != anchor else { return }
+        anchor = event.locationInWindow
+        if index != offset { index = offset }
+    }
+
+    private static var pointer: NSPoint? {
+        (NSApp.currentEvent?.window ?? NSApp.keyWindow)?.mouseLocationOutsideOfEventStream
+    }
+}
+
 struct CommandPalette: View {
+    private static let pageStep = 10
+
     let store: StudioStore
     let page: PalettePage
     @Environment(\.openSettings) private var openSettings
     @State private var query = ""
-    @State private var highlighted = 0
+    @State private var selection = PaletteSelection()
     @State private var request: String?
+    @State private var settled: String?
     @State private var failure: String?
-    @FocusState private var focused: Bool
 
     var body: some View {
         let items = items
@@ -51,100 +85,57 @@ struct CommandPalette: View {
                         .foregroundStyle(Theme.secondaryText)
                         .accessibilityHidden(true)
                 }
-                TextField(placeholder, text: $query)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 15))
-                    .focused($focused)
-                    .onKeyPress(.downArrow) {
-                        highlighted = min(highlighted + 1, max(items.count - 1, 0))
-                        return .handled
-                    }
-                    .onKeyPress(.upArrow) {
-                        highlighted = max(highlighted - 1, 0)
-                        return .handled
-                    }
-                    .onKeyPress(.escape) {
-                        if page != .root {
-                            go(.root)
-                        } else {
-                            store.shell.palette = nil
-                        }
-                        return .handled
-                    }
-                    .onKeyPress(.delete) {
-                        guard query.isEmpty, page != .root else { return .ignored }
-                        go(.root)
-                        return .handled
-                    }
-                    .onSubmit {
-                        if items.indices.contains(highlighted) {
-                            items[highlighted].action()
-                        }
-                    }
+                PaletteField(placeholder: placeholder, text: query) { text in
+                    query = text
+                    selection.reset()
+                } command: { command in
+                    perform(command, items)
+                }
+                .frame(maxWidth: .infinity)
             }
             .padding(.horizontal, 14)
             .frame(height: 46)
             Divider()
-            list(items)
+            PaletteList(items: items, selection: selection, empty: emptyText)
         }
         .frame(width: 600)
         .background(Theme.overlay, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.hairline))
         .shadow(color: Theme.shadow, radius: 24, y: 10)
-        .onAppear { focused = true }
-        .onChange(of: query) { highlighted = 0 }
-        .onChange(of: page) {
-            query = ""
-            highlighted = 0
-            request = nil
-            failure = nil
-            focused = true
-        }
         .task(id: SearchToken(page: page, query: query)) {
             await search()
         }
+        .onChange(of: arrived) { _, value in
+            guard value else { return }
+            settled = request
+            selection.reset()
+        }
     }
 
-    private func list(_ items: [PaletteItem]) -> some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 1) {
-                    if items.isEmpty {
-                        Text(emptyText)
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 22)
-                    }
-                    ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
-                        if offset == 0 || items[offset - 1].group != item.group {
-                            Text(item.group)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Theme.secondaryText)
-                                .padding(.horizontal, 10)
-                                .padding(.top, offset == 0 ? 4 : 10)
-                                .padding(.bottom, 3)
-                        }
-                        PaletteRow(item: item, highlighted: offset == highlighted)
-                            .id(item.id)
-                            .onTapGesture { item.action() }
-                            .onHover { if $0 { highlighted = offset } }
-                            .accessibilityElement(children: .combine)
-                            .accessibilityAddTraits(offset == highlighted ? [.isButton, .isSelected] : .isButton)
-                            .accessibilityAction { item.action() }
-                    }
-                }
-                .padding(6)
+    private func perform(_ command: PaletteCommand, _ items: [PaletteItem]) -> Bool {
+        let index = min(selection.index, max(items.count - 1, 0))
+        switch command {
+        case .up: selection.move(to: index - 1, count: items.count)
+        case .down: selection.move(to: index + 1, count: items.count)
+        case .pageUp: selection.move(to: index - Self.pageStep, count: items.count)
+        case .pageDown: selection.move(to: index + Self.pageStep, count: items.count)
+        case .first: selection.move(to: 0, count: items.count)
+        case .last: selection.move(to: items.count - 1, count: items.count)
+        case .submit:
+            if items.indices.contains(index) {
+                items[index].action()
             }
-            .frame(maxHeight: 400)
-            .fixedSize(horizontal: false, vertical: true)
-            .scrollIndicators(.never)
-            .onChange(of: highlighted) { _, value in
-                if items.indices.contains(value) {
-                    proxy.scrollTo(items[value].id)
-                }
+        case .cancel:
+            if page != .root {
+                go(.root)
+            } else {
+                store.shell.palette = nil
             }
+        case .deleteBackward:
+            guard query.isEmpty, page != .root else { return false }
+            go(.root)
         }
+        return true
     }
 
     private var pageTitle: String {
@@ -292,7 +283,8 @@ struct CommandPalette: View {
                 },
             ]
         }
-        return items
+        let commands = ["terminal": "terminal.toggle", "panel": "rightPanel.toggle"]
+        return items.filter { item in commands[item.id].map(store.canDispatch) ?? true }
     }
 
     private var projectItems: [PaletteItem] {
@@ -337,7 +329,11 @@ struct CommandPalette: View {
     }
 
     private var results: [SearchHit]? {
-        request.flatMap { store.workspace.searchResults[$0] }
+        request.flatMap { store.workspace.searchResults[$0] } ?? settled.flatMap { store.workspace.searchResults[$0] }
+    }
+
+    private var arrived: Bool {
+        request.flatMap { store.workspace.searchResults[$0] } != nil
     }
 
     private func threadItem(_ row: ThreadRow, group: String) -> PaletteItem {
@@ -355,6 +351,7 @@ struct CommandPalette: View {
         let needle = query.trimmingCharacters(in: .whitespaces)
         guard !needle.isEmpty else {
             request = nil
+            settled = nil
             return
         }
         try? await Task.sleep(for: .milliseconds(120))
@@ -380,9 +377,67 @@ struct CommandPalette: View {
     }
 }
 
+private struct PaletteList: View {
+    private static let top = "palette-top"
+
+    let items: [PaletteItem]
+    let selection: PaletteSelection
+    let empty: String
+
+    var body: some View {
+        let selected = items.isEmpty ? nil : min(selection.index, items.count - 1)
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 1) {
+                    Color.clear.frame(height: 5).id(Self.top)
+                    if items.isEmpty {
+                        Text(empty)
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(Theme.secondaryText)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 22)
+                    }
+                    ForEach(Array(items.enumerated()), id: \.element.id) { offset, item in
+                        if offset == 0 || items[offset - 1].group != item.group {
+                            Text(item.group)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(Theme.secondaryText)
+                                .padding(.horizontal, 10)
+                                .padding(.top, offset == 0 ? 4 : 10)
+                                .padding(.bottom, 3)
+                        }
+                        PaletteRow(item: item, selected: offset == selected)
+                            .id(item.id)
+                            .onContinuousHover { phase in
+                                if case .active = phase { selection.hover(offset) }
+                            }
+                            .onTapGesture { item.action() }
+                            .accessibilityElement(children: .combine)
+                            .accessibilityAddTraits(offset == selected ? [.isButton, .isSelected] : .isButton)
+                            .accessibilityAction { item.action() }
+                    }
+                }
+                .padding([.horizontal, .bottom], 6)
+            }
+            .frame(maxHeight: 400)
+            .fixedSize(horizontal: false, vertical: true)
+            .scrollIndicators(.never)
+            .onChange(of: selection.reveal) {
+                guard !items.isEmpty else { return }
+                let index = min(selection.index, items.count - 1)
+                if index == 0 {
+                    proxy.scrollTo(Self.top, anchor: .top)
+                } else {
+                    proxy.scrollTo(items[index].id)
+                }
+            }
+        }
+    }
+}
+
 private struct PaletteRow: View {
     let item: PaletteItem
-    let highlighted: Bool
+    let selected: Bool
 
     var body: some View {
         HStack(spacing: 10) {
@@ -390,11 +445,12 @@ private struct PaletteRow: View {
                 .frame(width: 18)
             Text(item.title)
                 .font(.system(size: 13))
+                .foregroundStyle(selected ? Theme.menuSelectionText : Theme.text)
                 .lineLimit(1)
             if let subtitle = item.subtitle, !subtitle.isEmpty {
                 Text(subtitle)
                     .font(.system(size: 12))
-                    .foregroundStyle(Theme.secondaryText)
+                    .foregroundStyle(selected ? Theme.menuSelectionText.opacity(0.8) : Theme.secondaryText)
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -402,17 +458,23 @@ private struct PaletteRow: View {
             if item.checked {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.primary)
+                    .foregroundStyle(selected ? Theme.menuSelectionText : Theme.primary)
                     .accessibilityLabel("Selected")
             }
             if let shortcut = item.shortcut {
-                ShortcutHint(text: shortcut)
+                Text(shortcut)
+                    .font(.system(size: 11))
+                    .foregroundStyle(selected ? Theme.menuSelectionText.opacity(0.8) : Theme.secondaryText)
             }
         }
         .padding(.horizontal, 10)
         .frame(height: 32)
         .contentShape(Rectangle())
-        .rowSurface(selected: highlighted, hovering: false)
+        .background {
+            if selected {
+                RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.menuSelection)
+            }
+        }
     }
 
     @ViewBuilder private var icon: some View {
@@ -420,7 +482,7 @@ private struct PaletteRow: View {
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: 13, weight: .light))
-                .foregroundStyle(Theme.chromeIcon)
+                .foregroundStyle(selected ? Theme.menuSelectionText : Theme.chromeIcon)
                 .accessibilityHidden(true)
         case .project(let project):
             ProjectTile(project: project, size: 16)
@@ -428,12 +490,12 @@ private struct PaletteRow: View {
             if let glyph = StatusBadge.glyph(row.status) {
                 Image(systemName: glyph.symbol)
                     .font(.system(size: 12))
-                    .foregroundStyle(glyph.tint)
+                    .foregroundStyle(selected ? Theme.menuSelectionText : glyph.tint)
                     .accessibilityLabel(glyph.title)
             } else {
                 Image(systemName: "bubble.left")
                     .font(.system(size: 12, weight: .light))
-                    .foregroundStyle(Theme.chromeIcon)
+                    .foregroundStyle(selected ? Theme.menuSelectionText : Theme.chromeIcon)
                     .accessibilityHidden(true)
             }
         }

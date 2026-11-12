@@ -44,8 +44,10 @@ struct UsageDashboard: View {
                 TokenSummary(
                     tokens: report.lifetime,
                     empty: "Counted from saved agent sessions as models answer.",
-                    rows: [("Lifetime cost", PageFormat.cost(report.lifetimeCostUsd))]
+                    rows: [("Lifetime cost", PageFormat.cost(report.lifetimeCostUsd))],
+                    titled: false
                 )
+                .padding(.top, 32)
                 .frame(width: 244, alignment: .leading)
             }
             Rectangle()

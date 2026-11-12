@@ -12,6 +12,8 @@ enum Theme {
     static var hover: Color { ThemeTokens.shared.color(.hover) }
     static var selection: Color { ThemeTokens.shared.color(.selection) }
     static var selectionStroke: Color { ThemeTokens.shared.color(.selectionStroke) }
+    static var menuSelection: Color { Color(nsColor: .selectedContentBackgroundColor) }
+    static var menuSelectionText: Color { Color(nsColor: .alternateSelectedControlTextColor) }
     static var message: Color { ThemeTokens.shared.color(.message) }
     static var text: Color { ThemeTokens.shared.color(.text) }
     static var secondaryText: Color { ThemeTokens.shared.color(.secondaryText) }
