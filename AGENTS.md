@@ -5,7 +5,7 @@ Native desktop clients for local LLM work. The agent core is [Eukhe](https://git
 ## Architecture
 
 - Eukhe is the core, like libghostty is Ghostty's: sessions, durable storage, the harness, memory, tools and inference live there. Local Studio never reimplements them.
-- The engine runs out of process as `eukhe-daemon` (supervisor + one worker per session). GUIs reach it through the `eukhe-client` crate over the versioned `eukhe.daemon` protocol. A crash in the engine never takes a window down, and every Eukhe frontend can attach to the same session.
+- The engine runs out of process as the Eukhe daemon (`eukhe --mode daemon`: supervisor + one worker per session), started through `eukhe-client`'s `ProcessLauncher` on Eukhe's socket path. GUIs reach it through the `eukhe-client` crate over the versioned `eukhe.daemon` protocol. A crash in the engine never takes a window down, and every Eukhe frontend can attach to the same session.
 - Shared GUI logic lives once, in Rust (`core/`, crate `local-studio-core`): inbox across projects, transcripts, Local Studio state, git, files, terminals, usage, the Local fleet client, settings. Each GUI does only native chrome:
   - `macos/`: Swift + AppKit/SwiftUI, links the core through UniFFI (`kit/` → `LocalStudioKit`), like Ghostty links `GhosttyKit`.
   - `linux/`: Rust + GTK4 + libadwaita, links the core as a crate (own workspace, see `linux/AGENTS.md`).
@@ -15,7 +15,7 @@ Native desktop clients for local LLM work. The agent core is [Eukhe](https://git
 ## Rules
 
 - Logic needed by both GUIs goes in `core/`; platform behavior (windows, menus, toolbars, notifications) stays in the GUI. Never port core logic into Swift or GTK code.
-- Eukhe changes land in the eukhe repo, not as copies or patches here. `core/` depends on `../eukhe` by path.
+- Eukhe changes land in the eukhe repo, not as copies or patches here. Both workspaces pin `eukhe-client` and `eukhe-types` to one Eukhe release tag (git dependencies, root `Cargo.toml`); the apps bundle the `eukhe` binary of that same release (`eukhe.nu`: downloaded from the GitHub release and checked against its `SHA256SUMS` into `<target>/eukhe/<tag>/`, or `EUKHE_BIN=<eukhe built from the tag>`). Move both together.
 - Verify end to end: build and run the real binaries. No new unit tests.
 - Add no code comments.
 - Never stop processes, controllers, engines, or GPU jobs this work did not start. Kill only PIDs you spawned.
@@ -27,9 +27,9 @@ Native desktop clients for local LLM work. The agent core is [Eukhe](https://git
 ## Commands
 
 - Core: `cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings`
-- Core end to end (each needs `LOCAL_STUDIO_SMOKE_AGENT`, ends with a usage report that must count real tokens and cost, and removes its credential link): `cargo run -p local-studio-core --example smoke -- <eukhe-daemon> <scratch>`, `--example workspace_smoke -- <eukhe-daemon> <scratch>`, `--example working_smoke -- <eukhe-daemon> <scratch>` (a tool step keeps the thread busy with one start time)
-- Providers end to end: `cargo build -p local-studio-core --examples`, then `providers_smoke <eukhe-daemon> <scratch>` from the examples dir; it round-trips the built-in `anthropic` provider on the real model, starts the `provider_stub` example (the custom endpoint under test) on a random 127.0.0.1 port, round-trips a custom endpoint through Eukhe, checks models.json and auth.json return to the providers they started with, and stops the stub by PID
-- Durability end to end: `--example durable_smoke -- <eukhe-daemon> <scratch>` quits the core mid-turn (a real `sleep 8` bash call), checks the Eukhe daemon survives, and requires the reopened core to show the turn's tool output and reply
+- Core end to end (each takes the release `eukhe` binary, e.g. `target/eukhe/<tag>/eukhe` after an app build, needs `LOCAL_STUDIO_SMOKE_AGENT`, ends with a usage report that must count real tokens and cost, and removes its credential link): `cargo run -p local-studio-core --example smoke -- <eukhe> <scratch>`, `--example workspace_smoke -- <eukhe> <scratch>`, `--example working_smoke -- <eukhe> <scratch>` (a tool step keeps the thread busy with one start time)
+- Providers end to end: `cargo build -p local-studio-core --examples`, then `providers_smoke <eukhe> <scratch>` from the examples dir; it round-trips the built-in `anthropic` provider on the real model, starts the `provider_stub` example (the custom endpoint under test) on a random 127.0.0.1 port, round-trips a custom endpoint through Eukhe, checks models.json and auth.json return to the providers they started with, and stops the stub by PID
+- Durability end to end: `--example durable_smoke -- <eukhe> <scratch>` quits the core mid-turn (a real `sleep 8` bash call), checks the Eukhe daemon survives, and requires the reopened core to show the turn's tool output and reply
 - Stop a scratch daemon: `cargo run -p local-studio-core --example smoke -- --stop <socket>`
 - Controller: `cd controller && bun install && bun run typecheck && bun run test`
 - Share one cargo target across worktrees: `CARGO_TARGET_DIR=/tmp/ls-cargo-target`

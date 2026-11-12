@@ -339,22 +339,27 @@ dependencies = [
 [[package]]
 name = "eukhe-bend"
 version = "0.10.0"
+source = "git+https://github.com/gildrb/eukhe?tag=eukhe-v0.10.69#d6c715c9b3baec97ec791fea803480f8e5ab8abd"
 dependencies = [
  "cc",
  "eukhe-types",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "eukhe-build-info"
 version = "0.10.0"
+source = "git+https://github.com/gildrb/eukhe?tag=eukhe-v0.10.69#d6c715c9b3baec97ec791fea803480f8e5ab8abd"
 dependencies = [
  "eukhe-bend",
+ "thiserror 2.0.21",
  "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
 name = "eukhe-client"
 version = "0.10.0"
+source = "git+https://github.com/gildrb/eukhe?tag=eukhe-v0.10.69#d6c715c9b3baec97ec791fea803480f8e5ab8abd"
 dependencies = [
  "anyhow",
  "eukhe-bend",
@@ -362,6 +367,7 @@ dependencies = [
  "eukhe-types",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "tokio",
  "tracing",
 ]
@@ -369,6 +375,7 @@ dependencies = [
 [[package]]
 name = "eukhe-types"
 version = "0.10.0"
+source = "git+https://github.com/gildrb/eukhe?tag=eukhe-v0.10.69#d6c715c9b3baec97ec791fea803480f8e5ab8abd"
 dependencies = [
  "anyhow",
  "indexmap",

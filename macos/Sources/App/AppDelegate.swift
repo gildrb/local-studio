@@ -234,7 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private static func bundledDaemon() -> DaemonLaunch? {
-        guard let url = Bundle.main.url(forAuxiliaryExecutable: "eukhe-daemon") else { return nil }
-        return DaemonLaunch(program: url.path, arguments: ["supervisor"])
+        guard let url = Bundle.main.url(forAuxiliaryExecutable: "eukhe") else { return nil }
+        return DaemonLaunch(program: url.path)
     }
 }

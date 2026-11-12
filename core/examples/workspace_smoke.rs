@@ -472,7 +472,7 @@ fn install_fake_gh(root: &Path) -> anyhow::Result<PathBuf> {
 }
 
 fn main() -> anyhow::Result<()> {
-    let usage = "usage: workspace_smoke <eukhe-daemon> [scratch dir, default /tmp/ls-r2]";
+    let usage = "usage: workspace_smoke <eukhe> [scratch dir, default /tmp/ls-r2]";
     let mut args = std::env::args_os().skip(1);
     let daemon = PathBuf::from(args.next().context(usage)?);
     let base = args.next().map_or_else(|| PathBuf::from("/tmp/ls-r2"), PathBuf::from);
@@ -488,20 +488,14 @@ fn main() -> anyhow::Result<()> {
     let engine = start_stub_engine(&root.join("bin"))?;
     println!("     stub engine on port {engine}");
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", &data);
+    std::env::set_var("EUKHE_CODING_AGENT_DIR", &agent_dir);
     std::env::set_var("LOCAL_STUDIO_CONTROLLER_URL", format!("http://127.0.0.1:{port}"));
     let socket = root.join("d.sock");
     let config = StudioConfig {
         socket_path: Some(socket.to_string_lossy().into_owned()),
         session_dir: Some(agent_dir.join("sessions").to_string_lossy().into_owned()),
         data_dir: None,
-        launch: Some(DaemonLaunch {
-            program: daemon.to_string_lossy().into_owned(),
-            arguments: vec![
-                "supervisor".to_string(),
-                "--agent-dir".to_string(),
-                agent_dir.to_string_lossy().into_owned(),
-            ],
-        }),
+        launch: Some(DaemonLaunch { program: daemon.to_string_lossy().into_owned() }),
         controller_main: Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../controller/src/main.ts").to_string()),
     };
     let outcome = drive(&config, &repo, port);

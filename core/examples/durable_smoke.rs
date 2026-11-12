@@ -272,7 +272,7 @@ fn drive(config: &StudioConfig, socket: &Path, work: &Path) -> anyhow::Result<()
 }
 
 fn main() -> anyhow::Result<()> {
-    let usage = "usage: durable_smoke <eukhe-daemon> <scratch dir>";
+    let usage = "usage: durable_smoke <eukhe> <scratch dir>";
     let mut args = std::env::args_os().skip(1);
     let daemon = PathBuf::from(args.next().context(usage)?);
     let root = PathBuf::from(args.next().context(usage)?);
@@ -281,20 +281,14 @@ fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&work)?;
     let _credentials = real_model::install(&agent_dir)?;
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", root.join("data"));
+    std::env::set_var("EUKHE_CODING_AGENT_DIR", &agent_dir);
     let socket = root.join("d.sock");
     let config = StudioConfig {
         socket_path: Some(socket.to_string_lossy().into_owned()),
         session_dir: Some(agent_dir.join("sessions").to_string_lossy().into_owned()),
         data_dir: None,
         controller_main: None,
-        launch: Some(DaemonLaunch {
-            program: daemon.to_string_lossy().into_owned(),
-            arguments: vec![
-                "supervisor".to_string(),
-                "--agent-dir".to_string(),
-                agent_dir.to_string_lossy().into_owned(),
-            ],
-        }),
+        launch: Some(DaemonLaunch { program: daemon.to_string_lossy().into_owned() }),
     };
     let outcome = drive(&config, &socket, &work);
     let stopped = stop_daemon(&socket);

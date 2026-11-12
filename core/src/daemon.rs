@@ -1,19 +1,16 @@
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::Duration;
+use std::process::Command;
 
 use anyhow::Context;
+use eukhe_client::daemon_build::Build;
 use eukhe_client::daemon_client::{is_connect_failure, DaemonClient, DaemonClientEvent};
+use eukhe_client::launcher::ProcessLauncher;
 use eukhe_types::daemon::DaemonCommand;
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::watch;
-use tokio::time::Instant;
 
 use crate::studio::DaemonLaunch;
-
-const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
-const PROBE_INTERVAL: Duration = Duration::from_millis(50);
 
 pub(crate) type Connection = (DaemonClient, UnboundedReceiver<DaemonClientEvent>);
 
@@ -41,24 +38,16 @@ impl DaemonQuery {
     }
 }
 
-pub(crate) fn socket_path(explicit: Option<&str>) -> Result<PathBuf, String> {
-    explicit
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("EUKHE_DAEMON_SOCKET").filter(|value| !value.is_empty()).map(PathBuf::from))
-        .ok_or_else(|| "no daemon socket configured".to_string())
+pub(crate) fn socket_path(explicit: Option<&str>) -> PathBuf {
+    eukhe_client::paths::resolve_daemon_socket_path(explicit.map(Path::new))
 }
 
-pub(crate) fn agent_dir(launch: Option<&DaemonLaunch>) -> Option<PathBuf> {
-    launch
-        .and_then(|launch| launch.arguments.iter().skip_while(|argument| *argument != "--agent-dir").nth(1))
-        .map(|dir| eukhe_types::platform::dirs::expand_tilde(dir))
-        .or_else(eukhe_types::platform::dirs::agent_dir)
+pub(crate) fn agent_dir() -> Option<PathBuf> {
+    eukhe_types::platform::dirs::agent_dir()
 }
 
 pub(crate) fn kernel_program(launch: Option<&DaemonLaunch>) -> Option<PathBuf> {
-    launch
-        .and_then(|launch| Path::new(&launch.program).parent().map(|dir| dir.join("eukhe")))
-        .filter(|program| program.is_file())
+    launch.map(|launch| PathBuf::from(&launch.program)).filter(|program| program.is_file())
 }
 
 pub(crate) async fn connect(socket: &Path, launch: Option<&DaemonLaunch>) -> anyhow::Result<Connection> {
@@ -69,38 +58,28 @@ pub(crate) async fn connect(socket: &Path, launch: Option<&DaemonLaunch>) -> any
             let Some(launch) = launch else {
                 return Err(error.context("no Eukhe daemon is running and none is configured to start"));
             };
-            spawn(launch, socket)?;
+            start(launch, socket).await?;
         }
     }
-    let deadline = Instant::now() + STARTUP_TIMEOUT;
-    loop {
-        tokio::time::sleep(PROBE_INTERVAL).await;
-        match DaemonClient::connect(socket).await {
-            Ok(connection) => return Ok(connection),
-            Err(error) if is_connect_failure(&error) && Instant::now() < deadline => {}
-            Err(error) => return Err(error.context("the Eukhe daemon did not start")),
-        }
-    }
+    DaemonClient::connect(socket).await
 }
 
-fn spawn(launch: &DaemonLaunch, socket: &Path) -> anyhow::Result<()> {
-    use std::os::unix::process::CommandExt;
+async fn start(launch: &DaemonLaunch, socket: &Path) -> anyhow::Result<()> {
     let mut command = Command::new(&launch.program);
-    command
-        .args(&launch.arguments)
-        .arg("--socket")
-        .arg(socket)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0);
+    command.args(["--mode", "daemon", "--daemon-socket"]).arg(socket);
     if let Some(path) = crate::workspace::process::joined_path() {
         command.env("PATH", path);
     }
-    let mut child = command.spawn().with_context(|| format!("start the Eukhe daemon {}", launch.program))?;
-    std::thread::Builder::new()
-        .name("eukhe-daemon-reaper".to_string())
-        .spawn(move || child.wait())
-        .context("watch the Eukhe daemon process")?;
+    let stop = format!("{} shutdown --force --daemon-socket '{}'", launch.program, socket.display());
+    let launched = ProcessLauncher::new(command, socket, stop)
+        .launch_background(Build::THIS)
+        .await
+        .with_context(|| format!("start the Eukhe daemon {}", launch.program))?;
+    if let Some(mut child) = launched.spawned {
+        std::thread::Builder::new()
+            .name("eukhe-daemon-reaper".to_string())
+            .spawn(move || child.wait())
+            .context("watch the Eukhe daemon process")?;
+    }
     Ok(())
 }

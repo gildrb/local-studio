@@ -154,13 +154,16 @@ impl LiveState {
             | SessionEvent::ToolExecutionEnd { .. }
             | SessionEvent::CompactionSummaryDelta { .. }
             | SessionEvent::MemoryUpdate { .. }
-            | SessionEvent::AgentRelay(_)
             | SessionEvent::BashStart { .. }
             | SessionEvent::BashOutput { .. }
             | SessionEvent::BashEnd { .. }
             | SessionEvent::RefineComplete { .. }
             | SessionEvent::RefineFailed { .. }
-            | SessionEvent::IpythonSentAgentMessage { .. } => false,
+            | SessionEvent::UnknownEffectsUpdate { .. }
+            | SessionEvent::LoopUpdate { .. }
+            | SessionEvent::BudgetUpdate { .. }
+            | SessionEvent::AcceptanceUpdate { .. }
+            | SessionEvent::PythonSentAgentMessage { .. } => false,
         }
     }
 
@@ -197,7 +200,7 @@ fn goal_record(goal: &GoalState) -> Option<Goal> {
             .ok()
             .and_then(|status| status.as_str().map(str::to_string))
             .unwrap_or_default(),
-        active: goal.active,
+        active: goal.is_active(),
         tokens_used: goal.tokens_used,
         token_budget: goal.token_budget,
         time_used_seconds: goal.time_used_seconds,

@@ -8,8 +8,8 @@ use eukhe_client::daemon_client::{DaemonClient, DaemonClientEvent};
 use eukhe_client::saved_sessions;
 use eukhe_types::ai::{ServiceTier, UserContent, UserContentBlock};
 use eukhe_types::daemon::{
-    DaemonClientKind, DaemonCommand, DaemonSessionLifecycle, DaemonSessionSnapshot, ForkPosition, PromptInput,
-    SessionEvent, StreamingBehavior,
+    DaemonClientKind, DaemonCommand, DaemonSessionLifecycle, DaemonSessionSnapshot, DetachReason, ForkPosition,
+    PromptInput, SessionEvent, StreamingBehavior,
 };
 use eukhe_types::session::AgentMessage;
 use eukhe_types::shell::ShellVerdict;
@@ -50,7 +50,6 @@ const TITLE_CONTEXT_LIMIT: usize = 4000;
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct DaemonLaunch {
     pub program: String,
-    pub arguments: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -350,8 +349,7 @@ pub struct Studio {
 impl Studio {
     #[cfg_attr(feature = "ffi", uniffi::constructor)]
     pub fn new(config: StudioConfig, waker: Arc<dyn Waker>) -> Result<Arc<Self>, StudioError> {
-        let socket =
-            daemon::socket_path(config.socket_path.as_deref()).map_err(|message| StudioError::Config { message })?;
+        let socket = daemon::socket_path(config.socket_path.as_deref());
         let data_dir =
             store::data_dir(config.data_dir.as_deref()).map_err(|message| StudioError::Config { message })?;
         std::fs::create_dir_all(&data_dir)
@@ -375,7 +373,7 @@ impl Studio {
             runtime.handle().clone(),
             Arc::clone(&mailbox),
             data_dir,
-            daemon::agent_dir(config.launch.as_ref()),
+            daemon::agent_dir(),
             query,
             controller_main,
             text.clone(),
@@ -841,6 +839,7 @@ impl Actor {
                 let detach = DaemonCommand::Detach {
                     id: None,
                     active_session_id: Some(live.active.clone()),
+                    reason: None,
                     rest: Map::default(),
                 };
                 if let Err(error) = client.request_ok(detach).await {
@@ -1454,7 +1453,12 @@ impl Actor {
             return;
         }
         let active = live.active.clone();
-        let detach = DaemonCommand::Detach { id: None, active_session_id: Some(active.clone()), rest: Map::default() };
+        let detach = DaemonCommand::Detach {
+            id: None,
+            active_session_id: Some(active.clone()),
+            reason: Some(DetachReason::Switch),
+            rest: Map::default(),
+        };
         if let Err(error) = self.call(detach).await {
             self.mailbox.notice(NoticeLevel::Warning, error);
         }

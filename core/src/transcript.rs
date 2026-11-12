@@ -256,13 +256,16 @@ impl Transcript {
             | SessionEvent::SessionActionUpdate { .. }
             | SessionEvent::GoalUpdate { .. }
             | SessionEvent::MemoryUpdate { .. }
-            | SessionEvent::AgentRelay(_)
             | SessionEvent::BashStart { .. }
             | SessionEvent::BashOutput { .. }
             | SessionEvent::BashEnd { .. }
             | SessionEvent::RefineComplete { .. }
             | SessionEvent::RefineFailed { .. }
-            | SessionEvent::IpythonSentAgentMessage { .. } => Vec::new(),
+            | SessionEvent::UnknownEffectsUpdate { .. }
+            | SessionEvent::LoopUpdate { .. }
+            | SessionEvent::BudgetUpdate { .. }
+            | SessionEvent::AcceptanceUpdate { .. }
+            | SessionEvent::PythonSentAgentMessage { .. } => Vec::new(),
         }
     }
 

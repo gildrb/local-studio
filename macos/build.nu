@@ -1,6 +1,7 @@
 #!/usr/bin/env nu
 
 use zig.nu toolchain
+use ../eukhe.nu
 
 def developer-dir []: nothing -> string {
     if ($env.DEVELOPER_DIR? | is-not-empty) {
@@ -27,7 +28,7 @@ def compile-icon [package: path, resources: path] {
 
 def build-kit [repo: path, package: path, profile: string] {
     let cargo_profile = if $profile == "release" { ["--release"] } else { [] }
-    let target_root = if ($env.CARGO_TARGET_DIR? | is-not-empty) { $env.CARGO_TARGET_DIR | path expand } else { $repo | path join "target" }
+    let target_root = (target-root $repo)
     $env.PATH = ($env.PATH | prepend (toolchain $target_root))
     ^cargo build --manifest-path ($repo | path join "Cargo.toml") -p local-studio-kit ...$cargo_profile
     let target = ($target_root | path join $profile)
@@ -43,28 +44,8 @@ def build-kit [repo: path, package: path, profile: string] {
     rm -r -f $bindings
 }
 
-def find-daemon [repo: path]: nothing -> any {
-    if ($env.EUKHE_DAEMON? | is-not-empty) {
-        return ($env.EUKHE_DAEMON | path expand)
-    }
-    let eukhe = ($repo | path dirname | path join "eukhe" "target")
-    [($eukhe | path join "release" "eukhe-daemon") ($eukhe | path join "debug" "eukhe-daemon")]
-    | where { |candidate| $candidate | path exists }
-    | get 0?
-}
-
-def eukhe-root [daemon: path]: nothing -> any {
-    mut dir = ($daemon | path dirname)
-    loop {
-        if ($dir | path join "eukhe-runtime" "pyproject.toml" | path exists) {
-            return $dir
-        }
-        let parent = ($dir | path dirname)
-        if $parent == $dir {
-            return null
-        }
-        $dir = $parent
-    }
+def target-root [repo: path]: nothing -> path {
+    if ($env.CARGO_TARGET_DIR? | is-not-empty) { $env.CARGO_TARGET_DIR | path expand } else { $repo | path join "target" }
 }
 
 def sign-helper [source: path, target: path] {
@@ -72,30 +53,20 @@ def sign-helper [source: path, target: path] {
     ^/usr/bin/codesign --force --sign - --timestamp=none $target
 }
 
-def bundle-eukhe [daemon: path, contents: path] {
+def bundle-eukhe [cli: path, contents: path] {
     let macos = ($contents | path join "MacOS")
-    sign-helper $daemon ($macos | path join "eukhe-daemon")
-    let cli = ($daemon | path dirname | path join "eukhe")
-    if ($cli | path exists) {
-        sign-helper $cli ($macos | path join "eukhe")
-    } else {
-        print -e $"warning: no eukhe beside ($daemon); the app cannot install the Python kernel"
-    }
-    let root = (eukhe-root $daemon)
-    if $root == null {
-        print -e $"warning: no eukhe-runtime found above ($daemon); the Python kernel cannot be installed"
+    sign-helper $cli ($macos | path join "eukhe")
+    let sidecars = (eukhe sidecars $cli)
+    if ($sidecars | is-empty) {
+        print -e $"warning: no eukhe-runtime found beside or above ($cli); the Python kernel cannot start"
         return
     }
     let payload = ($contents | path join "Resources" "eukhe")
     mkdir $payload
-    let excluded = [test uv.lock .venv __pycache__ .pytest_cache .ruff_cache .mypy_cache .git .DS_Store node_modules "*.pyc" "*.egg-info"]
-    let excludes = ($excluded | each { |name| $"--exclude=($name)" })
-    for sidecar in ["eukhe-runtime" "skills"] {
-        let source = ($root | path join $sidecar)
-        if ($source | path exists) {
-            ^rsync -a ...$excludes $"($source)/" $"($payload | path join $sidecar)/"
-            ^ln -s $"../Resources/eukhe/($sidecar)" ($macos | path join $sidecar)
-        }
+    for sidecar in $sidecars {
+        eukhe copy-sidecar $sidecar $payload
+        let name = ($sidecar | path basename)
+        ^ln -s $"../Resources/eukhe/($name)" ($macos | path join $name)
     }
 }
 
@@ -145,12 +116,7 @@ def main [
         for resource in (glob ($package | path join "Resources" "*")) {
             cp $resource ($contents | path join "Resources")
         }
-        let daemon = (find-daemon $repo)
-        if $daemon == null {
-            print -e "warning: no eukhe-daemon found (set EUKHE_DAEMON); the app will only attach to a running daemon"
-        } else {
-            bundle-eukhe $daemon $contents
-        }
+        bundle-eukhe (eukhe binary $repo ((target-root $repo) | path join "eukhe")) $contents
         ^/usr/bin/codesign --force --sign - --timestamp=none $app
         match $action {
             "build" => { print $app }

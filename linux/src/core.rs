@@ -1,6 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use local_studio_core::{DaemonLaunch, Studio, StudioConfig, StudioError, Update, Waker};
@@ -23,10 +23,10 @@ impl Core {
     pub fn start(&self, on_wake: impl Fn() + 'static) -> Result<(), StudioError> {
         let (sender, receiver) = async_channel::bounded(1);
         let config = StudioConfig {
-            socket_path: Some(socket_path().to_string_lossy().into_owned()),
+            socket_path: None,
             session_dir: None,
             data_dir: None,
-            launch: daemon_program().map(|program| DaemonLaunch { program, arguments: vec!["supervisor".to_string()] }),
+            launch: eukhe_program().map(|program| DaemonLaunch { program }),
             controller_main: controller_main(),
         };
         let studio = Studio::new(config, Arc::new(ChannelWaker(sender)))?;
@@ -67,23 +67,15 @@ impl Core {
     }
 }
 
-fn socket_path() -> PathBuf {
-    if let Some(socket) = std::env::var_os("EUKHE_DAEMON_SOCKET").filter(|value| !value.is_empty()) {
-        return PathBuf::from(socket);
-    }
-    let uid = std::fs::metadata("/proc/self").map(|meta| meta.uid()).unwrap_or_default();
-    std::env::temp_dir().join(format!("eukhe-{uid}")).join("daemon.sock")
-}
-
-fn daemon_program() -> Option<String> {
-    if let Some(program) = std::env::var_os("EUKHE_DAEMON").filter(|value| !value.is_empty()) {
+fn eukhe_program() -> Option<String> {
+    if let Some(program) = std::env::var_os("EUKHE_BIN").filter(|value| !value.is_empty()) {
         return Some(program.to_string_lossy().into_owned());
     }
-    let sibling = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("eukhe-daemon")));
+    let sibling = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|dir| dir.join("eukhe")));
     let on_path = std::env::var_os("PATH")
         .into_iter()
         .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
-        .map(|dir| dir.join("eukhe-daemon"));
+        .map(|dir| dir.join("eukhe"));
     sibling.into_iter().chain(on_path).find(|path| is_executable(path)).map(|path| path.to_string_lossy().into_owned())
 }
 

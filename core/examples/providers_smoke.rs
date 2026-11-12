@@ -356,7 +356,7 @@ fn auth_keys(agent: &Path) -> anyhow::Result<BTreeSet<String>> {
 }
 
 fn main() -> anyhow::Result<()> {
-    let usage = "usage: providers_smoke <eukhe-daemon> [scratch dir, default /tmp/ls-providers]";
+    let usage = "usage: providers_smoke <eukhe> [scratch dir, default /tmp/ls-providers]";
     let mut args = std::env::args_os().skip(1);
     let daemon = PathBuf::from(args.next().context(usage)?);
     let base = args.next().map_or_else(|| PathBuf::from("/tmp/ls-providers"), PathBuf::from);
@@ -394,16 +394,14 @@ fn run(daemon: &Path, root: &Path, stub: Option<u16>) -> anyhow::Result<()> {
         keys: auth_keys(&agent)?,
     };
     std::env::set_var("LOCAL_STUDIO_DATA_DIR", root.join("data"));
+    std::env::set_var("EUKHE_CODING_AGENT_DIR", &agent);
     std::env::set_var("LOCAL_STUDIO_CONTROLLER_URL", format!("http://127.0.0.1:{}", free_port()?));
     let socket = root.join("d.sock");
     let config = StudioConfig {
         socket_path: Some(socket.to_string_lossy().into_owned()),
         session_dir: Some(agent.join("sessions").to_string_lossy().into_owned()),
         data_dir: None,
-        launch: Some(DaemonLaunch {
-            program: daemon.to_string_lossy().into_owned(),
-            arguments: vec!["supervisor".to_string(), "--agent-dir".to_string(), agent.to_string_lossy().into_owned()],
-        }),
+        launch: Some(DaemonLaunch { program: daemon.to_string_lossy().into_owned() }),
         controller_main: Some(concat!(env!("CARGO_MANIFEST_DIR"), "/../controller/src/main.ts").to_string()),
     };
     let outcome = Harness::new(config).and_then(|mut harness| {
