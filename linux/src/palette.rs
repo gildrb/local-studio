@@ -51,8 +51,7 @@ pub fn open(app: &Rc<App>) {
     column.append(&search);
     column.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
     column.append(&scroller);
-    let popover =
-        gtk::Popover::builder().child(&column).has_arrow(false).position(gtk::PositionType::Bottom).build();
+    let popover = gtk::Popover::builder().child(&column).has_arrow(false).position(gtk::PositionType::Bottom).build();
     popover.add_css_class("ls-palette");
     popover.set_parent(&app.toasts);
     popover.set_pointing_to(Some(&gdk::Rectangle::new(app.toasts.width() / 2, 60, 1, 1)));
