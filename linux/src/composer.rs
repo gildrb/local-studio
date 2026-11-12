@@ -312,7 +312,7 @@ impl Composer {
         let label = working.clone();
         glib::timeout_add_seconds_local(1, move || {
             let Some(app) = weak.upgrade() else { return glib::ControlFlow::Break };
-            if let Some(started) = app.composer.run_started.get() {
+            if let Some(started) = app.composer.run_started.get().filter(|_| crate::app::on_screen(&label)) {
                 label.set_label(&format!(
                     "Working for {}",
                     format::duration(u64::try_from(format::now_ms() - started).unwrap_or(0))

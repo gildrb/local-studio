@@ -847,6 +847,7 @@ struct WorkingRow: View {
     let info: ThreadInfo
     let waitingForApproval: Bool
     var probe: RenderProbe?
+    @Environment(\.windowActivity) private var activity
 
     var body: some View {
         HStack(spacing: 8) {
@@ -861,7 +862,7 @@ struct WorkingRow: View {
                     .accessibilityHidden(true)
             }
             if let started = info.runStartedAt, !waitingForApproval, !info.compacting, info.retryAttempt == 0 {
-                TimelineView(.aligned(every: 1)) { context in
+                TimelineView(.aligned(every: 1, live: activity.visible)) { context in
                     let text = "Working for \(elapsed(since: started, now: context.date))"
                     TickingText(text)
                         .monospacedDigit()

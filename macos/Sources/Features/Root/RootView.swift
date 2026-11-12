@@ -74,6 +74,7 @@ struct RootView: View {
             CloneRepositorySheet(store: store)
         }
         .themeRoot()
+        .windowActivityRoot(main: true, hooks: WindowActivityHooks(changed: store.windowActivityChanged, revealing: store.windowRevealing))
         .onAppear { PageCommands.install(store) }
         .transaction { $0.disablesAnimations = true }
     }

@@ -203,6 +203,11 @@ final class ThemeStore {
 
     private init() {
         rebuild()
+        _ = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { ThemeStore.shared.rebuild() }
+        }
     }
 
     var themes: [ThemeDefinition] {
@@ -282,7 +287,8 @@ final class ThemeStore {
                 ? LegacyPalette.palette(appearance)
                 : Self.resolve(theme, appearance)
             palette = Self.adjust(palette, contrast: Double(contrast), appearance: appearance)
-            palette.colors[.overlay]?.alpha = 0.7 + 0.3 * Double(min(glass, 100)) / 100
+            let opaque = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+            palette.colors[.overlay]?.alpha = opaque ? 1 : 0.7 + 0.3 * Double(min(glass, 100)) / 100
             next[appearance] = palette
         }
         palettes = next

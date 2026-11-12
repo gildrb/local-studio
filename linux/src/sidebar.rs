@@ -1187,7 +1187,9 @@ fn tick(label: &gtk::Label, since: i64) {
     let weak = label.downgrade();
     glib::timeout_add_local(std::time::Duration::from_secs(1), move || {
         let Some(label) = weak.upgrade() else { return glib::ControlFlow::Break };
-        label.set_label(&text());
+        if crate::app::on_screen(&label) {
+            label.set_label(&text());
+        }
         glib::ControlFlow::Continue
     });
 }

@@ -157,7 +157,7 @@ impl TerminalView {
         );
         glib::timeout_add_local(BLINK, move || {
             let Some(area) = area.upgrade() else { return glib::ControlFlow::Break };
-            if focused.get() && blink_enabled.get() {
+            if focused.get() && blink_enabled.get() && crate::app::focused_window(&area) {
                 blink_on.set(!blink_on.get());
                 area.queue_draw();
             } else if !blink_on.get() {

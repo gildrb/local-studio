@@ -287,6 +287,28 @@ impl App {
                 app.timeline.recolor();
             }
         });
+        let weak = Rc::downgrade(&app);
+        app.window.connect_suspended_notify(move |_| {
+            if let Some(app) = weak.upgrade() {
+                app.local.screen_changed(&app);
+            }
+        });
+        let weak = Rc::downgrade(&app);
+        app.window.connect_visible_notify(move |_| {
+            if let Some(app) = weak.upgrade() {
+                app.local.screen_changed(&app);
+            }
+        });
+        let weak = Rc::downgrade(&app);
+        app.window.connect_realize(move |window| {
+            let Some(toplevel) = window.surface().and_downcast::<gtk::gdk::Toplevel>() else { return };
+            let weak = weak.clone();
+            toplevel.connect_state_notify(move |_| {
+                if let Some(app) = weak.upgrade() {
+                    app.local.screen_changed(&app);
+                }
+            });
+        });
         app.render(Dirty::all());
         app
     }
@@ -1050,6 +1072,19 @@ impl App {
     pub fn shelf_of(&self, thread: &str) -> Option<Shelf> {
         self.state.borrow().row(thread).map(|row| row.shelf)
     }
+}
+
+pub fn on_screen(widget: &impl IsA<gtk::Widget>) -> bool {
+    let Some(window) = widget.root().and_downcast::<gtk::Window>() else { return false };
+    let minimized = window
+        .surface()
+        .and_downcast::<gtk::gdk::Toplevel>()
+        .is_some_and(|toplevel| toplevel.state().contains(gtk::gdk::ToplevelState::MINIMIZED));
+    widget.is_mapped() && window.is_visible() && !window.is_suspended() && !minimized
+}
+
+pub fn focused_window(widget: &impl IsA<gtk::Widget>) -> bool {
+    widget.root().and_downcast::<gtk::Window>().is_some_and(|window| window.is_active()) && on_screen(widget)
 }
 
 fn sidebar_handle(split: &adw::OverlaySplitView) -> gtk::Box {

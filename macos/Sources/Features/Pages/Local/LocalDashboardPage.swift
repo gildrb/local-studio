@@ -7,6 +7,7 @@ struct LocalPage: View {
     @State private var selected: String?
     @State private var lastModels: [String: String] = [:]
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.windowActivity) private var activity
 
     init(store: StudioStore, leadingInset: CGFloat = 0, selected: String? = nil) {
         self.store = store
@@ -25,7 +26,7 @@ struct LocalPage: View {
     }
 
     private var watchTarget: String? {
-        guard scenePhase != .background, let current, current.reachable else { return nil }
+        guard scenePhase != .background, activity.visible, let current, current.reachable else { return nil }
         return current.target
     }
 

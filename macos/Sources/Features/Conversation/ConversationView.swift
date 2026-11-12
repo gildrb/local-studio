@@ -264,6 +264,7 @@ private struct TimelineScroll: View {
     @State private var awayFromEnd = false
     @State private var currentAnchor: UInt64?
     @State private var roomForMinimap = false
+    @Environment(\.windowActivity) private var activity
 
     private static let followSlack: CGFloat = 40
 
@@ -288,6 +289,7 @@ private struct TimelineScroll: View {
         .defaultScrollAnchor(restoredTop == nil ? .bottom : nil, for: .initialOffset)
         .defaultScrollAnchor(current && conversation.followsEnd ? .bottom : nil, for: .sizeChanges)
         .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollEdgeEffectHidden(activity.flatGlass, for: .all)
         .onScrollPhaseChange { _, phase in
             let wasUserDriven = tracker.userDriven
             tracker.phase = phase

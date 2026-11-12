@@ -4,9 +4,11 @@ import SwiftUI
 
 struct LocalPolling: ViewModifier {
     let pages: PagesStore
+    @Environment(\.windowActivity) private var activity
 
     func body(content: Content) -> some View {
-        content.task {
+        content.task(id: activity.visible) {
+            guard activity.visible else { return }
             while !Task.isCancelled {
                 pages.refreshLocal()
                 try? await Task.sleep(for: .seconds(5))

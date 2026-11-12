@@ -112,7 +112,7 @@ fn poll(inner: &Rc<Inner>) {
     glib::timeout_add_seconds_local(5, move || {
         let Some(fleet) = weak.upgrade() else { return glib::ControlFlow::Break };
         let Some(app) = fleet.app.upgrade() else { return glib::ControlFlow::Break };
-        if app.state.borrow().page != Page::Local {
+        if app.state.borrow().page != Page::Local && crate::app::on_screen(&fleet.root) {
             let request = app.core.request();
             app.core.run(|studio| studio.local_snapshot(request));
         }

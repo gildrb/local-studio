@@ -1,9 +1,19 @@
 import Foundation
 import SwiftUI
 
-extension TimelineSchedule where Self == PeriodicTimelineSchedule {
-    static func aligned(every interval: TimeInterval) -> PeriodicTimelineSchedule {
-        .periodic(from: ClockAnchor.date, by: interval)
+struct AlignedSchedule: TimelineSchedule {
+    let interval: TimeInterval
+    let live: Bool
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> AnyIterator<Date> {
+        guard live else { return AnyIterator(CollectionOfOne(startDate).makeIterator()) }
+        return AnyIterator(PeriodicTimelineSchedule(from: ClockAnchor.date, by: interval).entries(from: startDate, mode: mode).makeIterator())
+    }
+}
+
+extension TimelineSchedule where Self == AlignedSchedule {
+    static func aligned(every interval: TimeInterval, live: Bool) -> AlignedSchedule {
+        AlignedSchedule(interval: interval, live: live)
     }
 }
 

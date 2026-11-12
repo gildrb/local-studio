@@ -26,6 +26,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let arguments = CommandLine.arguments
+        if ["+snapshot", "+motion", "+stress", "+keys", "+logo-load"].contains(where: arguments.contains) {
+            WindowActivity.pinned = WindowActivity()
+        }
         if let flag = arguments.firstIndex(of: "+snapshot") {
             let directory = arguments.indices.contains(flag + 1) ? arguments[flag + 1] : NSTemporaryDirectory() + "local-studio-snapshots"
             let filter = arguments.indices.contains(flag + 2) ? arguments[flag + 2] : nil

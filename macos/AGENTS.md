@@ -16,5 +16,7 @@
   - `LOCAL_STUDIO_SNAPSHOT_LIVE=1` adds `pages-local-live` (the first reachable Local controller) and the `pages-usage-live*` entries: they start the core against the daemon on `$EUKHE_DAEMON_SOCKET`, load the real usage report from its saved sessions and render the Usage page (30 days tokens and cost, 24 hours, 7 days, gildrb). Point the daemon's agent dir at a scratch copy of the sessions.
 - Structure: `App/` (scenes, commands, smokes), `Design/` (Theme tokens, shared controls), `Features/<Area>/`, `Generated/` (build output, ignored). `StudioStore` routes every core `Update` to one feature store.
 - UI rules: native controls (grouped `Form`, `Picker(.menu)`, `Menu`, `Toggle`); `Theme` tokens only (dashboards palette); simple light-weight SF Symbols; no animation on repeatable actions and no looping animations; window chrome never moves.
+- No continuous rendering when the window is not key: decorative animation, glass sampling, timers and display links stop, real content updates at most 4 times a second, and nothing renders or polls for visuals while the window is occluded, minimised or the app hidden.
+- Gate it on `@Environment(\.windowActivity)` (`Design/WindowActivity.swift`, set once by `RootView`); never add per-view key or occlusion observers for rendering.
 - Builds stay warning-free under strict concurrency checking.
 - Never stop processes this app did not spawn.

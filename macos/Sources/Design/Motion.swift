@@ -6,7 +6,7 @@ enum Motion {
     static var reducedOverride: Bool?
 
     static var reduced: Bool {
-        reducedOverride ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        reducedOverride ?? (NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !WindowActivity.main.animates)
     }
 
     static var structural: Animation? {

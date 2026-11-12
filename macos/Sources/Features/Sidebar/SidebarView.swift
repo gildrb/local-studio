@@ -8,6 +8,7 @@ struct SidebarView: View {
     @State private var highlighted = 0
     @FocusState private var searchFocused: Bool
     @State private var dropTarget: String?
+    @Environment(\.windowActivity) private var activity
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,7 +51,7 @@ struct SidebarView: View {
         } else if store.inbox.projects.isEmpty, store.inbox.sections.isEmpty, store.connection == .ready || store.inbox.receivedThreads {
             NoProjectsSidebar(store: store)
         } else {
-            TimelineView(.aligned(every: 30)) { context in
+            TimelineView(.aligned(every: 30, live: activity.visible)) { context in
                 inbox(now: context.date)
             }
         }

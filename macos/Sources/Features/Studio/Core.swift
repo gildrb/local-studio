@@ -8,6 +8,9 @@ final class UpdatePump: Waker, @unchecked Sendable {
     private var studio: Studio?
     private var woken = false
     private var delivering = false
+    private var interval: TimeInterval = 0
+    private var delivered: TimeInterval = 0
+    private var deferred = false
 
     init(_ deliver: @escaping @MainActor @Sendable (Studio, [Update]) -> Void) {
         self.deliver = deliver
@@ -28,11 +31,42 @@ final class UpdatePump: Waker, @unchecked Sendable {
         }
     }
 
+    func pace(_ interval: TimeInterval) {
+        queue.async {
+            self.interval = interval
+            self.drain()
+        }
+    }
+
+    @MainActor
+    func flush() {
+        let batch: (Studio, [Update])? = queue.sync {
+            guard woken, !delivering, let studio else { return nil }
+            woken = false
+            delivered = ProcessInfo.processInfo.systemUptime
+            return (studio, studio.tick())
+        }
+        guard let (studio, updates) = batch, !updates.isEmpty else { return }
+        deliver(studio, updates)
+    }
+
     private func drain() {
         guard woken, !delivering, let studio else { return }
+        let wait = delivered + interval - ProcessInfo.processInfo.systemUptime
+        guard wait <= 0 else {
+            if !deferred {
+                deferred = true
+                queue.asyncAfter(deadline: .now() + wait) {
+                    self.deferred = false
+                    self.drain()
+                }
+            }
+            return
+        }
         woken = false
         let updates = studio.tick()
         guard !updates.isEmpty else { return }
+        delivered = ProcessInfo.processInfo.systemUptime
         delivering = true
         let deliver = self.deliver
         DispatchQueue.main.async {

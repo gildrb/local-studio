@@ -7,6 +7,7 @@ struct StatusBadge: View {
     let now: Date
     let store: StudioStore
     @State private var attention = 0
+    @Environment(\.windowActivity) private var activity
 
     var body: some View {
         if let glyph = Self.glyph(row.status) {
@@ -23,7 +24,7 @@ struct StatusBadge: View {
                         .accessibilityHidden(true)
                 }
                 if row.status == .working, row.statusSince != nil {
-                    TimelineView(.aligned(every: 1)) { context in
+                    TimelineView(.aligned(every: 1, live: activity.visible)) { context in
                         let text = label(glyph.title, now: context.date)
                         TickingText(text)
                             .font(.system(size: 11.5))

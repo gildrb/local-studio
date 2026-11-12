@@ -53,6 +53,7 @@ final class StudioStore {
         let studio = try Studio(config: config, waker: pump)
         core.studio = studio
         pump.attach(studio)
+        pump.pace(WindowActivity.main.updateInterval)
         self.pump = pump
     }
 
@@ -62,6 +63,14 @@ final class StudioStore {
         core.studio?.shutdown()
         core.studio = nil
         requests.reset()
+    }
+
+    func windowActivityChanged(_ activity: WindowActivity) {
+        pump?.pace(activity.updateInterval)
+    }
+
+    func windowRevealing() {
+        pump?.flush()
     }
 
     func select(_ id: String?) {

@@ -46,10 +46,14 @@ enum LogoMotion {
     static let leafOpacity: [Double] = [0.3, 1, 0.3, 0.3]
     static let leafScale: [Double] = [0.86, 1.14, 0.92, 0.86]
     static let cloudOpacity: Float = 0.22
+    static let leavesRest: CFTimeInterval = 1.2
+    static let leafRestOpacity: Float = 0.3
+    static let leafRestScale: CGFloat = 0.86
 
     static let coinDuration: CFTimeInterval = 2.6
     static let coinTimes: [Double] = [0, 0.34, 0.5, 0.84, 1]
     static let coinAngles: [Double] = [0, .pi, .pi, 2 * .pi, 2 * .pi]
+    static let coinRest: CFTimeInterval = 2.4
 
     static func sample(_ times: [Double], _ values: [Double], at fraction: Double, eased: Bool) -> Double {
         let clamped = min(max(fraction, 0), 1)
@@ -103,11 +107,18 @@ final class LogoMarkView: NSView {
         }
     }
 
+    var paused = false {
+        didSet {
+            guard paused != oldValue else { return }
+            pose()
+            updateAnimation()
+        }
+    }
+
     private let stage = CALayer()
     private let body = CAShapeLayer()
     private let leaves = (0..<3).map { _ in CAShapeLayer() }
     private var animating = false
-    private weak var observedWindow: NSWindow?
 
     init(style: Style) {
         self.style = style
@@ -139,22 +150,8 @@ final class LogoMarkView: NSView {
         updateAnimation()
     }
 
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
-        super.viewWillMove(toWindow: newWindow)
-        if let observedWindow {
-            NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: observedWindow)
-        }
-        observedWindow = nil
-    }
-
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let window {
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(occlusionChanged(_:)), name: NSWindow.didChangeOcclusionStateNotification, object: window
-            )
-            observedWindow = window
-        }
         updateAnimation()
     }
 
@@ -173,17 +170,26 @@ final class LogoMarkView: NSView {
         recolor()
     }
 
-    @objc private func occlusionChanged(_ notification: Notification) {
-        updateAnimation()
-    }
-
     @objc private func motionPreferenceChanged(_ notification: Notification) {
+        pose()
         updateAnimation()
     }
 
     private var shouldAnimate: Bool {
-        guard let window, window.occlusionState.contains(.visible), !isHiddenOrHasHiddenAncestor, bounds.width > 0 else { return false }
+        guard !paused, window != nil, !isHiddenOrHasHiddenAncestor, bounds.width > 0 else { return false }
         return !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+
+    private func pose() {
+        let resting = paused && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let scale = resting ? LogoMotion.leafRestScale : 1
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for leaf in leaves {
+            leaf.opacity = resting ? LogoMotion.leafRestOpacity : 1
+            leaf.transform = CATransform3DMakeScale(scale, scale, 1)
+        }
+        CATransaction.commit()
     }
 
     private func updateAnimation() {
@@ -248,7 +254,7 @@ final class LogoMarkView: NSView {
                 group.animations = [opacity, scale]
                 group.duration = LogoMotion.leavesDuration
                 group.repeatCount = .infinity
-                group.beginTime = now + Double(index) * LogoMotion.leafDelay
+                group.beginTime = now - LogoMotion.leavesRest + Double(index) * LogoMotion.leafDelay
                 group.fillMode = .backwards
                 leaf.add(group, forKey: "pulse")
             }
@@ -257,14 +263,18 @@ final class LogoMarkView: NSView {
             flip.timingFunctions = Array(repeating: CAMediaTimingFunction(name: .easeInEaseOut), count: LogoMotion.coinTimes.count - 1)
             flip.duration = LogoMotion.coinDuration
             flip.repeatCount = .infinity
+            flip.beginTime = now - LogoMotion.coinRest
             body.add(flip, forKey: "flip")
         }
     }
 
     private func stopAnimating() {
         animating = false
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         body.removeAllAnimations()
         leaves.forEach { $0.removeAllAnimations() }
+        CATransaction.commit()
     }
 
     private func keyframes(_ path: String, _ values: [Double], times: [Double]) -> CAKeyframeAnimation {
@@ -282,11 +292,13 @@ struct LogoMark: NSViewRepresentable {
     func makeNSView(context: Context) -> LogoMarkView {
         let view = LogoMarkView(style: style)
         view.tint = NSColor(tint)
+        view.paused = !context.environment.windowActivity.animates
         return view
     }
 
     func updateNSView(_ view: LogoMarkView, context: Context) {
         view.style = style
         view.tint = NSColor(tint)
+        view.paused = !context.environment.windowActivity.animates
     }
 }

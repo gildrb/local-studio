@@ -467,9 +467,19 @@ impl LocalPage {
                 app.local.polling.set(false);
                 return glib::ControlFlow::Break;
             }
-            app.local.request_snapshot(&app);
+            if crate::app::on_screen(&app.local.root) {
+                app.local.request_snapshot(&app);
+            }
             glib::ControlFlow::Continue
         });
+    }
+
+    pub fn screen_changed(&self, app: &Rc<App>) {
+        let shown = crate::app::on_screen(&self.root);
+        if shown && self.watching.borrow().is_none() && self.desired.borrow().is_some() {
+            self.request_snapshot(app);
+        }
+        self.watch(shown);
     }
 
     fn request_snapshot(&self, app: &Rc<App>) {
@@ -559,7 +569,7 @@ impl LocalPage {
         self.desired
             .replace(current.filter(|controller| controller.reachable).map(|controller| controller.target.clone()));
         self.shown.replace(current.cloned());
-        self.watch(self.root.is_mapped());
+        self.watch(crate::app::on_screen(&self.root));
     }
 
     fn current<'a>(&self, controllers: &'a [LocalController]) -> Option<&'a LocalController> {
