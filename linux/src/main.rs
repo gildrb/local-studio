@@ -10,6 +10,7 @@ mod composer;
 mod core;
 mod dashboard;
 mod dashboard_charts;
+mod dashboard_engines;
 mod dashboard_parts;
 mod dashboard_scenes;
 mod diffview;

@@ -120,7 +120,7 @@ impl Workspace {
         mailbox.push(Update::Keybindings { bindings: settings::keybindings(&overrides) });
         let (notify, notifications) = mpsc::unbounded_channel();
         let inner = Arc::new(Inner {
-            local: Local::new(&data_dir, controller_main),
+            local: Local::new(&data_dir, agent_dir.clone(), controller_main),
             dashboard: Mutex::new(None),
             devices: Devices::default(),
             runtime,

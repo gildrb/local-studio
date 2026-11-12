@@ -72,6 +72,7 @@ window, dialog { font-size: 13px; }
 .ls-dot.serving { background: #34d399; }
 .ls-dot.loading { background: #f5a524; }
 .ls-dot.offline { background: #f85149; }
+.ls-dot.unreachable { background: transparent; box-shadow: inset 0 0 0 1.5px #f5a524; }
 .ls-panel { background: var(--sidebar-bg-color); border-left: 1px solid var(--border-color); }
 .ls-diff { font-family: monospace; font-size: 12px; background: transparent; }
 .ls-diff text { background: transparent; }
@@ -145,6 +146,7 @@ window, dialog { font-size: 13px; }
 .ls-machine-dot.loading { background: var(--warning-color); }
 .ls-machine-dot.idle { background: alpha(var(--window-fg-color), 0.4); }
 .ls-machine-dot.offline { box-shadow: inset 0 0 0 1.5px alpha(var(--window-fg-color), 0.62); }
+.ls-machine-dot.unreachable { box-shadow: inset 0 0 0 1.5px var(--warning-color); }
 .ls-dash-label { font-size: 13px; }
 .ls-dash-small { font-size: 11.5px; }
 .ls-dash-num { font-feature-settings: 'tnum'; }
