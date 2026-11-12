@@ -27,6 +27,7 @@ impl Entry {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn open(app: &Rc<App>) {
     let mut entries = entries(&app.state.borrow());
     entries.retain(|entry| enabled(app, &entry.action));
@@ -96,7 +97,7 @@ pub fn open(app: &Rc<App>) {
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         let control = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
         let current = key_list.selected_row().map_or(0, |row| row.index());
-        let last = i32::try_from(key_visible.borrow().len()).unwrap_or(i32::MAX) - 1;
+        let end = i32::try_from(key_visible.borrow().len()).unwrap_or(i32::MAX) - 1;
         let page = page_rows(&key_list, &key_scroller);
         let target = match key {
             gdk::Key::Escape => {
@@ -110,11 +111,11 @@ pub fn open(app: &Rc<App>) {
             gdk::Key::Page_Down | gdk::Key::KP_Page_Down => current + page,
             gdk::Key::Page_Up | gdk::Key::KP_Page_Up => current - page,
             gdk::Key::Home | gdk::Key::KP_Home => 0,
-            gdk::Key::End | gdk::Key::KP_End => last,
+            gdk::Key::End | gdk::Key::KP_End => end,
             _ => return glib::Propagation::Proceed,
         };
-        if last >= 0 {
-            select(&key_list, &key_scroller, target.clamp(0, last));
+        if end >= 0 {
+            select(&key_list, &key_scroller, target.clamp(0, end));
         }
         glib::Propagation::Stop
     });
