@@ -84,6 +84,7 @@
             ];
             env.FONTCONFIG_FILE = "${fonts}";
             env.GIO_EXTRA_MODULES = "${pkgs.glib-networking}/lib/gio/modules";
+            env.CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-Clinker-features=-lld";
             shellHook = ''
               export XDG_DATA_DIRS="${
                 lib.concatMapStringsSep ":" (pkg: "${pkg}/share/gsettings-schemas/${pkg.name}") schemas
