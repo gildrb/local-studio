@@ -328,7 +328,9 @@ impl Extras {
             badge: match command.kind {
                 local_studio_core::CommandKind::Template => "Template".to_string(),
                 local_studio_core::CommandKind::Skill => "Skill".to_string(),
-                local_studio_core::CommandKind::Command => command.source.clone(),
+                local_studio_core::CommandKind::Plugin | local_studio_core::CommandKind::Command => {
+                    command.source.clone()
+                }
             },
             insert: format!("/{} ", command.name),
             file: None,

@@ -5,6 +5,7 @@ mod highlight;
 mod images;
 mod model;
 mod oneshot;
+pub mod plugins;
 mod scratch;
 mod session;
 mod skills;

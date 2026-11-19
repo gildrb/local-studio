@@ -1,0 +1,13 @@
+[[plugin]]
+id = "smoothstone"
+git = "https://github.com/baney75/local-studio"
+rev = "715e0ace08107d726b6f84a461a418ee191c5437"
+subdir = "examples/plugins/smoothstone"
+tree = "sha256:46e84a10126c4e5a86e549b420a63ab6989646ec9680f28850ca4ee0afa01267"
+
+[[plugin]]
+id = "gantrel"
+git = "https://github.com/baney75/Gantrel"
+rev = "5cdd0899732ccf87a892bd602b8fda45bc09489e"
+tree = "sha256:c66f4c35b2c3f556d5e4fc3cfa7fbcf380006142726764dddd19ffc6095ff025"
+exclude = ["scripts", "tests"]

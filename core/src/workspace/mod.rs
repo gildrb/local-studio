@@ -12,7 +12,7 @@ mod local;
 pub mod model;
 pub(crate) mod process;
 mod projects;
-mod providers;
+pub(crate) mod providers;
 mod settings;
 mod setup;
 mod terminal;
