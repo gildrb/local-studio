@@ -1,0 +1,163 @@
+name: LocalStudio
+options:
+  bundleIdPrefix: org.local.studio.ios
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: false
+  defaultConfig: Dev
+configs:
+  Dev: debug
+  Nightly: release
+  Release: release
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    TARGETED_DEVICE_FAMILY: "1"
+    LS_BUNDLE_PREFIX: org.local.studio.ios
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "0"
+    LS_VERSION: ""
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    DEAD_CODE_STRIPPING: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+packages:
+  LocalStudioRemote:
+    path: Packages/LocalStudioRemote
+targets:
+  LocalStudio:
+    type: application
+    platform: iOS
+    sources:
+      - path: LocalStudio
+    dependencies:
+      - package: LocalStudioRemote
+    info:
+      path: LocalStudio/Info.plist
+      properties:
+        CFBundleDisplayName: $(LS_DISPLAY_NAME)
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSChannel: $(LS_CHANNEL)
+        LSVersion: $(LS_VERSION)
+        LSRequiresIPhoneOS: true
+        ITSAppUsesNonExemptEncryption: false
+        LSPairScheme: $(LS_URL_SCHEME)
+        NSCameraUsageDescription: Local Studio uses the camera to scan the pairing code a computer shows.
+        NSMicrophoneUsageDescription: Local Studio uses the microphone when you dictate a message.
+        NSSpeechRecognitionUsageDescription: Local Studio turns your dictation into message text.
+        NSLocalNetworkUsageDescription: Local Studio connects to Local Studio on your computers over your local network.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    postBuildScripts:
+      - name: Stamp version
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)
+        script: |
+          version="$LS_VERSION"
+          if [ -z "$version" ]; then
+            sha="$(git -C "$SRCROOT" rev-parse --short=7 HEAD 2>/dev/null || echo unknown)"
+            version="$MARKETING_VERSION-dev.0+local.$sha"
+          fi
+          plutil -replace LSVersion -string "$version" "$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: LocalStudio/Info.plist
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+      configs:
+        Dev:
+          PRODUCT_BUNDLE_IDENTIFIER: $(LS_BUNDLE_PREFIX).dev
+          LS_DISPLAY_NAME: Local Studio Dev
+          LS_URL_SCHEME: localstudio-dev
+          LS_CHANNEL: dev
+        Nightly:
+          PRODUCT_BUNDLE_IDENTIFIER: $(LS_BUNDLE_PREFIX).nightly
+          LS_DISPLAY_NAME: Local Studio Nightly
+          LS_URL_SCHEME: localstudio-nightly
+          LS_CHANNEL: nightly
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: $(LS_BUNDLE_PREFIX)
+          LS_DISPLAY_NAME: Local Studio
+          LS_URL_SCHEME: localstudio
+          LS_CHANNEL: stable
+  LocalStudioSmoke:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: LocalStudioSmoke
+    dependencies:
+      - target: LocalStudio
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: LocalStudio
+      configs:
+        Dev:
+          PRODUCT_BUNDLE_IDENTIFIER: $(LS_BUNDLE_PREFIX).dev.smoke
+        Nightly:
+          PRODUCT_BUNDLE_IDENTIFIER: $(LS_BUNDLE_PREFIX).nightly.smoke
+        Release:
+          PRODUCT_BUNDLE_IDENTIFIER: $(LS_BUNDLE_PREFIX).smoke
+schemes:
+  LocalStudio Dev:
+    build:
+      targets:
+        LocalStudio: all
+        LocalStudioSmoke: [test]
+    run:
+      config: Dev
+    test:
+      config: Dev
+      targets:
+        - LocalStudioSmoke
+    profile:
+      config: Dev
+    analyze:
+      config: Dev
+    archive:
+      config: Dev
+  LocalStudio Nightly:
+    build:
+      targets:
+        LocalStudio: all
+        LocalStudioSmoke: [test]
+    run:
+      config: Nightly
+    test:
+      config: Nightly
+      targets:
+        - LocalStudioSmoke
+    profile:
+      config: Nightly
+    analyze:
+      config: Nightly
+    archive:
+      config: Nightly
+  LocalStudio:
+    build:
+      targets:
+        LocalStudio: all
+        LocalStudioSmoke: [test]
+    run:
+      config: Release
+    test:
+      config: Release
+      targets:
+        - LocalStudioSmoke
+    profile:
+      config: Release
+    analyze:
+      config: Release
+    archive:
+      config: Release

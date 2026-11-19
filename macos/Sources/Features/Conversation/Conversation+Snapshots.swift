@@ -523,6 +523,7 @@ enum ConversationFixtures {
         SlashCommand(name: "skill:release-notes", description: "Draft release notes from merged PRs", source: "skill", kind: .skill),
         SlashCommand(name: "skill:swift-lint", description: "Fix SwiftLint violations", source: "skill", kind: .skill),
         SlashCommand(name: "todo", description: "Track tasks for this thread", source: "extension", kind: .command),
+        SlashCommand(name: "stone", description: "Make a printable part with smoothstone", source: "plugin:smoothstone", kind: .plugin),
     ]
 
     static var projectInfo: ThreadInfo {
@@ -634,7 +635,7 @@ enum ConversationFixtures {
             busy: busy, runStartedAt: busy ? Int64(Date.now.timeIntervalSince1970 * 1_000) - 12_400 : nil,
             compacting: false, retryAttempt: 0, queued: 0,
             context: ContextUsage(tokens: 57_600, window: 200_000), branch: nil, worktree: nil,
-            serviceTier: nil, serviceTiers: [], goal: nil
+            serviceTier: nil, serviceTiers: [], goal: nil, harness: .eukhe
         )
     }
 

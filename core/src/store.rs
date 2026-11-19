@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-use crate::model::{AccessMode, ModelKey};
+use crate::model::{AccessMode, Harness, ModelKey};
 
 const VERSION: u32 = 1;
 const FILE: &str = "state.json";
@@ -47,6 +47,23 @@ pub(crate) struct ThreadFlags {
     pub(crate) auto_settle_disabled: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) fan_out: Option<String>,
+    #[serde(skip_serializing_if = "is_eukhe")]
+    pub(crate) harness: Harness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) native_session: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) thinking_level: Option<String>,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_eukhe(harness: &Harness) -> bool {
+    *harness == Harness::Eukhe
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,7 +165,7 @@ impl Store {
     }
 }
 
-pub(crate) fn data_dir(explicit: Option<&str>) -> Result<PathBuf, String> {
+pub fn data_dir(explicit: Option<&str>) -> Result<PathBuf, String> {
     if let Some(explicit) = explicit.filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(explicit));
     }

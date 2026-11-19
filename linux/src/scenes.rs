@@ -34,6 +34,24 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             app.composer.extras.show_fixture_commands(commands(), "co");
             app.render(Dirty::all());
         }
+        "16-composer-plugin" => {
+            app.apply(base());
+            app.new_thread(Some(project_id("local-studio")));
+            app.composer.set_text("/st");
+            app.composer.extras.show_fixture_commands(commands(), "st");
+            app.render(Dirty::all());
+        }
+        "16-composer-plugin-installed" => {
+            app.apply(base());
+            app.new_thread(Some(project_id("local-studio")));
+            let mut listed = commands();
+            if let Some(root) = local_studio_core::plugins::plugins_dir(None) {
+                listed.extend(local_studio_core::plugins::commands(&local_studio_core::plugins::scan(&root).plugins));
+            }
+            app.composer.set_text("/ga");
+            app.composer.extras.show_fixture_commands(listed, "ga");
+            app.render(Dirty::all());
+        }
         "17-composer-mentions" => {
             conversation(app, false);
             app.composer.set_text("Compare the sidebar with @side");
@@ -258,16 +276,17 @@ fn commands() -> Vec<SlashCommand> {
         ("commit", "Commit the working tree with a generated message", "Project"),
         ("code-review", "Review the latest changes for bugs", "Skill"),
         ("context", "Show what is in the context window", "Eukhe"),
+        ("stone", "Make a printable part with smoothstone", "plugin:smoothstone"),
     ]
     .into_iter()
     .map(|(name, description, source)| SlashCommand {
         name: name.to_string(),
         description: description.to_string(),
         source: source.to_string(),
-        kind: if source == "Skill" {
-            local_studio_core::CommandKind::Skill
-        } else {
-            local_studio_core::CommandKind::Command
+        kind: match source {
+            "Skill" => local_studio_core::CommandKind::Skill,
+            "plugin:smoothstone" => local_studio_core::CommandKind::Plugin,
+            _ => local_studio_core::CommandKind::Command,
         },
     })
     .collect()

@@ -30,6 +30,7 @@ fn window(period: UsagePeriod, now: i64) -> (i64, i64, usize) {
 pub(crate) async fn load(
     daemon: &DaemonQuery,
     ledger: Arc<Mutex<Ledger>>,
+    harness: &Path,
     period: UsagePeriod,
     now_ms: i64,
 ) -> Result<UsageReport, String> {
@@ -48,8 +49,14 @@ pub(crate) async fn load(
         Some(Value::Array(rows)) => rows,
         _ => Vec::new(),
     };
+    let harness = harness.to_path_buf();
     let mut report = tokio::task::spawn_blocking(move || {
-        ledger.lock().unwrap_or_else(PoisonError::into_inner).report(&rows, period, now_ms)
+        let calls: Vec<Value> = std::fs::read_to_string(harness)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect();
+        ledger.lock().unwrap_or_else(PoisonError::into_inner).report(&rows, &calls, period, now_ms)
     })
     .await
     .map_err(|error| format!("Computing usage failed: {error}"))?;
@@ -273,7 +280,7 @@ impl Ledger {
         storages
     }
 
-    pub(crate) fn report(&mut self, rows: &[Value], period: UsagePeriod, now: i64) -> UsageReport {
+    pub(crate) fn report(&mut self, rows: &[Value], harness: &[Value], period: UsagePeriod, now: i64) -> UsageReport {
         let storages = self.refresh(rows);
         let mut tally = Tally::new(period, now);
         for (row, storage) in rows.iter().zip(&storages) {
@@ -306,6 +313,30 @@ impl Ledger {
                 tally.sessions += 1;
             }
         }
+        let mut threads = HashSet::new();
+        for call in harness {
+            let text = |key: &str| call.get(key).and_then(Value::as_str).unwrap_or("unknown");
+            let number = |key: &str| call.get(key).and_then(Value::as_u64).unwrap_or(0);
+            let Some(at) = call.get("at").and_then(Value::as_i64) else { continue };
+            tally.first_day = Some(tally.first_day.map_or(days_since_epoch(at), |day| day.min(days_since_epoch(at))));
+            tally.touched = false;
+            tally.add(
+                at,
+                text("provider"),
+                text("model"),
+                Spend {
+                    read: number("input").saturating_add(number("cacheRead")).saturating_add(number("cacheWrite")),
+                    cache_read: number("cacheRead"),
+                    written: number("output"),
+                    cost: call.get("cost").and_then(Value::as_f64).unwrap_or(0.0),
+                    requests: 1,
+                },
+            );
+            if tally.touched {
+                threads.insert(text("thread"));
+            }
+        }
+        tally.sessions += u64::try_from(threads.len()).unwrap_or(0);
         tally.finish()
     }
 }

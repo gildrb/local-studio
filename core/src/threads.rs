@@ -4,7 +4,7 @@ use std::sync::Arc;
 use eukhe_client::saved_sessions::strip_signal_reply_rules;
 use serde_json::Value;
 
-use crate::model::{Project, Shelf, Subagent, ThreadRow, ThreadSearchHit, ThreadStatus};
+use crate::model::{Harness, Project, Shelf, Subagent, ThreadRow, ThreadSearchHit, ThreadStatus};
 use crate::session::model_ref;
 use crate::store::{StoredProject, ThreadFlags};
 use crate::workspace::model::PullRequest;
@@ -135,6 +135,7 @@ pub(crate) struct Facts {
     pub(crate) monitoring: bool,
     pub(crate) live_agents: u32,
     pub(crate) pull_request: Option<PullRequest>,
+    pub(crate) harness: Harness,
 }
 
 pub(crate) fn saved_rows(data: &Value) -> Vec<SavedRow> {
@@ -376,6 +377,7 @@ pub(crate) fn row(
             live_agents: facts.live_agents,
             fan_out: flags.fan_out.clone(),
             pull_request: facts.pull_request,
+            harness: facts.harness,
         },
         key,
     )

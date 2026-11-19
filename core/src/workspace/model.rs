@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use crate::model::AccessMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "wire",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")
+)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum DiffScope {
     WorkingTree,
@@ -12,6 +17,7 @@ pub enum DiffScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum UsagePeriod {
     Day,
@@ -21,6 +27,11 @@ pub enum UsagePeriod {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "wire",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")
+)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum LocalAction {
     ScanTailnet,
@@ -39,6 +50,7 @@ pub enum LocalAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct GitStatus {
     pub branch: Option<String>,
@@ -54,6 +66,7 @@ pub struct GitStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Branch {
     pub name: String,
@@ -63,6 +76,7 @@ pub struct Branch {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct FileDiff {
     pub path: String,
@@ -75,6 +89,7 @@ pub struct FileDiff {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct DiffHunk {
     pub header: String,
@@ -82,6 +97,7 @@ pub struct DiffHunk {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct DiffLine {
     pub kind: DiffLineKind,
@@ -91,6 +107,7 @@ pub struct DiffLine {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum DiffLineKind {
     Context,
@@ -99,6 +116,7 @@ pub enum DiffLineKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct FileEntry {
     pub name: String,
@@ -108,15 +126,32 @@ pub struct FileEntry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "wire",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")
+)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum FileContent {
-    Text { text: String, language: Option<String> },
-    Image { mime_type: String, data: Vec<u8> },
-    Binary { size: u64 },
-    TooLarge { size: u64 },
+    Text {
+        text: String,
+        language: Option<String>,
+    },
+    Image {
+        mime_type: String,
+        #[cfg_attr(feature = "wire", serde(with = "crate::wire::bytes"))]
+        data: Vec<u8>,
+    },
+    Binary {
+        size: u64,
+    },
+    TooLarge {
+        size: u64,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct SearchHit {
     pub relative: String,
@@ -125,6 +160,7 @@ pub struct SearchHit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct PullRequest {
     pub number: u64,
@@ -137,6 +173,7 @@ pub struct PullRequest {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UsageReport {
     pub period: UsagePeriod,
@@ -157,6 +194,7 @@ pub struct UsageReport {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UsageBucket {
     pub start_ms: i64,
@@ -165,6 +203,7 @@ pub struct UsageBucket {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UsageLimit {
     pub provider: String,
@@ -175,6 +214,7 @@ pub struct UsageLimit {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct PullRequestDetail {
     pub pull: PullRequest,
@@ -188,6 +228,7 @@ pub struct PullRequestDetail {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct PrComment {
     pub author: String,
@@ -198,6 +239,7 @@ pub struct PrComment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct PrEvent {
     pub kind: String,
@@ -207,6 +249,7 @@ pub struct PrEvent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct PrCheck {
     pub name: String,
@@ -215,6 +258,7 @@ pub struct PrCheck {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum DevicePlatform {
     IosSimulator,
@@ -223,6 +267,7 @@ pub enum DevicePlatform {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Device {
     pub id: String,
@@ -258,6 +303,7 @@ pub struct ProjectSettings {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum SetupStageState {
     Pending,
@@ -268,6 +314,7 @@ pub enum SetupStageState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct SetupStage {
     pub name: String,
@@ -276,6 +323,11 @@ pub struct SetupStage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "wire",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")
+)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum KernelState {
     Checking,
@@ -287,6 +339,7 @@ pub enum KernelState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UsageByModel {
     pub provider: String,
@@ -297,6 +350,7 @@ pub struct UsageByModel {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct UsageDay {
     pub day: String,
@@ -305,6 +359,7 @@ pub struct UsageDay {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum ProviderApi {
     OpenAiCompatible,
@@ -313,6 +368,7 @@ pub enum ProviderApi {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum ProviderKind {
     BuiltIn,
@@ -321,6 +377,7 @@ pub enum ProviderKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum ProviderCredential {
     Missing,
@@ -332,6 +389,7 @@ pub enum ProviderCredential {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ProviderModel {
     pub id: String,
@@ -340,6 +398,7 @@ pub struct ProviderModel {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct ProviderStatus {
     pub id: String,
@@ -355,6 +414,11 @@ pub struct ProviderStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "wire",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")
+)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum ProviderKey {
     Keep,
@@ -363,6 +427,7 @@ pub enum ProviderKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct CustomProvider {
     pub name: String,
@@ -373,6 +438,7 @@ pub struct CustomProvider {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct EndpointPreset {
     pub name: String,
@@ -382,6 +448,7 @@ pub struct EndpointPreset {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalEngine {
     pub id: String,
@@ -394,6 +461,7 @@ pub struct LocalEngine {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct Keybinding {
     pub command: String,
@@ -714,6 +782,7 @@ impl Default for Settings {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalSnapshot {
     pub controllers: Vec<LocalController>,
@@ -728,6 +797,7 @@ pub struct LocalSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalController {
     pub target: String,
@@ -756,6 +826,7 @@ pub struct LocalController {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalHardware {
     pub cpus: u32,
@@ -769,6 +840,7 @@ pub struct LocalHardware {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalGpu {
     pub index: u32,
@@ -780,6 +852,7 @@ pub struct LocalGpu {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum LocalMachineStatus {
     Serving,
@@ -790,6 +863,7 @@ pub enum LocalMachineStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalElsewhere {
     pub url: String,
@@ -798,6 +872,7 @@ pub struct LocalElsewhere {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum LocalEngineState {
     Loaded,
@@ -806,6 +881,7 @@ pub enum LocalEngineState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalEndpoint {
     pub id: String,
@@ -824,6 +900,7 @@ pub struct LocalEndpoint {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalJob {
     pub id: String,
@@ -837,6 +914,7 @@ pub struct LocalJob {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalRecipe {
     pub id: String,
@@ -852,6 +930,7 @@ pub struct LocalRecipe {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalRegistry {
     pub controller: String,
@@ -865,6 +944,7 @@ pub struct LocalRegistry {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalRegistryMatch {
     pub name: String,
@@ -875,6 +955,7 @@ pub struct LocalRegistryMatch {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct RegistryModel {
     pub repo: String,
@@ -882,6 +963,7 @@ pub struct RegistryModel {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct RegistryVariant {
     pub id: String,
@@ -899,6 +981,7 @@ pub struct RegistryVariant {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalDownload {
     pub recipe: String,
@@ -906,6 +989,7 @@ pub struct LocalDownload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalRecord {
     pub controller: String,
@@ -921,6 +1005,7 @@ pub struct LocalRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalShare {
     pub controller: String,
@@ -938,6 +1023,7 @@ pub struct LocalShare {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalUsage {
     pub today_tokens: u64,
@@ -950,6 +1036,7 @@ pub struct LocalUsage {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalModelUsage {
     pub model: String,
@@ -960,6 +1047,7 @@ pub struct LocalModelUsage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalTailnet {
     pub available: bool,
@@ -967,6 +1055,7 @@ pub struct LocalTailnet {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TailnetDevice {
     pub name: String,
@@ -978,6 +1067,11 @@ pub struct TailnetDevice {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "wire",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")
+)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum TerminalColor {
     Default,
@@ -986,6 +1080,7 @@ pub enum TerminalColor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum TerminalUnderline {
     None,
@@ -997,6 +1092,7 @@ pub enum TerminalUnderline {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 #[allow(clippy::struct_excessive_bools)]
 pub struct TerminalStyle {
@@ -1015,6 +1111,7 @@ pub struct TerminalStyle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalRun {
     pub column: u16,
@@ -1025,6 +1122,7 @@ pub struct TerminalRun {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalSpan {
     pub start: u16,
@@ -1032,6 +1130,7 @@ pub struct TerminalSpan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalRow {
     pub index: u16,
@@ -1040,6 +1139,7 @@ pub struct TerminalRow {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum TerminalCursorShape {
     Block,
@@ -1049,6 +1149,7 @@ pub enum TerminalCursorShape {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalCursor {
     pub column: u16,
@@ -1060,6 +1161,7 @@ pub struct TerminalCursor {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 #[allow(clippy::struct_excessive_bools)]
 pub struct TerminalFrame {
@@ -1077,6 +1179,7 @@ pub struct TerminalFrame {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalSize {
     pub cols: u16,
@@ -1086,6 +1189,7 @@ pub struct TerminalSize {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 #[allow(clippy::struct_excessive_bools)]
 pub struct TerminalMods {
@@ -1097,6 +1201,7 @@ pub struct TerminalMods {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum TerminalKeyAction {
     Press,
@@ -1105,6 +1210,7 @@ pub enum TerminalKeyAction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalKey {
     pub action: TerminalKeyAction,
@@ -1116,6 +1222,7 @@ pub struct TerminalKey {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum TerminalMouseAction {
     Press,
@@ -1124,6 +1231,7 @@ pub enum TerminalMouseAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "snake_case"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum TerminalMouseButton {
     Left,
@@ -1132,6 +1240,7 @@ pub enum TerminalMouseButton {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalMouse {
     pub action: TerminalMouseAction,
@@ -1142,6 +1251,7 @@ pub struct TerminalMouse {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalScroll {
     pub lines: i32,
@@ -1151,6 +1261,7 @@ pub struct TerminalScroll {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TerminalPoint {
     pub column: u16,
@@ -1158,6 +1269,11 @@ pub struct TerminalPoint {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "wire",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(tag = "type", rename_all = "snake_case", rename_all_fields = "camelCase")
+)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Enum))]
 pub enum TerminalSelect {
     All,
@@ -1168,6 +1284,7 @@ pub enum TerminalSelect {
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalDashboard {
     pub controller: String,
@@ -1196,6 +1313,7 @@ pub struct LocalDashboard {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalEngineTelemetry {
     pub port: u16,
@@ -1205,6 +1323,7 @@ pub struct LocalEngineTelemetry {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct LocalGpuTelemetry {
     pub index: u32,
@@ -1218,6 +1337,7 @@ pub struct LocalGpuTelemetry {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "wire", derive(serde::Serialize, serde::Deserialize), serde(rename_all = "camelCase"))]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
 pub struct TokenHistory {
     pub since_day: Option<String>,

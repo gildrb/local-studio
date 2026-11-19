@@ -8,13 +8,20 @@ description = "Shared Local Studio logic: the Eukhe daemon client, session model
 
 [features]
 ffi = ["dep:uniffi"]
+wire = []
 
 [dependencies]
 eukhe-client.workspace = true
 eukhe-types.workspace = true
+aes-gcm.workspace = true
 anyhow.workspace = true
+base64.workspace = true
+ed25519-dalek.workspace = true
+getrandom.workspace = true
+hkdf.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 tokio.workspace = true
 image.workspace = true
 ignore.workspace = true
@@ -23,7 +30,9 @@ notify.workspace = true
 portable-pty.workspace = true
 reqwest.workspace = true
 syntect.workspace = true
+toml.workspace = true
 two-face.workspace = true
+x25519-dalek.workspace = true
 uniffi = { workspace = true, optional = true }
 
 [lints]

@@ -1,12 +1,13 @@
 use std::rc::Rc;
 
 use adw::prelude::*;
-use local_studio_core::{Branch, GitStatus, Update};
+use local_studio_core::{Branch, GitStatus, Harness, ModelRef, Update};
 
 use crate::app::{App, Dirty};
-use crate::fixtures::{base, conversation, project_id, FOCUSED};
+use crate::fixtures::{base, conversation, info, project_id, threads, FOCUSED};
 
-pub const SCENES: [&str; 5] = ["picker-access", "picker-thinking", "picker-branches", "picker-project", "picker-stash"];
+pub const SCENES: [&str; 6] =
+    ["picker-access", "picker-thinking", "picker-branches", "picker-project", "picker-stash", "harness-claude-code"];
 
 pub fn stage(app: &Rc<App>, scene: &str) {
     match scene {
@@ -37,8 +38,33 @@ pub fn stage(app: &Rc<App>, scene: &str) {
             ]);
             app.composer.tools.stash.popup();
         }
+        "harness-claude-code" => harness(app),
         _ => crate::dashboard_scenes::stage(app, scene),
     }
+}
+
+fn harness(app: &Rc<App>) {
+    conversation(app, false);
+    let mut rows = threads();
+    for row in &mut rows {
+        let (harness, provider, model) = match row.id.as_str() {
+            FOCUSED => (Harness::ClaudeCode, "claude-code", "haiku"),
+            "t-done" => (Harness::Codex, "codex", "gpt-6-luna"),
+            _ => continue,
+        };
+        row.harness = harness;
+        row.provider = Some(provider.to_string());
+        row.model = Some(model.to_string());
+    }
+    let mut focused = info(false);
+    focused.harness = Harness::ClaudeCode;
+    focused.model = Some(ModelRef {
+        provider: "claude-code".to_string(),
+        id: "haiku".to_string(),
+        name: Some("Haiku (Claude Code)".to_string()),
+        reasoning: true,
+    });
+    app.apply(vec![Update::Threads { threads: rows }, Update::Thread { thread: FOCUSED.to_string(), info: focused }]);
 }
 
 pub fn reset(app: &Rc<App>) {

@@ -1,0 +1,110 @@
+name: Promote
+# gh workflow run promote.yml --ref stable -f nightly=nightly-YYYYMMDDHHMMSS
+# gh workflow run promote.yml --ref stable -f hotfix=true
+on:
+  workflow_dispatch:
+    inputs:
+      nightly:
+        description: The nightly-YYYYMMDDHHMMSS tag to promote
+        type: string
+        default: ""
+      hotfix:
+        description: Tag stable's head as the next patch release instead
+        type: boolean
+        default: false
+permissions:
+  contents: write
+  issues: read
+concurrency:
+  group: stable
+  cancel-in-progress: false
+env:
+  REPO: ${{ github.repository }}
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    environment: stable
+    outputs:
+      version: ${{ steps.pick.outputs.version }}
+      commit: ${{ steps.pick.outputs.commit }}
+    steps:
+      - name: Refuse anything but the stable ref
+        run: '[ "$GITHUB_REF" = refs/heads/stable ] || { echo "::error::run this on the stable ref: gh workflow run promote.yml --ref stable"; exit 1; }'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY: ${{ inputs.nightly }}
+          HOTFIX: ${{ inputs.hotfix }}
+        run: |
+          set -euo pipefail
+          die() { echo "::error::$*"; exit 1; }
+          head=$(git ls-remote origin refs/heads/stable | cut -f1)
+          [ -n "$head" ] || die "no stable branch"
+          if [ "$HOTFIX" = true ]; then
+            [ -z "$NIGHTLY" ] || die "pass nightly or hotfix=true, not both"
+            last=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "$head") || die "stable has no vX.Y.Z tag to follow"
+            [ "$(git rev-parse "$last^{commit}")" != "$head" ] || die "stable's head is already $last"
+            IFS=. read -r major minor patch <<< "${last#v}"
+            version="$major.$minor.$((patch + 1))"
+            commit=$head
+            git checkout -q "$commit"
+            stamped=$(nu scripts/version.nu stable --commit "$commit")
+            [ "$stamped" = "$version" ] || die "stable's head builds $stamped; bump the workspace version to $version in the hotfix"
+          else
+            [[ $NIGHTLY =~ ^nightly-[0-9]{14}$ ]] || die "nightly must be a nightly-YYYYMMDDHHMMSS tag"
+            published=$(gh api "repos/$REPO/releases/tags/$NIGHTLY" -q .published_at) || die "no release $NIGHTLY"
+            age=$(( $(date -u +%s) - $(date -u -d "$published" +%s) ))
+            [ "$age" -ge 259200 ] || die "$NIGHTLY was published $((age / 3600)) hours ago; promotion needs 72"
+            commit=$(git rev-parse "$NIGHTLY^{commit}")
+            git merge-base --is-ancestor "$head" "$commit" || die "$NIGHTLY ($commit) does not contain stable's head $head"
+            gh release download "$NIGHTLY" -R "$REPO" -p latest.json -O "$RUNNER_TEMP/nightly.json"
+            [ "$(jq -r .commit "$RUNNER_TEMP/nightly.json")" = "$commit" ] || die "$NIGHTLY's latest.json names another commit"
+            git checkout -q "$commit"
+            version=$(nu scripts/version.nu stable --commit "$commit")
+            case $(jq -r .version "$RUNNER_TEMP/nightly.json") in
+              "$version"-nightly.*) ;;
+              *) die "$NIGHTLY is not a $version nightly" ;;
+            esac
+          fi
+          open=$(gh api "repos/$REPO/issues?state=open&labels=regression&per_page=100" -q '[.[] | select(.pull_request | not)] | length')
+          [ "$open" = 0 ] || die "$open open issue(s) labeled regression"
+          ! git ls-remote --exit-code --tags origin "refs/tags/v$version" > /dev/null || die "v$version already exists"
+          [ "$head" = "$commit" ] || git merge-base --is-ancestor "$head" "$commit" || die "stable's head $head is not an ancestor of $commit"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Refuse without the release app
+        env:
+          APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          APP_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: '[ -n "$APP_ID" ] && [ -n "$APP_KEY" ] || { echo "::error::RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY are not set in the stable environment; GITHUB_TOKEN cannot move stable past workflow changes"; exit 1; }'
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+      - name: Fast-forward stable
+        env:
+          COMMIT: ${{ steps.pick.outputs.commit }}
+          TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:$TOKEN@github.com/$REPO.git"
+          app() { git -c http.https://github.com/.extraheader= "$@"; }
+          [ "$(app ls-remote "$url" refs/heads/stable | cut -f1)" = "$COMMIT" ] || app push "$url" "$COMMIT:refs/heads/stable"
+          [ "$(app ls-remote "$url" refs/heads/stable | cut -f1)" = "$COMMIT" ] || { echo "::error::stable did not move to $COMMIT"; exit 1; }
+
+  stable:
+    needs: promote
+    uses: ./.github/workflows/stable.yml
+    with:
+      version: ${{ needs.promote.outputs.version }}
+      commit: ${{ needs.promote.outputs.commit }}
+    secrets: inherit

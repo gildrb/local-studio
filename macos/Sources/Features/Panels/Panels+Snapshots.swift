@@ -371,7 +371,7 @@ enum PanelFixtures {
             id: thread, project: project, title: "Build the native panels", shelf: .working, status: .working,
             statusSince: now - 300_000, updatedAt: now, snoozedUntil: nil, pinned: false, unread: false,
             branch: "feat/panels", worktree: nil, provider: "anthropic", model: "claude-opus", additions: 214, deletions: 37,
-            note: nil, archived: false, autoSettle: true, liveAgents: agents ? 2 : 0, fanOut: nil, pullRequest: nil
+            note: nil, archived: false, autoSettle: true, liveAgents: agents ? 2 : 0, fanOut: nil, pullRequest: nil, harness: .eukhe
         )
         let items: [Item] = [
             Item(id: 1, turn: 1, createdAt: now - 900_000, kind: .user(text: "Build the panels", images: 0, entry: nil, thumbnails: [])),

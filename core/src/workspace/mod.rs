@@ -12,11 +12,11 @@ mod local;
 pub mod model;
 pub(crate) mod process;
 mod projects;
-mod providers;
+pub(crate) mod providers;
 mod settings;
 mod setup;
 mod terminal;
-mod time;
+pub(crate) mod time;
 mod usage;
 mod watch;
 mod writer;
@@ -611,9 +611,10 @@ impl Workspace {
     pub(crate) fn load_usage(&self, request: String, period: UsagePeriod) {
         let daemon = self.inner.daemon.clone();
         let ledger = Arc::clone(&self.inner.usage);
+        let harness = crate::harness::usage_ledger(&self.inner.data_dir);
         let reply = request.clone();
         self.answer(request, async move {
-            let report = usage::load(&daemon, ledger, period, time::now_ms()).await?;
+            let report = usage::load(&daemon, ledger, &harness, period, time::now_ms()).await?;
             Ok(vec![Update::Usage { request: reply, report }])
         });
     }

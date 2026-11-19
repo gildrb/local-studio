@@ -1,0 +1,121 @@
+name: Nightly
+# Builds the newest main commit that passed CI and the real-model core smokes (the
+# `local-studio/e2e` status, posted by scripts/e2e.sh) into a draft, then swaps it in as the rolling
+# `nightly` pre-release and keeps an immutable `nightly-YYYYMMDDHHMMSS` copy for 14 days
+# (docs/channels.md).
+# Re-run with "Re-run all jobs", never "Re-run failed jobs": a failed run deletes its draft.
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+  issues: read
+  statuses: read
+  actions: read
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+env:
+  REPO: ${{ github.repository }}
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      skip: ${{ steps.v.outputs.skip }}
+      commit: ${{ steps.v.outputs.commit }}
+      version: ${{ steps.v.outputs.version }}
+      at: ${{ steps.v.outputs.at }}
+    steps:
+      - name: Refuse anything but main
+        run: '[ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::nightly builds only from main"; exit 1; }'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          commit=
+          for sha in $(gh api "repos/$REPO/commits?sha=main&per_page=30" -q '.[].sha'); do
+            e2e=$(gh api "repos/$REPO/commits/$sha/status" -q '[.statuses[] | select(.context == "local-studio/e2e")][0].state // ""')
+            ci=$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=completed" -q '[.workflow_runs[].conclusion][0] // ""')
+            if [ "$e2e" = success ] && [ "$ci" = success ]; then commit=$sha; break; fi
+          done
+          if [ -z "$commit" ]; then
+            echo "::error::no main commit in the last 30 has both green CI and a passing local-studio/e2e status (scripts/e2e.sh --post)"
+            exit 1
+          fi
+          echo "building $commit"
+          if [ "$EVENT" = schedule ] && [ "$(scripts/release.sh feed-field nightly commit)" = "$commit" ]; then
+            echo "no newer checked commit since the last nightly"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          blockers=$(gh api "repos/$REPO/issues?state=open&labels=regression,blocks-nightly&per_page=100" -q '[.[] | select(.pull_request | not)] | length')
+          [ "$blockers" = 0 ] || { echo "::error::$blockers open issue(s) labeled regression and blocks-nightly"; exit 1; }
+          git fetch -q --depth 1 origin "$commit" && git checkout -q FETCH_HEAD
+          at=$(date -u +%Y%m%d%H%M%S)
+          version=$(nu scripts/version.nu nightly --at "$at" --commit "$commit")
+          scripts/release.sh check-newer nightly "$version"
+          printf 'skip=false\nat=%s\nversion=%s\ncommit=%s\n' "$at" "$version" "$commit" >> "$GITHUB_OUTPUT"
+
+  draft:
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    outputs:
+      id: ${{ steps.d.outputs.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: d
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: echo "id=$(scripts/release.sh draft nightly "$VERSION" "$COMMIT" "nightly-build-$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [prepare, draft]
+    uses: ./.github/workflows/build.yml
+    with:
+      channel: nightly
+      version: ${{ needs.prepare.outputs.version }}
+      at: ${{ needs.prepare.outputs.at }}
+      commit: ${{ needs.prepare.outputs.commit }}
+      draft: ${{ needs.draft.outputs.id }}
+    secrets: inherit
+
+  publish:
+    needs: [prepare, draft, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Write latest.json and swap the draft in as nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAC_SIGNED: ${{ needs.build.outputs.mac == 'true' }}
+          UPDATER_SIGNING_KEY: ${{ secrets.UPDATER_SIGNING_KEY }}
+          UPDATER_SIGNING_KEY_PASSWORD: ${{ secrets.UPDATER_SIGNING_KEY_PASSWORD }}
+          DRAFT: ${{ needs.draft.outputs.id }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          [ -n "$UPDATER_SIGNING_KEY" ] || echo "::warning title=Unsigned feed::UPDATER_SIGNING_KEY is not set, so latest.json has no signatures and updaters will not install this build."
+          scripts/release.sh publish nightly "$DRAFT" "$VERSION" "$COMMIT"
+
+  cleanup:
+    needs: [draft, build, publish]
+    if: always() && needs.draft.outputs.id != '' && (needs.build.result != 'success' || needs.publish.result != 'success')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ needs.draft.outputs.id }}
+        run: scripts/release.sh discard "$DRAFT"

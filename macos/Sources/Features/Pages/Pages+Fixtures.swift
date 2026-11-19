@@ -178,7 +178,7 @@ enum PagesFixtures {
             updatedAt: now - Int64(hoursAgo * 3_600_000), snoozedUntil: nil, pinned: false, unread: false,
             branch: branch, worktree: nil, provider: "anthropic", model: "claude-sonnet-4-5",
             additions: branch == nil ? 0 : 42, deletions: branch == nil ? 0 : 7, note: nil, archived: true, autoSettle: true,
-            liveAgents: 0, fanOut: nil, pullRequest: nil
+            liveAgents: 0, fanOut: nil, pullRequest: nil, harness: .eukhe
         )
     }
 

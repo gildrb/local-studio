@@ -1028,6 +1028,12 @@ fn thread_widget(app: &Weak<App>, card: &Card) -> gtk::Widget {
     project_label.set_hexpand(true);
     project_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     top.append(&project_label);
+    if let Some(name) = format::harness_label(row.harness) {
+        let harness = gtk::Label::new(Some(name));
+        harness.add_css_class("ls-pill");
+        harness.set_tooltip_text(Some(&format!("Runs in {name}")));
+        top.append(&harness);
+    }
     if row.pinned {
         top.append(&icons::image(icons::PIN));
     }
