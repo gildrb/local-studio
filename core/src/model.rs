@@ -205,6 +205,7 @@ pub enum CommandKind {
     Command,
     Template,
     Skill,
+    Plugin,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

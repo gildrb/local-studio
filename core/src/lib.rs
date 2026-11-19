@@ -5,6 +5,7 @@ mod highlight;
 mod images;
 mod model;
 mod oneshot;
+pub mod plugins;
 mod scratch;
 mod session;
 mod skills;
@@ -12,6 +13,7 @@ mod store;
 mod studio;
 mod threads;
 mod transcript;
+pub mod tunnel;
 mod workspace;
 
 pub use highlight::{highlight, highlight_lines, CodeSegment, SyntaxKind};

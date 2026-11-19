@@ -4,6 +4,7 @@ use eukhe_types::slash_commands::parse_slash_command;
 use serde_json::Value;
 
 use crate::model::{CommandKind, SkillEntry, SkillSource, SlashCommand};
+use crate::plugins::{self, CommandTarget, Plugin};
 
 const SESSION_COMMANDS: [(&str, &str); 7] = [
     ("compact", "Compact the conversation context"),
@@ -19,6 +20,7 @@ const SESSION_COMMANDS: [(&str, &str); 7] = [
 pub(crate) struct Resources {
     skills: Vec<Resource>,
     templates: Vec<Resource>,
+    plugins: Vec<Plugin>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +29,23 @@ struct Resource {
     file_path: String,
     description: String,
     source: SkillSource,
+    plugin: Option<String>,
+}
+
+impl Resource {
+    fn label(&self) -> String {
+        self.plugin.as_ref().map_or_else(|| source_label(self.source).to_string(), |id| format!("plugin:{id}"))
+    }
+
+    fn from_plugin(plugin: &Plugin, file: &plugins::PluginFile) -> Self {
+        Self {
+            name: file.name.clone(),
+            file_path: file.path.display().to_string(),
+            description: file.description.clone(),
+            source: SkillSource::Personal,
+            plugin: Some(plugin.id.clone()),
+        }
+    }
 }
 
 impl Resources {
@@ -47,17 +66,39 @@ impl Resources {
                                     .unwrap_or_default()
                                     .to_string(),
                                 source: source(entry.get("sourceInfo")),
+                                plugin: None,
                             })
                         })
                         .collect()
                 })
                 .unwrap_or_default()
         };
-        Self { skills: list("skills"), templates: list("prompts") }
+        Self { skills: list("skills"), templates: list("prompts"), plugins: Vec::new() }
+    }
+
+    pub(crate) fn with_plugins(mut self, plugins: Vec<Plugin>) -> Self {
+        self.plugins = plugins;
+        self
+    }
+
+    fn all_skills(&self) -> Vec<Resource> {
+        let mut all = self.skills.clone();
+        for plugin in &self.plugins {
+            all.extend(plugin.skills.iter().map(|file| Resource::from_plugin(plugin, file)));
+        }
+        all
+    }
+
+    fn all_templates(&self) -> Vec<Resource> {
+        let mut all = self.templates.clone();
+        for plugin in &self.plugins {
+            all.extend(plugin.prompts.iter().map(|file| Resource::from_plugin(plugin, file)));
+        }
+        all
     }
 
     pub(crate) fn skills(&self) -> Vec<SkillEntry> {
-        self.skills
+        self.all_skills()
             .iter()
             .map(|skill| SkillEntry {
                 name: skill.name.clone(),
@@ -81,33 +122,38 @@ impl Resources {
             source: "session".to_string(),
             kind: CommandKind::Command,
         }));
-        commands.extend(self.templates.iter().map(|template| SlashCommand {
+        commands.extend(self.all_templates().iter().map(|template| SlashCommand {
             name: template.name.clone(),
             description: template.description.clone(),
-            source: source_label(template.source).to_string(),
+            source: template.label(),
             kind: CommandKind::Template,
         }));
-        commands.extend(self.skills.iter().map(|skill| SlashCommand {
+        commands.extend(self.all_skills().iter().map(|skill| SlashCommand {
             name: format!("skill:{}", skill.name),
             description: skill.description.clone(),
-            source: source_label(skill.source).to_string(),
+            source: skill.label(),
             kind: CommandKind::Skill,
         }));
+        commands.extend(plugins::commands(&self.plugins));
         commands
     }
 
     pub(crate) fn expand(&self, text: &str) -> String {
+        let skills = self.all_skills();
         if let Some((name, args)) = parse_slash_command(text) {
             if let Some(skill_name) = name.strip_prefix("skill:") {
-                if let Some(block) = self.skills.iter().find(|skill| skill.name == skill_name).and_then(skill_block) {
-                    return if args.trim().is_empty() { block } else { format!("{block}\n\n{args}") };
+                if let Some(block) = skills.iter().find(|skill| skill.name == skill_name).and_then(skill_block) {
+                    return with_args(block, &args);
                 }
                 return text.to_string();
             }
-            if let Some(template) = self.templates.iter().find(|template| template.name == name) {
+            if let Some(template) = self.all_templates().iter().find(|template| template.name == name) {
                 if let Ok(content) = std::fs::read_to_string(&template.file_path) {
                     return substitute_args(&strip_frontmatter(&content), &words(&args));
                 }
+            }
+            if let Some(expanded) = self.expand_plugin(&name, &args) {
+                return expanded;
             }
             return text.to_string();
         }
@@ -118,7 +164,7 @@ impl Resources {
             if used.contains(&name) {
                 continue;
             }
-            if let Some(block) = self.skills.iter().find(|skill| skill.name == name).and_then(skill_block) {
+            if let Some(block) = skills.iter().find(|skill| skill.name == name).and_then(skill_block) {
                 used.push(name);
                 blocks.push(block);
             }
@@ -128,6 +174,33 @@ impl Resources {
         }
         blocks.push(text.to_string());
         blocks.join("\n\n")
+    }
+}
+
+impl Resources {
+    fn expand_plugin(&self, name: &str, args: &str) -> Option<String> {
+        let (plugin, command) = self.plugins.iter().find_map(|plugin| {
+            plugin.commands.iter().find(|command| command.name == name).map(|command| (plugin, command))
+        })?;
+        match &command.target {
+            CommandTarget::Prompt(path) => {
+                let content = std::fs::read_to_string(path).ok()?;
+                Some(substitute_args(&strip_frontmatter(&content), &words(args)))
+            }
+            CommandTarget::Skill(skill) => {
+                let file = plugin.skill(skill)?;
+                skill_block(&Resource::from_plugin(plugin, file)).map(|block| with_args(block, args))
+            }
+        }
+    }
+}
+
+fn with_args(block: String, args: &str) -> String {
+    if args.trim().is_empty() {
+        block
+    } else {
+        // Small models lose a request that sits after a long skill, so it also opens the prompt.
+        format!("The person's request: {}\n\n{block}\n\n{args}", args.trim())
     }
 }
 
@@ -266,4 +339,17 @@ fn substitute_args(content: &str, args: &[String]) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod request_tests {
+    use super::with_args;
+
+    #[test]
+    fn the_request_opens_and_closes_an_expanded_skill() {
+        let text = with_args("<skill>body</skill>".into(), " a fan guard ");
+        assert!(text.starts_with("The person's request: a fan guard\n"));
+        assert!(text.ends_with("</skill>\n\n a fan guard "));
+        assert_eq!(with_args("<skill>body</skill>".into(), "  "), "<skill>body</skill>");
+    }
 }

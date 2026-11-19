@@ -1,0 +1,9 @@
+id = "smoothstone"
+version = "0.1.0"
+description = "Make 3D printable parts with the stone CLI and its tested parametric recipes"
+capabilities = []
+
+[[commands]]
+name = "stone"
+description = "Make a printable part with smoothstone"
+skill = "smoothstone"
