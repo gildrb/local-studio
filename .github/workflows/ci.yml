@@ -1,0 +1,134 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.head_ref || github.run_id }}
+  cancel-in-progress: true
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  core:
+    name: Core (Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  linux:
+    name: Linux app
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        with:
+          github_access_token: ${{ github.token }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: linux
+      - name: Lint and build in the dev shell
+        run: nix develop ./linux --command bash -euc 'cd linux && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo build'
+
+  channels:
+    name: Channels
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - run: scripts/check-channels.sh
+      - run: scripts/tests/check-channels-test.sh
+      - run: scripts/tests/e2e-target-test.sh
+      - name: Version strings sort local < dev < nightly < stable
+        run: |
+          set -euo pipefail
+          versions=()
+          for channel in local dev nightly stable; do
+            versions+=("$(nu scripts/version.nu "$channel" --at 20261118070000)")
+          done
+          printf '%s\n' "${versions[@]}"
+          sorted=$(npx -y semver@7.6.3 "${versions[@]}")
+          [ "$sorted" = "$(printf '%s\n' "${versions[@]%%+*}")" ]
+      - name: Stamping writes each channel's identity and leaves the checkout alone
+        run: |
+          set -euo pipefail
+          for channel in stable nightly dev local; do
+            dir="$RUNNER_TEMP/stamp-$channel"
+            mkdir -p "$dir/macos" "$dir/linux/src"
+            cp Cargo.toml "$dir/"
+            cp macos/LocalStudio-Info.plist "$dir/macos/"
+            cp linux/src/main.rs "$dir/linux/src/"
+            identity=$(nu scripts/version.nu "$channel" --stamp --json --root "$dir" --at 20261118070000 --commit "$GITHUB_SHA")
+            for field in name bundle_id scheme bundle_version base; do
+              grep -qF "<string>$(jq -r ".$field" <<< "$identity")</string>" "$dir/macos/LocalStudio-Info.plist"
+            done
+            grep -qF "application_id(\"$(jq -r .app_id <<< "$identity")\")" "$dir/linux/src/main.rs"
+          done
+          git diff --exit-code
+
+  macos:
+    name: macOS
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Core and kit
+        run: PATH="$(nu macos/zig.nu):$PATH" cargo build -p local-studio-core -p local-studio-kit
+
+  macos-app:
+    name: macOS app (not blocking)
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Newest Xcode 26
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          sudo xcodebuild -runFirstLaunch
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - name: App (Debug)
+        # actool in Xcode 26.6, the newest on macos-26, crashes on macos/AppIcon.icon (#27); this records it without blocking.
+        continue-on-error: true
+        run: nu macos/build.nu
+
+  windows:
+    name: Windows (core and kit, not shipped)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Core and kit
+        # Eukhe ships no Windows binary and eukhe-client is Unix-only; this records what fails without blocking.
+        continue-on-error: true
+        run: cargo check -p local-studio-core -p local-studio-kit

@@ -1,0 +1,87 @@
+name: Stable
+# Called only by promote.yml after it fast-forwarded `stable`. Publishing the draft creates the vX.Y.Z tag, so a failed run leaves no tag behind and promote can run again (docs/channels.md).
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      commit:
+        type: string
+        required: true
+permissions:
+  contents: write
+env:
+  REPO: ${{ github.repository }}
+  VERSION: ${{ inputs.version }}
+  COMMIT: ${{ inputs.commit }}
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    environment: stable
+    outputs:
+      id: ${{ steps.d.outputs.id }}
+      at: ${{ steps.d.outputs.at }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+      - id: d
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          scripts/release.sh check-newer stable "$VERSION"
+          echo "at=$(date -u +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
+          echo "id=$(scripts/release.sh draft stable "$VERSION" "$COMMIT" "v$VERSION")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    uses: ./.github/workflows/build.yml
+    with:
+      channel: stable
+      version: ${{ inputs.version }}
+      at: ${{ needs.draft.outputs.at }}
+      commit: ${{ inputs.commit }}
+      draft: ${{ needs.draft.outputs.id }}
+    secrets: inherit
+
+  publish:
+    needs: [draft, build]
+    runs-on: ubuntu-24.04
+    environment: stable
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+      - name: Write latest.json and publish the release
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          MAC_SIGNED: ${{ needs.build.outputs.mac == 'true' }}
+          UPDATER_SIGNING_KEY: ${{ secrets.STABLE_UPDATER_SIGNING_KEY }}
+          UPDATER_SIGNING_KEY_PASSWORD: ${{ secrets.STABLE_UPDATER_SIGNING_KEY_PASSWORD }}
+          DRAFT: ${{ needs.draft.outputs.id }}
+        run: |
+          [ -n "$UPDATER_SIGNING_KEY" ] || echo "::warning title=Unsigned feed::STABLE_UPDATER_SIGNING_KEY is not set in the stable environment, so latest.json has no signatures and updaters will not install this build."
+          scripts/release.sh publish stable "$DRAFT" "$VERSION" "$COMMIT"
+
+  cleanup:
+    needs: [draft, build, publish]
+    if: always() && needs.draft.outputs.id != '' && (needs.build.result != 'success' || needs.publish.result != 'success')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ needs.draft.outputs.id }}
+        run: scripts/release.sh discard "$DRAFT"

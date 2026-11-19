@@ -1,0 +1,90 @@
+name: Dev
+# Every merge to main builds into a draft, then swaps it in as the rolling `dev` pre-release (docs/channels.md).
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: dev
+  cancel-in-progress: false
+env:
+  REPO: ${{ github.repository }}
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      at: ${{ steps.v.outputs.at }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          at=$(date -u +%Y%m%d%H%M%S)
+          version=$(nu scripts/version.nu dev --at "$at" --commit "$GITHUB_SHA")
+          scripts/release.sh check-newer dev "$version"
+          printf 'at=%s\nversion=%s\n' "$at" "$version" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  draft:
+    needs: [prepare, ci]
+    runs-on: ubuntu-24.04
+    outputs:
+      id: ${{ steps.d.outputs.id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - id: d
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: echo "id=$(scripts/release.sh draft dev "$VERSION" "$GITHUB_SHA" "dev-build-$GITHUB_RUN_ID")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: [prepare, draft]
+    uses: ./.github/workflows/build.yml
+    with:
+      channel: dev
+      version: ${{ needs.prepare.outputs.version }}
+      at: ${{ needs.prepare.outputs.at }}
+      commit: ${{ github.sha }}
+      draft: ${{ needs.draft.outputs.id }}
+    secrets: inherit
+
+  publish:
+    needs: [prepare, draft, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Write latest.json and swap the draft in as dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MAC_SIGNED: ${{ needs.build.outputs.mac == 'true' }}
+          UPDATER_SIGNING_KEY: ${{ secrets.UPDATER_SIGNING_KEY }}
+          UPDATER_SIGNING_KEY_PASSWORD: ${{ secrets.UPDATER_SIGNING_KEY_PASSWORD }}
+          DRAFT: ${{ needs.draft.outputs.id }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          [ -n "$UPDATER_SIGNING_KEY" ] || echo "::warning title=Unsigned feed::UPDATER_SIGNING_KEY is not set, so latest.json has no signatures and updaters will not install this build."
+          scripts/release.sh publish dev "$DRAFT" "$VERSION" "$GITHUB_SHA"
+
+  cleanup:
+    needs: [draft, build, publish]
+    if: always() && needs.draft.outputs.id != '' && (needs.build.result != 'success' || needs.publish.result != 'success')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          DRAFT: ${{ needs.draft.outputs.id }}
+        run: scripts/release.sh discard "$DRAFT"

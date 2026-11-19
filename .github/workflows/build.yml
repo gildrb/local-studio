@@ -1,0 +1,168 @@
+name: Build
+on:
+  workflow_call:
+    outputs:
+      mac:
+        description: true when a signed macOS build was uploaded to the draft
+        value: ${{ jobs.macos.outputs.uploaded }}
+    inputs:
+      channel:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      at:
+        type: string
+        required: true
+      commit:
+        type: string
+        required: true
+      draft:
+        type: string
+        required: true
+permissions:
+  contents: write
+env:
+  CARGO_TERM_COLOR: always
+  REPO: ${{ github.repository }}
+  CHANNEL: ${{ inputs.channel }}
+  VERSION: ${{ inputs.version }}
+  AT: ${{ inputs.at }}
+  COMMIT: ${{ inputs.commit }}
+  DRAFT: ${{ inputs.draft }}
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
+        with:
+          github_access_token: ${{ github.token }}
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - name: Stamp the channel identity
+        run: |
+          stamped=$(nu scripts/version.nu "$CHANNEL" --stamp --at "$AT" --commit "$COMMIT")
+          [ "$stamped" = "$VERSION" ] || { echo "::error::stamped $stamped, expected $VERSION"; exit 1; }
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          workspaces: linux
+          key: release
+      - name: Build and bundle in the dev shell
+        run: nix develop ./linux --command bash -euc 'cd linux && cargo build --release && nu bundle.nu --profile release'
+      - name: Upload to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/out"
+          mv linux/target/release/bundle "$RUNNER_TEMP/local-studio"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/out/local-studio-linux-x86_64.tar.gz" local-studio
+          scripts/release.sh upload "$DRAFT" "$RUNNER_TEMP/out/local-studio-linux-x86_64.tar.gz"
+
+  macos:
+    name: macOS arm64
+    runs-on: macos-26
+    outputs:
+      uploaded: ${{ steps.ship.outputs.uploaded }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.15.2
+      - uses: hustcer/setup-nu@1b8faed9a8ff673c8ce0beae243e0b72d0787241 # v3.30
+        with:
+          version: 0.117.0
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: release
+      - name: Stamp the channel identity
+        run: |
+          stamped=$(nu scripts/version.nu "$CHANNEL" --stamp --at "$AT" --commit "$COMMIT")
+          [ "$stamped" = "$VERSION" ] || { echo "::error::stamped $stamped, expected $VERSION"; exit 1; }
+      # An ad-hoc build is a new app to macOS each time, so without the Apple secrets nothing ships and the
+      # release skips the Xcode build: CI's macos-app job already shows whether it compiles. With the secrets
+      # set, a failed macOS build blocks the release.
+      - name: Check the Apple secrets
+        id: secrets
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE" ] || [ -z "$APPLE_SIGNING_IDENTITY" ] || [ -z "$APPLE_API_KEY_ID" ] || [ -z "$APPLE_API_ISSUER" ] || [ -z "$APPLE_API_PRIVATE_KEY" ]; then
+            echo "::warning title=macOS build not published::the Apple signing or notarization secrets are not all set, so the macOS build was skipped and not uploaded."
+            echo "ship=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ship=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Newest Xcode 26
+        if: steps.secrets.outputs.ship == 'true'
+        run: |
+          xcode=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          sudo xcodebuild -runFirstLaunch
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - name: Build (Release)
+        if: steps.secrets.outputs.ship == 'true'
+        run: nu macos/build.nu --configuration Release
+      - name: Sign, package and upload
+        id: ship
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.secrets.outputs.ship }}" != true ]; then
+            echo "uploaded=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          name=$(nu scripts/version.nu "$CHANNEL" --json --at "$AT" --commit "$COMMIT" | jq -r .name)
+          stage="$RUNNER_TEMP/stage"
+          mkdir -p "$stage" "$RUNNER_TEMP/out"
+          app="$stage/$name.app"
+          mv macos/build/Release/LocalStudio.app "$app"
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          password=$(openssl rand -hex 24)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/certificate.p12"
+          security import "$RUNNER_TEMP/certificate.p12" -k "$keychain" -P "${APPLE_CERTIFICATE_PASSWORD:-}" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/certificate.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" > /dev/null
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          find "$app/Contents" -type f -print0 | xargs -0 file --no-pad | awk -F': ' '/Mach-O/ {print $1}' |
+            awk -F/ '{print NF "\t" $0}' | sort -rn | cut -f2- |
+            while IFS= read -r code; do
+              codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$code"
+            done
+          codesign --force --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$app"
+          codesign --verify --strict --verbose=2 "$app"
+          printf '%s' "$APPLE_API_PRIVATE_KEY" > "$RUNNER_TEMP/notary.p8"
+          ditto -c -k --keepParent "$app" "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" --key "$RUNNER_TEMP/notary.p8" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER" --wait --timeout 45m --output-format json > "$RUNNER_TEMP/notary.json" || true
+          rm -f "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/notarize.zip"
+          [ "$(jq -r .status "$RUNNER_TEMP/notary.json" 2>/dev/null)" = Accepted ] || { cat "$RUNNER_TEMP/notary.json"; echo "::error::notarization was not accepted"; exit 1; }
+          xcrun stapler staple "$app"
+          xcrun stapler validate "$app"
+          tar -C "$stage" -czf "$RUNNER_TEMP/out/local-studio-darwin-aarch64.app.tar.gz" "$name.app"
+          scripts/release.sh upload "$DRAFT" "$RUNNER_TEMP/out/local-studio-darwin-aarch64.app.tar.gz"
+          echo "uploaded=true" >> "$GITHUB_OUTPUT"
