@@ -19,13 +19,15 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::Instant;
 
 use crate::daemon::{self, DaemonQuery};
+use crate::harness::{self, Envelope};
 use crate::images;
 use crate::model::{
-    AccessMode, Approval, ApprovalAnswer, Block, Connection, DaemonMismatch, Delivery, ItemKind, ModelKey, ModelOption,
-    NoticeLevel, NotificationKind, PromptDraft, Subagent, ThreadInfo, ThreadRow, ThreadSettings, TranscriptOp, Update,
-    WorktreeChoice,
+    AccessMode, Approval, ApprovalAnswer, Block, Connection, DaemonMismatch, Delivery, Harness, ItemKind, ModelKey,
+    ModelOption, NoticeLevel, NotificationKind, PromptDraft, Subagent, ThreadInfo, ThreadRow, ThreadSettings,
+    TranscriptOp, Update, WorktreeChoice,
 };
 use crate::oneshot::TextGen;
+use crate::plugins::{self, Plugin};
 use crate::session::{self, LiveState};
 use crate::skills::Resources;
 use crate::store::{self, Store, StoredProject};
@@ -52,6 +54,8 @@ const RELINK_ATTEMPTS: u32 = 20;
 const PROBE_TIMEOUT_MS: u64 = 5_000;
 const KILL_TIMEOUT_MS: u64 = 15_000;
 const DELIVERY_SLACK_MS: i64 = 2_000;
+
+mod cli;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "ffi", derive(uniffi::Record))]
@@ -350,6 +354,9 @@ enum Command {
     RestartDaemon {
         force: bool,
     },
+    HarnessModels {
+        models: Vec<ModelOption>,
+    },
     Shutdown {
         done: std::sync::mpsc::Sender<()>,
     },
@@ -368,6 +375,7 @@ impl Studio {
     #[cfg_attr(feature = "ffi", uniffi::constructor)]
     pub fn new(config: StudioConfig, waker: Arc<dyn Waker>) -> Result<Arc<Self>, StudioError> {
         let socket = daemon::socket_path(config.socket_path.as_deref());
+        let plugins_dir = plugins::plugins_dir(config.data_dir.as_deref());
         let data_dir =
             store::data_dir(config.data_dir.as_deref()).map_err(|message| StudioError::Config { message })?;
         std::fs::create_dir_all(&data_dir)
@@ -390,7 +398,7 @@ impl Studio {
         let workspace = Workspace::new(
             runtime.handle().clone(),
             Arc::clone(&mailbox),
-            data_dir,
+            data_dir.clone(),
             daemon::agent_dir(),
             query,
             controller_main,
@@ -400,6 +408,7 @@ impl Studio {
         let settings = workspace.settings();
         let pull_requests = workspace.pull_requests_changed();
         let (commands, receiver) = mpsc::unbounded_channel();
+        let (cli, cli_events) = mpsc::unbounded_channel();
         let adder = commands.clone();
         workspace.set_project_adder(Arc::new(move |path: String| {
             adder.send(Command::AddProject { path }).ok();
@@ -441,8 +450,16 @@ impl Studio {
             interactive: true,
             daemon: None,
             daemon_pushed: None,
+            plugins_dir,
+            plugin_errors: Vec::new(),
+            data_dir,
+            cli,
+            drivers: HashMap::new(),
+            generation: 0,
+            codex_models: Vec::new(),
+            plugin_consent: Vec::new(),
         };
-        runtime.spawn(actor.run(receiver));
+        runtime.spawn(actor.run(receiver, cli_events));
         Ok(Arc::new(Self { commands, mailbox, workspace, _runtime: runtime }))
     }
 
@@ -714,6 +731,14 @@ struct Actor {
     interactive: bool,
     daemon: Option<DaemonFacts>,
     daemon_pushed: Option<Update>,
+    plugins_dir: Option<PathBuf>,
+    plugin_errors: Vec<String>,
+    data_dir: PathBuf,
+    cli: mpsc::UnboundedSender<Envelope>,
+    drivers: HashMap<String, cli::Cli>,
+    generation: u64,
+    codex_models: Vec<ModelOption>,
+    plugin_consent: Vec<String>,
 }
 
 struct DaemonFacts {
@@ -749,8 +774,14 @@ async fn wait_until(at: Option<Instant>) {
 }
 
 impl Actor {
-    async fn run(mut self, mut commands: mpsc::UnboundedReceiver<Command>) {
+    async fn run(
+        mut self,
+        mut commands: mpsc::UnboundedReceiver<Command>,
+        mut cli_events: mpsc::UnboundedReceiver<Envelope>,
+    ) {
         self.push_projects();
+        self.push_models();
+        self.load_codex_models();
         let launch = self.launch.clone();
         self.bundled =
             tokio::task::spawn_blocking(move || daemon::bundled_version(launch.as_ref())).await.ok().flatten();
@@ -810,6 +841,9 @@ impl Actor {
                     self.disconnected();
                     retry_at = Some(Instant::now() + RECONNECT_DELAY);
                 }
+                envelope = cli_events.recv() => if let Some(envelope) = envelope {
+                    self.cli_event(envelope).await;
+                },
                 () = wait_until(retry_at) => {}
                 _ = timer.tick() => self.on_timer(),
                 changed = self.settings.changed(), if settings_open => {
@@ -878,7 +912,10 @@ impl Actor {
         self.roster.clear();
         self.daemon = None;
         self.daemon_pushed = None;
-        for thread in self.threads.values_mut() {
+        for (id, thread) in &mut self.threads {
+            if self.store.threads.get(id).is_some_and(|flags| flags.harness != Harness::Eukhe) {
+                continue;
+            }
             if let Some(live) = thread.live.take() {
                 thread.reopen = live.state.busy || thread.pending_run;
             }
@@ -887,7 +924,7 @@ impl Actor {
             thread.stopping = None;
             thread.run_started_at = None;
         }
-        if let Some(focused) = self.focused.clone() {
+        if let Some(focused) = self.focused.clone().filter(|focused| self.harness(focused).is_none()) {
             self.mailbox.push(Update::Approvals { thread: focused, approvals: Vec::new() });
         }
         self.mailbox
@@ -896,8 +933,14 @@ impl Actor {
     }
 
     async fn stop(&mut self, done: &std::sync::mpsc::Sender<()>) {
+        self.cli_shutdown();
         if let Some(client) = self.client.clone() {
-            for live in self.threads.values().filter_map(|thread| thread.live.as_ref()) {
+            for live in self
+                .threads
+                .values()
+                .filter_map(|thread| thread.live.as_ref())
+                .filter(|live| self.by_active.contains_key(&live.active))
+            {
                 let detach = DaemonCommand::Detach {
                     id: None,
                     active_session_id: Some(live.active.clone()),
@@ -934,6 +977,7 @@ impl Actor {
         if !woke.is_empty() {
             self.save();
         }
+        self.cli_idle();
         if self.client.is_some() {
             let unsure: Vec<String> = self
                 .threads
@@ -1062,6 +1106,7 @@ impl Actor {
                     self.mailbox.notice(NoticeLevel::Error, error);
                 }
             }
+            Command::Compact { thread } if self.harness(&thread).is_some() => self.cli_compact(&thread).await,
             Command::Compact { thread } => match self.ensure_open(&thread).await {
                 Ok(active) => {
                     let command = DaemonCommand::Compact {
@@ -1091,7 +1136,9 @@ impl Actor {
                 }
                 self.store.update(&thread, |flags| flags.access = Some(mode));
                 self.save();
-                if let Some(active) = self.live_active(&thread) {
+                if self.harness(&thread).is_some() {
+                    self.cli_access(&thread, mode);
+                } else if let Some(active) = self.live_active(&thread) {
                     if let Err(error) = self.apply_access(&thread, &active).await {
                         self.mailbox.notice(NoticeLevel::Error, error);
                     }
@@ -1164,6 +1211,10 @@ impl Actor {
                     self.mailbox.notice(NoticeLevel::Error, format!("Could not restart the thread: {error}"));
                 }
             }
+            Command::CancelSubagent { thread, .. } if self.harness(&thread).is_some() => {
+                let harness = self.harness(&thread).unwrap_or_default();
+                self.mailbox.notice(NoticeLevel::Error, cli::unsupported(harness, "cancel a subagent"));
+            }
             Command::CancelSubagent { thread, child } => {
                 let result = match self.live_active(&thread) {
                     Some(active) => {
@@ -1190,6 +1241,10 @@ impl Actor {
             Command::Verify { thread, attempt, relink } => self.verify(&thread, attempt, relink).await,
             Command::StopCheck { thread } => self.stop_check(&thread).await,
             Command::RestartDaemon { force } => self.restart_daemon(force).await,
+            Command::HarnessModels { models } => {
+                self.codex_models = models;
+                self.push_models();
+            }
             Command::Shutdown { done } => self.stop(&done).await,
         }
     }
@@ -1251,7 +1306,7 @@ impl Actor {
 
     fn push_models(&self) {
         self.mailbox.push(Update::Models {
-            models: self.models.clone(),
+            models: self.all_models(),
             favorites: self.store.favorites.clone(),
             hidden: self.store.hidden.clone(),
         });
@@ -1312,7 +1367,7 @@ impl Actor {
         });
         self.save();
         self.dirty = true;
-        if self.client.is_none() {
+        if self.client.is_none() && self.harness(&id).is_none() {
             return;
         }
         match self.ensure_open(&id).await {
@@ -1378,6 +1433,7 @@ impl Actor {
         let head = threads::git_head(&live.state.cwd);
         info.branch = head.branch;
         info.worktree = head.worktree;
+        info.harness = flags.harness;
         Some(info)
     }
 
@@ -1386,6 +1442,7 @@ impl Actor {
         let roster = self.roster_for(id);
         thread
             .and_then(|thread| thread.title.clone())
+            .or_else(|| self.store.threads.get(id).and_then(|flags| flags.title.clone()))
             .or_else(|| thread.and_then(|thread| thread.live.as_ref()).and_then(|live| live.state.name.clone()))
             .or_else(|| roster.and_then(|row| row.title.clone()))
             .or_else(|| self.saved.get(id).and_then(|row| row.title.clone()))
@@ -1403,7 +1460,10 @@ impl Actor {
     }
 
     fn known(&self, id: &str) -> bool {
-        self.threads.contains_key(id) || self.saved.contains_key(id) || self.roster_for(id).is_some()
+        self.threads.contains_key(id)
+            || self.saved.contains_key(id)
+            || self.roster_for(id).is_some()
+            || self.harness(id).is_some()
     }
 
     fn live_active(&self, id: &str) -> Option<String> {
@@ -1432,6 +1492,9 @@ impl Actor {
     }
 
     async fn ensure_open(&mut self, id: &str) -> Result<String, String> {
+        if self.harness(id).is_some() {
+            return self.cli_open(id).await;
+        }
         if let Some(active) = self.live_active(id) {
             return Ok(active);
         }
@@ -1520,6 +1583,9 @@ impl Actor {
     }
 
     async fn fetch_entries(&mut self, id: &str, emit: bool) {
+        if self.harness(id).is_some() {
+            return;
+        }
         let Some(active) = self.live_active(id) else { return };
         let command =
             DaemonCommand::GetUserMessagesForForking { id: None, active_session_id: active, rest: Map::default() };
@@ -1556,7 +1622,7 @@ impl Actor {
     }
 
     async fn release(&mut self, id: &str) {
-        if self.focused.as_deref() == Some(id) {
+        if self.focused.as_deref() == Some(id) || self.harness(id).is_some() {
             return;
         }
         let Some(thread) = self.threads.get(id) else { return };
@@ -1644,12 +1710,19 @@ impl Actor {
         fan_out: Option<String>,
         prompt: &str,
     ) -> Result<String, String> {
-        let client = self.client.clone().ok_or_else(|| "Not connected to the Eukhe daemon yet.".to_string())?;
         let project_path = match &project {
             Some(project) => Some(self.store.project_id(project).ok_or_else(|| format!("Unknown project {project}."))?),
             None => None,
         };
         let effective = self.workspace.effective_settings(project_path.as_deref());
+        let harness = settings
+            .provider
+            .as_deref()
+            .or(effective.default_provider.as_deref())
+            .map_or(Harness::Eukhe, harness::harness_of);
+        if harness == Harness::Eukhe && self.client.is_none() {
+            return Err("Not connected to the Eukhe daemon yet.".to_string());
+        }
         let choice = match settings.worktree {
             WorktreeChoice::Default => match effective.new_thread_workspace {
                 NewThreadWorkspace::Local => WorktreeChoice::Local,
@@ -1673,6 +1746,14 @@ impl Actor {
             (WorktreeChoice::Local | WorktreeChoice::Default, Some(project)) => project.clone(),
             (WorktreeChoice::Local | WorktreeChoice::Default, None) => self.home.clone(),
         };
+        if harness != Harness::Eukhe {
+            let model = if settings.provider.is_some() { settings.model } else { effective.default_model };
+            let thinking = settings.thinking_level.or(effective.default_thinking_level);
+            return self
+                .cli_create(draft, harness, cwd, project_path, settings.access, model, thinking, fan_out, prompt)
+                .await;
+        }
+        let client = self.client.clone().ok_or_else(|| "Not connected to the Eukhe daemon yet.".to_string())?;
         let created = saved_sessions::create_resident(&client, None, self.create_config(&cwd))
             .await
             .map_err(|error| format!("{error:#}"))?;
@@ -1753,7 +1834,8 @@ impl Actor {
             return Err("Write a message first.".to_string());
         }
         let active = self.ensure_open(id).await?;
-        let message = if message.starts_with('/') || message.contains('$') {
+        let cli = self.harness(id).is_some();
+        let message = if !cli && (message.starts_with('/') || message.contains('$')) {
             self.resources(id, &active).await.expand(&message)
         } else {
             message
@@ -1798,14 +1880,20 @@ impl Actor {
         });
         self.save();
         self.dirty = true;
-        let command = DaemonCommand::Prompt {
-            id: None,
-            active_session_id: active,
-            message,
-            input: prompt_input(images, behavior),
-            rest: Map::default(),
+        let result = if cli {
+            let steer = matches!(delivery, Delivery::Steer);
+            self.cli_send(id, &message, Self::cli_images(&prompt), steer).await
+        } else {
+            let command = DaemonCommand::Prompt {
+                id: None,
+                active_session_id: active,
+                message,
+                input: prompt_input(images, behavior),
+                rest: Map::default(),
+            };
+            self.call(command).await.map(|_| ())
         };
-        if let Err(error) = self.call(command).await {
+        if let Err(error) = result {
             if let Some(thread) = self.threads.get_mut(id) {
                 thread.pending_run = false;
                 thread.pending_at = None;
@@ -1822,9 +1910,51 @@ impl Actor {
         threads::project_for(&cwd, &self.store.flags(id), &self.store.projects)
     }
 
+    fn plugins(&mut self) -> Vec<Plugin> {
+        let Some(dir) = self.plugins_dir.as_deref() else { return Vec::new() };
+        let scan = plugins::scan(dir);
+        let errors: Vec<String> = scan
+            .failures
+            .iter()
+            .flat_map(|failure| {
+                let name = failure.dir.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                failure.errors.iter().map(move |error| format!("{name}: {error}"))
+            })
+            .collect();
+        if errors != self.plugin_errors {
+            if !errors.is_empty() {
+                self.mailbox.notice(NoticeLevel::Warning, format!("Some plugins did not load: {}", errors.join("; ")));
+            }
+            self.plugin_errors = errors;
+        }
+        let mut notes: Vec<String> = Vec::new();
+        let grants = plugins::Grants::load(dir).unwrap_or_else(|error| {
+            notes.push(error);
+            plugins::Grants::default()
+        });
+        for plugin in &scan.plugins {
+            if let plugins::Consent::NeedsConsent { missing } = grants.consent(plugin) {
+                let names: Vec<&str> = missing.iter().map(|capability| capability.name()).collect();
+                notes.push(format!("{} needs consent for {}, so its MCP server is off", plugin.id, names.join(", ")));
+            }
+        }
+        if let Some(agent) = crate::daemon::agent_dir() {
+            if let Err(error) = plugins::sync_mcp_servers(&agent, &scan.plugins, &grants) {
+                notes.push(error);
+            }
+        }
+        if notes != self.plugin_consent {
+            if !notes.is_empty() {
+                self.mailbox.notice(NoticeLevel::Info, format!("Plugins: {}", notes.join("; ")));
+            }
+            self.plugin_consent = notes;
+        }
+        scan.plugins
+    }
+
     async fn resources(&mut self, id: &str, active: &str) -> Resources {
         if let Some(resources) = self.threads.get(id).and_then(|thread| thread.resources.clone()) {
-            return resources;
+            return resources.with_plugins(self.plugins());
         }
         let command = DaemonCommand::GetResourceSnapshot {
             id: None,
@@ -1837,11 +1967,11 @@ impl Actor {
                 if let Some(thread) = self.threads.get_mut(id) {
                     thread.resources = Some(resources.clone());
                 }
-                resources
+                resources.with_plugins(self.plugins())
             }
             Err(error) => {
                 self.mailbox.notice(NoticeLevel::Warning, format!("Could not read the skills: {error}"));
-                Resources::default()
+                Resources::default().with_plugins(self.plugins())
             }
         }
     }
@@ -1920,6 +2050,10 @@ impl Actor {
     }
 
     async fn answer(&mut self, id: &str, request: String, answer: ApprovalAnswer) {
+        if self.harness(id).is_some() {
+            self.cli_answer(id, &request, answer);
+            return;
+        }
         let Some(active) = self.live_active(id) else {
             self.mailbox.notice(NoticeLevel::Info, "That approval is no longer pending.");
             return;
@@ -1980,6 +2114,10 @@ impl Actor {
             self.mailbox.notice(NoticeLevel::Error, format!("Unknown thread {id}."));
             return;
         }
+        if self.harness(id).is_some() {
+            self.cli_rename(id, &title).await;
+            return;
+        }
         let command = if let Some(active) = self.live_active(id) {
             DaemonCommand::SetSessionName {
                 id: None,
@@ -2022,6 +2160,10 @@ impl Actor {
     async fn delete(&mut self, id: &str) {
         if !self.known(id) {
             self.mailbox.notice(NoticeLevel::Error, format!("Unknown thread {id}."));
+            return;
+        }
+        if self.harness(id).is_some() {
+            self.cli_delete(id);
             return;
         }
         let Some(path) = self.session_path(id) else {
@@ -2072,6 +2214,9 @@ impl Actor {
     }
 
     async fn edit_from_here(&mut self, id: &str, entry: String) -> Result<(), String> {
+        if let Some(harness) = self.harness(id) {
+            return Err(cli::unsupported(harness, "edit from an earlier message"));
+        }
         let active = self.ensure_open(id).await?;
         let command = DaemonCommand::NavigateTree {
             id: None,
@@ -2092,6 +2237,9 @@ impl Actor {
     }
 
     async fn fork(&mut self, id: &str) -> Result<(), String> {
+        if let Some(harness) = self.harness(id) {
+            return Err(cli::unsupported(harness, "fork"));
+        }
         let active = self.ensure_open(id).await?;
         let tree = self
             .call(DaemonCommand::GetSessionTree { id: None, active_session_id: active.clone(), rest: Map::default() })
@@ -2148,6 +2296,9 @@ impl Actor {
         model: Option<String>,
         level: Option<String>,
     ) -> Result<(), String> {
+        if self.harness(id).is_some() {
+            return self.cli_model(id, provider, model, level);
+        }
         let mut active = self.ensure_open(id).await?;
         if let (Some(provider), Some(model)) = (provider, model) {
             let command = |active: String| DaemonCommand::SetModel {
@@ -2183,6 +2334,9 @@ impl Actor {
     }
 
     async fn reload_state(&mut self, id: &str) {
+        if self.harness(id).is_some() {
+            return;
+        }
         let Some(active) = self.live_active(id) else { return };
         match self.call(DaemonCommand::GetState { id: None, active_session_id: active, rest: Map::default() }).await {
             Ok(state) => {
@@ -2197,6 +2351,9 @@ impl Actor {
     }
 
     async fn reload_messages(&mut self, id: &str) {
+        if self.harness(id).is_some() {
+            return;
+        }
         let Some(active) = self.live_active(id) else { return };
         let data = match self
             .call(DaemonCommand::GetMessages { id: None, active_session_id: active, rest: Map::default() })
@@ -2232,6 +2389,9 @@ impl Actor {
     }
 
     async fn reload_context(&mut self, id: &str) {
+        if self.harness(id).is_some() {
+            return;
+        }
         let Some(active) = self.live_active(id) else { return };
         let command = DaemonCommand::GetSessionStats { id: None, active_session_id: active, rest: Map::default() };
         let Ok(stats) = self.call(command).await else { return };
@@ -2244,11 +2404,20 @@ impl Actor {
     }
 
     async fn utility_session(&mut self) -> Result<String, String> {
-        if let Some(active) = self.focused.as_deref().and_then(|id| self.live_active(id)) {
+        if let Some(active) = self
+            .focused
+            .as_deref()
+            .and_then(|id| self.live_active(id))
+            .filter(|active| self.by_active.contains_key(active))
+        {
             return Ok(active);
         }
-        if let Some(active) =
-            self.threads.values().find_map(|thread| thread.live.as_ref().map(|live| live.active.clone()))
+        if let Some(active) = self
+            .threads
+            .values()
+            .filter_map(|thread| thread.live.as_ref())
+            .find(|live| self.by_active.contains_key(&live.active))
+            .map(|live| live.active.clone())
         {
             return Ok(active);
         }
@@ -2361,7 +2530,7 @@ impl Actor {
         let project = project.and_then(|project| self.store.project_id(&project));
         let in_project = project.as_ref().and_then(|project| {
             self.threads.iter().find_map(|(id, thread)| {
-                let live = thread.live.as_ref()?;
+                let live = thread.live.as_ref().filter(|live| self.by_active.contains_key(&live.active))?;
                 let flags = self.store.flags(id);
                 (threads::project_for(&live.state.cwd, &flags, &self.store.projects).as_ref() == Some(project))
                     .then(|| live.active.clone())
@@ -2374,10 +2543,13 @@ impl Actor {
         let data = self
             .call(DaemonCommand::GetResourceSnapshot { id: None, active_session_id: active, rest: Map::default() })
             .await?;
-        Ok(Resources::parse(&data))
+        Ok(Resources::parse(&data).with_plugins(self.plugins()))
     }
 
     async fn set_service_tier(&mut self, id: &str, tier: Option<String>) -> Result<(), String> {
+        if let Some(harness) = self.harness(id) {
+            return Err(cli::unsupported(harness, "change the service tier"));
+        }
         let active = self.ensure_open(id).await?;
         let service_tier = match tier {
             Some(tier) => Some(
@@ -2469,7 +2641,7 @@ impl Actor {
     }
 
     async fn reopen_focused(&mut self, id: &str) {
-        if self.focused.as_deref() != Some(id) || self.client.is_none() {
+        if self.focused.as_deref() != Some(id) || (self.client.is_none() && self.harness(id).is_none()) {
             return;
         }
         if let Err(error) = self.ensure_open(id).await {
@@ -2553,6 +2725,9 @@ impl Actor {
     }
 
     async fn verify(&mut self, id: &str, attempt: u32, relink: bool) {
+        if self.harness(id).is_some() {
+            return;
+        }
         let Some(thread) = self.threads.get(id) else { return };
         if !relink && (thread.stopping.is_some() || starting(thread) || !self.running(id)) {
             return;
@@ -2607,6 +2782,10 @@ impl Actor {
     }
 
     async fn stop_run(&mut self, id: &str) {
+        if self.harness(id).is_some() {
+            self.cli_stop(id).await;
+            return;
+        }
         let Some(active) = self.daemon_active(id) else {
             if self.running(id) {
                 self.forget_run(id);
@@ -2631,6 +2810,10 @@ impl Actor {
     async fn stop_check(&mut self, id: &str) {
         let Some(thread) = self.threads.get_mut(id) else { return };
         if thread.stopping.take().is_none() || !self.running(id) {
+            return;
+        }
+        if self.harness(id).is_some() {
+            self.cli_stop_check(id).await;
             return;
         }
         let Some(active) = self.daemon_active(id) else {
@@ -2707,6 +2890,9 @@ impl Actor {
     }
 
     async fn reopen_session(&mut self, id: &str) -> Result<String, String> {
+        if self.harness(id).is_some() {
+            return self.cli_restart(id).await;
+        }
         let active = self.live_active(id).or_else(|| self.roster_for(id).and_then(|row| row.active_session_id.clone()));
         if let Some(active) = active {
             self.by_active.remove(&active);
@@ -2723,6 +2909,10 @@ impl Actor {
     }
 
     async fn refresh_subagents(&mut self, id: &str) {
+        if self.harness(id).is_some() {
+            self.emit_subagents(id);
+            return;
+        }
         let Some(active) = self.live_active(id) else { return };
         let command = DaemonCommand::GetRlmChildren { id: None, active_session_id: active, rest: Map::default() };
         if let Ok(data) = self.call(command).await {
@@ -2775,6 +2965,9 @@ impl Actor {
     }
 
     async fn message_image(&mut self, id: &str, entry: &str, index: u32) -> Result<(String, Vec<u8>), String> {
+        if let Some(harness) = self.harness(id) {
+            return Err(cli::unsupported(harness, "reopen an image from an earlier message"));
+        }
         let active = self.ensure_open(id).await?;
         let forks = self
             .call(DaemonCommand::GetUserMessagesForForking {
@@ -3013,19 +3206,7 @@ impl Actor {
                     effects: request.effects.iter().map(|effect| effect.as_str().to_string()).collect(),
                     agent,
                 };
-                let body = truncate(&approval.command, BODY_LIMIT);
-                let Some(live) = self.threads.get_mut(&id).and_then(|thread| thread.live.as_mut()) else { return };
-                live.approvals.retain(|(known, _)| known.request_id != approval.request_id);
-                live.approvals.push((approval, now_ms()));
-                self.emit_approvals(&id);
-                let title = self.title(&id);
-                self.mailbox.push(Update::Notification {
-                    thread: id,
-                    kind: NotificationKind::NeedsApproval,
-                    title,
-                    body,
-                });
-                self.dirty = true;
+                self.add_approval(id, approval);
             }
             DaemonClientEvent::ShellApprovalSettled { active_session_id, request_id } => {
                 if let Some(id) = self.by_active.get(&active_session_id).cloned() {
@@ -3084,6 +3265,12 @@ impl Actor {
             });
             return Ok(());
         }
+        if let Some(harness) = self.harness(id) {
+            return Err(format!(
+                "{} threads are titled by the text generation model; choose one in Settings first.",
+                cli::name(harness)
+            ));
+        }
         let active = self.ensure_open(id).await?;
         let request = format!("title:{id}:{}", now_ms());
         self.titles.insert(request.clone(), id.to_string());
@@ -3126,6 +3313,11 @@ impl Actor {
 
     async fn session_event(&mut self, active: &str, event: &SessionEvent, sequence: u64) {
         let Some(id) = self.by_active.get(active).cloned() else { return };
+        self.apply_event(&id, event, sequence).await;
+    }
+
+    async fn apply_event(&mut self, id: &str, event: &SessionEvent, sequence: u64) {
+        let id = id.to_string();
         let focused = self.focused.as_deref() == Some(id.as_str());
         let now = now_ms();
         let mode = self.settings.borrow().response_streaming;
@@ -3235,7 +3427,9 @@ impl Actor {
         if self.focused.as_deref() == Some(id) {
             self.refresh_subagents(id).await;
         }
-        self.refresh_saved().await;
+        if self.harness(id).is_none() {
+            self.refresh_saved().await;
+        }
         self.emit_info(id);
         self.release(id).await;
     }
@@ -3252,6 +3446,9 @@ impl Actor {
         let mut ids: HashSet<String> = self.saved.keys().cloned().collect();
         ids.extend(self.roster.values().filter(|row| row.session_file.is_some()).map(|row| row.session_id.clone()));
         ids.extend(self.threads.iter().filter(|(_, thread)| thread.path.is_some()).map(|(id, _)| id.clone()));
+        ids.extend(
+            self.store.threads.iter().filter(|(_, flags)| flags.harness != Harness::Eukhe).map(|(id, _)| id.clone()),
+        );
         let mut rows = Vec::with_capacity(ids.len());
         for id in ids {
             let flags = self.store.flags(&id);
@@ -3281,9 +3478,13 @@ impl Actor {
             .or_else(|| thread.and_then(|thread| thread.cwd.clone()))
             .or_else(|| roster.map(|row| row.cwd.clone()))
             .or_else(|| saved.map(|row| row.cwd.clone()))
+            .or_else(|| self.store.threads.get(id).and_then(|flags| flags.cwd.clone()))
             .unwrap_or_default();
         let activity_at = self.store.activity_at(id).or_else(|| self.first_seen.get(id).copied()).unwrap_or(now);
         let model = live.and_then(|live| live.state.model.clone());
+        let flags = self.store.threads.get(id);
+        let harness = flags.map_or(Harness::Eukhe, |flags| flags.harness);
+        let cli_provider = Some(harness::provider_of(harness).to_string()).filter(|provider| !provider.is_empty());
         Facts {
             id: id.to_string(),
             title: self.title(id),
@@ -3301,17 +3502,20 @@ impl Actor {
                 .map(|model| model.provider.clone())
                 .filter(|provider| !provider.is_empty())
                 .or_else(|| roster.and_then(|row| row.provider.clone()))
-                .or_else(|| saved.and_then(|row| row.provider.clone())),
+                .or_else(|| saved.and_then(|row| row.provider.clone()))
+                .or(cli_provider),
             model: model
                 .map(|model| model.id)
                 .or_else(|| roster.and_then(|row| row.model.clone()))
-                .or_else(|| saved.and_then(|row| row.model.clone())),
+                .or_else(|| saved.and_then(|row| row.model.clone()))
+                .or_else(|| flags.and_then(|flags| flags.model.clone())),
             note: roster.and_then(|row| row.note.clone()),
             monitoring: roster.is_some_and(|row| row.monitoring),
             live_agents: u32::try_from(self.subagents(id).iter().filter(|agent| agent.running).count())
                 .unwrap_or(u32::MAX),
             pull_request: None,
             cwd,
+            harness,
         }
     }
 

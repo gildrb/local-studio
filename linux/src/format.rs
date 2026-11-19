@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use gtk::glib;
-use local_studio_core::{AccessMode, NoticeLevel, ThreadStatus, ToolKind, ToolState};
+use local_studio_core::{AccessMode, Harness, NoticeLevel, ThreadStatus, ToolKind, ToolState};
 
 use crate::icons;
 
@@ -66,6 +66,22 @@ pub fn tokens(count: u64) -> String {
 #[allow(clippy::cast_precision_loss)]
 pub fn gigabytes(bytes: u64) -> String {
     format!("{:.0} GB", bytes as f64 / 1_000_000_000.0)
+}
+
+pub fn harness_of(provider: &str) -> Harness {
+    match provider {
+        "claude-code" => Harness::ClaudeCode,
+        "codex" => Harness::Codex,
+        _ => Harness::Eukhe,
+    }
+}
+
+pub fn harness_label(harness: Harness) -> Option<&'static str> {
+    match harness {
+        Harness::ClaudeCode => Some("Claude Code"),
+        Harness::Codex => Some("Codex"),
+        Harness::Eukhe => None,
+    }
 }
 
 pub fn access_label(mode: AccessMode) -> &'static str {

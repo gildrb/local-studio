@@ -161,7 +161,7 @@ enum ShellFixtures {
             snoozedUntil: snoozeHours.map { Int64((Date.now.timeIntervalSince1970 + $0 * 3_600) * 1_000) },
             pinned: pinned, unread: unread, branch: branch, worktree: nil, provider: provider, model: model,
             additions: diff.0, deletions: diff.1, note: nil, archived: false, autoSettle: true,
-            liveAgents: 0, fanOut: fanOut, pullRequest: pull
+            liveAgents: 0, fanOut: fanOut, pullRequest: pull, harness: .eukhe
         )
     }
 
@@ -204,7 +204,7 @@ enum ShellFixtures {
             model: ModelRef(provider: "openai-codex", id: "gpt-5", name: "GPT-5", reasoning: true),
             thinkingLevel: "medium", thinkingLevels: ["low", "medium", "high"], access: .supervised,
             busy: true, runStartedAt: ago(3), compacting: false, retryAttempt: 0, queued: 0,
-            context: nil, branch: "swift/s1", worktree: nil, serviceTier: nil, serviceTiers: [], goal: nil
+            context: nil, branch: "swift/s1", worktree: nil, serviceTier: nil, serviceTiers: [], goal: nil, harness: .eukhe
         )),
         .gitStatus(project: projects[0].id, status: GitStatus(
             branch: "swift/s1", upstream: "origin/swift/s1", ahead: 2, behind: 0, dirty: true,

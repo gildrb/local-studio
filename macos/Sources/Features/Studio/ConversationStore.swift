@@ -198,7 +198,7 @@ final class ConversationStore {
                 status: start.failure == nil ? .working : .failed, statusSince: at, updatedAt: at, snoozedUntil: nil,
                 pinned: false, unread: false, branch: nil, worktree: nil, provider: start.info.model?.provider,
                 model: start.info.model?.id, additions: 0, deletions: 0, note: start.failure, archived: false,
-                autoSettle: true, liveAgents: 0, fanOut: nil, pullRequest: nil
+                autoSettle: true, liveAgents: 0, fanOut: nil, pullRequest: nil, harness: .eukhe
             )
         }
     }
@@ -947,7 +947,7 @@ final class ConversationStore {
             thinkingLevel: thinkingLevel(settings: settings) ?? "", thinkingLevels: thinkingLevels(settings: settings),
             access: access(settings: settings), busy: true, runStartedAt: Int64(Date.now.timeIntervalSince1970 * 1000),
             compacting: false, retryAttempt: 0, queued: 0, context: nil, branch: nil, worktree: nil,
-            serviceTier: serviceTier(settings: settings), serviceTiers: serviceTiers(settings: settings), goal: nil
+            serviceTier: serviceTier(settings: settings), serviceTiers: serviceTiers(settings: settings), goal: nil, harness: .eukhe
         )
     }
 

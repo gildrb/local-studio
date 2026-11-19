@@ -84,7 +84,7 @@ struct ComposerSuggestionSource {
                     title: "/" + name,
                     detail: command.description,
                     symbol: command.kind == .skill ? "book" : command.kind == .template ? "text.alignleft" : "command",
-                    badge: Self.kind(command.kind),
+                    badge: command.kind == .plugin ? command.source : Self.kind(command.kind),
                     action: .insert("/" + name + " ")
                 ))
             }
@@ -151,6 +151,7 @@ struct ComposerSuggestionSource {
         case .command: "Command"
         case .template: "Template"
         case .skill: "Skill"
+        case .plugin: "Plugin"
         }
     }
 

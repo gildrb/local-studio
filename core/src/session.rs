@@ -4,7 +4,7 @@ use eukhe_types::goal::GoalState;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::model::{AccessMode, ContextUsage, Goal, ModelOption, ModelRef, QueuedMessage, ThreadInfo};
+use crate::model::{AccessMode, ContextUsage, Goal, Harness, ModelOption, ModelRef, QueuedMessage, ThreadInfo};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct LiveState {
@@ -188,6 +188,7 @@ impl LiveState {
             service_tier: self.service_tier.clone(),
             service_tiers: self.service_tiers.clone(),
             goal: self.goal.clone(),
+            harness: Harness::Eukhe,
         }
     }
 }

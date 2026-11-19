@@ -3,11 +3,12 @@ use std::rc::Rc;
 use adw::prelude::*;
 use local_studio_core::{
     AccessMode, Approval, Block, ColorScheme, Connection, ContextUsage, DiffHunk, DiffLine, DiffLineKind, FileChange,
-    FileDiff, GitStatus, Item, ItemKind, Keybinding, LocalController, LocalEndpoint, LocalEngineState, LocalGpu,
-    LocalHardware, LocalJob, LocalMachineStatus, LocalModelUsage, LocalRecipe, LocalRegistry, LocalRegistryMatch,
-    LocalSnapshot, LocalUsage, ModelKey, ModelOption, ModelRef, NoticeLevel, Project, ProviderCredential, ProviderKind,
-    ProviderStatus, QueuedMessage, RegistryModel, RegistryVariant, Settings, Shelf, ThreadInfo, ThreadRow,
-    ThreadStatus, TokenHistory, ToolKind, ToolState, TranscriptOp, Update, UsageDay, UsagePeriod, UsageReport,
+    FileDiff, GitStatus, Harness, Item, ItemKind, Keybinding, LocalController, LocalEndpoint, LocalEngineState,
+    LocalGpu, LocalHardware, LocalJob, LocalMachineStatus, LocalModelUsage, LocalRecipe, LocalRegistry,
+    LocalRegistryMatch, LocalSnapshot, LocalUsage, ModelKey, ModelOption, ModelRef, NoticeLevel, Project,
+    ProviderCredential, ProviderKind, ProviderStatus, QueuedMessage, RegistryModel, RegistryVariant, Settings, Shelf,
+    ThreadInfo, ThreadRow, ThreadStatus, TokenHistory, ToolKind, ToolState, TranscriptOp, Update, UsageDay,
+    UsagePeriod, UsageReport,
 };
 
 use crate::app::{App, Dirty};
@@ -24,7 +25,7 @@ pub fn scenes() -> Vec<&'static str> {
     all
 }
 
-pub const SCENES: [&str; 60] = [
+pub const SCENES: [&str; 62] = [
     "01-empty",
     "02-new-thread",
     "03-conversation",
@@ -42,6 +43,8 @@ pub const SCENES: [&str; 60] = [
     "14-conversation-light",
     "15-command-palette",
     "16-composer-commands",
+    "16-composer-plugin",
+    "16-composer-plugin-installed",
     "17-composer-mentions",
     "18-sidebar-search",
     "19-sidebar-multiselect",
@@ -339,10 +342,11 @@ fn row(id: &str, project: &str, title: &str, shelf: Shelf, status: ThreadStatus,
         live_agents: 0,
         fan_out: None,
         pull_request: None,
+        harness: Harness::Eukhe,
     }
 }
 
-fn threads() -> Vec<ThreadRow> {
+pub fn threads() -> Vec<ThreadRow> {
     let now = format::now_ms();
     let mut rows = vec![
         row("t-release", "local-studio", "Ship the 0.4 release notes", Shelf::Pinned, ThreadStatus::Idle, 180),
@@ -428,7 +432,7 @@ fn models() -> Vec<ModelOption> {
     .collect()
 }
 
-fn info(live: bool) -> ThreadInfo {
+pub fn info(live: bool) -> ThreadInfo {
     ThreadInfo {
         thread: FOCUSED.to_string(),
         project: Some(project_id("local-studio")),
@@ -454,6 +458,7 @@ fn info(live: bool) -> ThreadInfo {
         service_tier: None,
         service_tiers: Vec::new(),
         goal: None,
+        harness: Harness::Eukhe,
     }
 }
 

@@ -334,7 +334,7 @@ fn engines(fleet: &[LocalController], providers: &Map<String, Value>) -> Vec<Loc
         .collect()
 }
 
-fn read_object(path: &Path) -> Result<Map<String, Value>, String> {
+pub(crate) fn read_object(path: &Path) -> Result<Map<String, Value>, String> {
     let name = path.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
     match fs::read(path) {
         Ok(bytes) if bytes.iter().all(u8::is_ascii_whitespace) => Ok(Map::new()),
@@ -393,7 +393,7 @@ fn replace_file(temporary: &Path, target: &Path, bytes: &[u8]) -> std::io::Resul
     Ok(())
 }
 
-fn write_private(path: &Path, value: &Value) -> Result<(), String> {
+pub(crate) fn write_private(path: &Path, value: &Value) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
     let target = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let parent = target.parent().map(Path::to_path_buf).unwrap_or_default();

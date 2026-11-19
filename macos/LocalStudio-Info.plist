@@ -8,6 +8,17 @@
 	<string>Local Studio</string>
 	<key>CFBundleIdentifier</key>
 	<string>org.local.studio.macos</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>org.local.studio.macos</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>localstudio</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>LocalStudio</string>
 	<key>CFBundleIconFile</key>

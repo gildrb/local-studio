@@ -528,6 +528,9 @@ impl Composer {
             .models
             .iter()
             .filter(|model| !state.hidden.iter().any(|key| key.provider == model.provider && key.model == model.id))
+            .filter(|model| {
+                state.selected.is_none() || info.is_none_or(|info| format::harness_of(&model.provider) == info.harness)
+            })
             .collect();
         models.sort_by_key(|model| {
             let favorite = state.favorites.iter().any(|key| key.provider == model.provider && key.model == model.id);
