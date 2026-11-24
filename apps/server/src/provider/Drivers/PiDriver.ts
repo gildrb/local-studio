@@ -1,4 +1,4 @@
-import { OmpSettings, PiAgentSettings } from "@t3tools/contracts";
+import { EukheSettings, OmpSettings, PiAgentSettings } from "@t3tools/contracts";
 import type * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
@@ -15,6 +15,7 @@ import { makePiAdapter } from "../Layers/PiAdapter.ts";
 import {
   buildInitialPiProviderSnapshot,
   checkPiProviderStatus,
+  EUKHE_FLAVOR,
   OMP_FLAVOR,
   PI_FLAVOR,
   type PiFlavor,
@@ -118,3 +119,4 @@ const makePiFamilyDriver = (
 
 export const PiAgentDriver = makePiFamilyDriver(PI_FLAVOR, PiAgentSettings);
 export const OmpDriver = makePiFamilyDriver(OMP_FLAVOR, OmpSettings);
+export const EukheDriver = makePiFamilyDriver(EUKHE_FLAVOR, EukheSettings);

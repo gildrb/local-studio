@@ -790,6 +790,9 @@ export type PiAgentSettings = typeof PiAgentSettings.Type;
 export const OmpSettings = makePiFamilySettings("omp", "Oh My Pi");
 export type OmpSettings = typeof OmpSettings.Type;
 
+export const EukheSettings = makePiFamilySettings("eukhe", "Eukhe");
+export type EukheSettings = typeof EukheSettings.Type;
+
 /**
  * Antigravity ACP auth methods. Personal and Enterprise open a Google sign-in
  * in the browser. The API key and Agent Platform methods take credentials from
@@ -1317,6 +1320,7 @@ export const ServerSettings = Schema.Struct({
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     piAgent: PiAgentSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     omp: OmpSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    eukhe: EukheSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     antigravity: AntigravitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),

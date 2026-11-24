@@ -74,6 +74,7 @@ pub(super) fn icon_driver_kind(icon_key: &str) -> Option<&'static str> {
         "antigravity" => "antigravity",
         "pi-agent" => "piAgent",
         "omp" => "omp",
+        "eukhe" => "eukhe",
         _ => return None,
     })
 }

@@ -26,12 +26,16 @@ export interface PiFlavor {
   readonly kind: ProviderDriverKind;
   readonly displayName: string;
   readonly binary: string;
-  readonly npmPackage: string;
+  readonly npmPackage: string | null;
   readonly resumeFlag: string;
   readonly settleEvent: string;
   readonly rollbackCommand: "fork" | "branch";
   readonly sessionArgs: ReadonlyArray<string>;
   readonly headlessArgs: ReadonlyArray<string>;
+  readonly textGenerationArgs: ReadonlyArray<string>;
+  readonly negotiates: boolean;
+  readonly entriesCommand: "get_entries" | "get_fork_messages";
+  readonly ladderFromMap: boolean;
 }
 
 export const PI_FLAVOR: PiFlavor = {
@@ -44,6 +48,10 @@ export const PI_FLAVOR: PiFlavor = {
   rollbackCommand: "fork",
   sessionArgs: [],
   headlessArgs: ["--no-session", "--no-extensions", "--offline"],
+  textGenerationArgs: ["--no-session", "--no-extensions", "--offline", "--no-tools"],
+  negotiates: true,
+  entriesCommand: "get_entries",
+  ladderFromMap: true,
 };
 
 export const OMP_FLAVOR: PiFlavor = {
@@ -56,6 +64,26 @@ export const OMP_FLAVOR: PiFlavor = {
   rollbackCommand: "branch",
   sessionArgs: ["--auto-approve"],
   headlessArgs: ["--no-session", "--no-extensions"],
+  textGenerationArgs: ["--no-session", "--no-extensions", "--no-tools"],
+  negotiates: true,
+  entriesCommand: "get_entries",
+  ladderFromMap: false,
+};
+
+export const EUKHE_FLAVOR: PiFlavor = {
+  kind: ProviderDriverKind.make("eukhe"),
+  displayName: "Eukhe",
+  binary: "eukhe",
+  npmPackage: null,
+  resumeFlag: "--resume",
+  settleEvent: "agent_end",
+  rollbackCommand: "fork",
+  sessionArgs: [],
+  headlessArgs: ["--no-session", "--offline"],
+  textGenerationArgs: ["--no-session", "--offline"],
+  negotiates: false,
+  entriesCommand: "get_fork_messages",
+  ladderFromMap: true,
 };
 
 export const REASONING_OPTION_ID = "reasoningEffort";
@@ -71,7 +99,7 @@ const capabilitiesOf = (flavor: PiFlavor, model: PiFrame) => {
   const levels = asRecord(model.thinkingLevelMap);
   const efforts = Array.isArray(reported)
     ? reported.filter((effort): effort is string => typeof effort === "string")
-    : model.reasoning === true && flavor.kind === PI_FLAVOR.kind
+    : model.reasoning === true && flavor.ladderFromMap
       ? ["minimal", "low", "medium", "high", "xhigh", "max"].filter(
           (effort, index) => levels[effort] !== null && (index < 4 || levels[effort] !== undefined),
         )
@@ -204,6 +232,7 @@ export const checkPiProviderStatus = Effect.fn("checkPiProviderStatus")(function
         args: ["--mode", "rpc", ...flavor.headlessArgs],
         cwd,
         env,
+        negotiates: flavor.negotiates,
         onFrame: () => Effect.void,
         onExit: () => Effect.void,
       });

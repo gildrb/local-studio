@@ -3,6 +3,7 @@ import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
+  EukheIcon,
   GrokIcon,
   Icon,
   OmpIcon,
@@ -20,4 +21,5 @@ export const PROVIDER_ICON_BY_PROVIDER: Partial<Record<ProviderDriverKind, Icon>
   [ProviderDriverKind.make("antigravity")]: AntigravityIcon,
   [ProviderDriverKind.make("piAgent")]: PiAgentIcon,
   [ProviderDriverKind.make("omp")]: OmpIcon,
+  [ProviderDriverKind.make("eukhe")]: EukheIcon,
 };

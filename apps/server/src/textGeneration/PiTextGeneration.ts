@@ -46,9 +46,10 @@ export const makePiTextGeneration = Effect.fn("makePiTextGeneration")(function* 
       const rpc = yield* spawnPiRpc({
         provider: flavor.kind,
         command: settings.binaryPath || flavor.binary,
-        args: ["--mode", "rpc", ...flavor.headlessArgs, "--no-tools"],
+        args: ["--mode", "rpc", ...flavor.textGenerationArgs],
         cwd: input.cwd,
         env: environment,
+        negotiates: flavor.negotiates,
         onFrame: (frame) =>
           frame.type === flavor.settleEvent ? Deferred.succeed(settled, undefined) : Effect.void,
         onExit: (reason) => Deferred.fail(settled, reason),

@@ -63,6 +63,7 @@ fn glyph(driver_kind: &str, appearance: Appearance) -> Option<Glyph> {
         }),
         "piAgent" => Glyph::Image("icons/providers/pi.svg"),
         "omp" => Glyph::Image("icons/providers/omp.svg"),
+        "eukhe" => Glyph::Image("icons/providers/eukhe.svg"),
         "antigravity" => Glyph::Image("icons/providers/antigravity.png"),
         _ => return None,
     })

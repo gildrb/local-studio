@@ -78,6 +78,15 @@ export function ProviderIcon(props: ProviderIconProps) {
     );
   }
 
+  if (props.provider === "eukhe") {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 64 64" fill="none">
+        <Rect width="64" height="64" rx="12" fill="#1c1917" />
+        <Path fill="#fbbf24" d="M22 18h20v7H29v5h11v6H29v5h13v7H22z" />
+      </Svg>
+    );
+  }
+
   if (props.provider === "opencode") {
     return (
       <Svg width={size} height={size} viewBox="0 0 32 40" fill="none">

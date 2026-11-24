@@ -91,6 +91,7 @@ const OWN: &[(&str, &[u8])] = own![
     "icons/providers/antigravity.png",
     "icons/providers/claude.svg",
     "icons/providers/cursor.svg",
+    "icons/providers/eukhe.svg",
     "icons/providers/gemini.svg",
     "icons/providers/github-copilot.svg",
     "icons/providers/grok.svg",

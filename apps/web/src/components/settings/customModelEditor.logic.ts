@@ -96,6 +96,9 @@ export const DESCRIPTOR_PRESETS_BY_KIND: Partial<
   [ProviderDriverKind.make("omp")]: [
     { id: "reasoningEffort", label: "Reasoning", type: "select", choices: EFFORT_CHOICES },
   ],
+  [ProviderDriverKind.make("eukhe")]: [
+    { id: "reasoningEffort", label: "Reasoning", type: "select", choices: EFFORT_CHOICES },
+  ],
   [ProviderDriverKind.make("opencode")]: [
     { id: "variant", label: "Reasoning", type: "select", choices: EFFORT_CHOICES },
     {

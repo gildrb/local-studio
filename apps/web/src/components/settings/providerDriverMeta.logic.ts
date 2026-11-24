@@ -3,6 +3,7 @@ import {
   ClaudeSettings,
   CodexSettings,
   CursorSettings,
+  EukheSettings,
   GrokSettings,
   OmpSettings,
   OpenCodeSettings,
@@ -23,7 +24,8 @@ export type ProviderDriverIconKey =
   | "opencode"
   | "antigravity"
   | "pi-agent"
-  | "omp";
+  | "omp"
+  | "eukhe";
 
 /**
  * Browser-safe provider definition. This is deliberately shaped like the
@@ -98,6 +100,13 @@ export const PROVIDER_DRIVER_METAS: readonly ProviderDriverMeta[] = [
     iconKey: "omp",
     badgeLabel: "Early Access",
     settingsSchema: OmpSettings,
+  },
+  {
+    value: ProviderDriverKind.make("eukhe"),
+    label: "Eukhe",
+    iconKey: "eukhe",
+    badgeLabel: "Early Access",
+    settingsSchema: EukheSettings,
   },
 ];
 

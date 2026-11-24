@@ -474,12 +474,16 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
           provider: PROVIDER,
           command: settings.binaryPath || flavor.binary,
           args: [
-            ...["--mode", "rpc", "--session-dir", sessionDir],
+            "--mode",
+            "rpc",
+            "--session-dir",
+            sessionDir,
             ...(resumeFile ? [flavor.resumeFlag, resumeFile] : []),
             ...flavor.sessionArgs,
           ],
           cwd,
           env: options.environment,
+          negotiates: flavor.negotiates,
           onFrame: (frame) => handleFrame(ctx, frame),
           onExit: (reason) => endSession(ctx, reason),
         }).pipe(Effect.mapError(processError(input.threadId, `Failed to start ${flavor.binary}.`)));
@@ -596,33 +600,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       return { threadId, turns };
     });
 
-  const rollbackThread: Shape["rollbackThread"] = (threadId, numTurns) =>
+  const forkToEntry = (ctx: PiSessionContext, rpc: PiRpc, threadId: ThreadId, entryId: string) =>
     Effect.gen(function* () {
       const fail = (detail: string) => requestError("thread/rollback", detail);
-      if (!Number.isInteger(numTurns) || numTurns < 1) {
-        return yield* validationError("rollbackThread", "numTurns must be an integer >= 1.");
-      }
-      const ctx = yield* requireSession(threadId);
-      const rpc = yield* rpcOf(ctx, "thread/rollback");
-      const state = asRecord((yield* rpc.request({ type: "get_state" })).data);
-      if (ctx.turnId || state.isStreaming === true || state.isCompacting === true) {
-        return yield* fail("Wait for the active turn to settle before rolling back.");
-      }
-      const history = asRecord((yield* rpc.request({ type: "get_entries" }, 60_000)).data);
-      if (!Array.isArray(history.entries)) return yield* fail("Session entries are unavailable.");
-      const entries = new Map(
-        history.entries.map((raw) => [asString(asRecord(raw).id), asRecord(raw)]),
-      );
-      const users: string[] = [];
-      const visited = new Set<string>();
-      for (let id = asString(history.leafId); id; id = asString(entries.get(id)?.parentId)) {
-        const entry = entries.get(id);
-        if (!entry || visited.has(id)) return yield* fail("Invalid session ancestry.");
-        visited.add(id);
-        if (entry.type === "message" && asRecord(entry.message).role === "user") users.push(id);
-      }
-      const entryId = users[Math.min(numTurns, users.length) - 1];
-      if (!entryId) return yield* readThread(threadId);
       const result = asRecord(
         (yield* rpc.request({ type: flavor.rollbackCommand, entryId }, 60_000)).data,
       );
@@ -643,6 +623,46 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       };
       yield* emit(ctx, { type: "session.started", payload: { resume: ctx.session.resumeCursor } });
       return yield* readThread(threadId);
+    });
+
+  const rollbackThread: Shape["rollbackThread"] = (threadId, numTurns) =>
+    Effect.gen(function* () {
+      const fail = (detail: string) => requestError("thread/rollback", detail);
+      if (!Number.isInteger(numTurns) || numTurns < 1) {
+        return yield* validationError("rollbackThread", "numTurns must be an integer >= 1.");
+      }
+      const ctx = yield* requireSession(threadId);
+      const rpc = yield* rpcOf(ctx, "thread/rollback");
+      const state = asRecord((yield* rpc.request({ type: "get_state" })).data);
+      if (ctx.turnId || state.isStreaming === true || state.isCompacting === true) {
+        return yield* fail("Wait for the active turn to settle before rolling back.");
+      }
+      const history = asRecord((yield* rpc.request({ type: flavor.entriesCommand }, 60_000)).data);
+      if (flavor.entriesCommand === "get_fork_messages") {
+        const messages = Array.isArray(history.messages) ? history.messages : [];
+        const forkable: string[] = messages.flatMap((raw) => {
+          const entryId = asString(asRecord(raw).entryId);
+          return entryId ? [entryId] : [];
+        });
+        const entryId = forkable.at(-numTurns);
+        if (!entryId) return yield* readThread(threadId);
+        return yield* forkToEntry(ctx, rpc, threadId, entryId);
+      }
+      if (!Array.isArray(history.entries)) return yield* fail("Session entries are unavailable.");
+      const entries = new Map(
+        history.entries.map((raw) => [asString(asRecord(raw).id), asRecord(raw)]),
+      );
+      const users: string[] = [];
+      const visited = new Set<string>();
+      for (let id = asString(history.leafId); id; id = asString(entries.get(id)?.parentId)) {
+        const entry = entries.get(id);
+        if (!entry || visited.has(id)) return yield* fail("Invalid session ancestry.");
+        visited.add(id);
+        if (entry.type === "message" && asRecord(entry.message).role === "user") users.push(id);
+      }
+      const entryId = users[Math.min(numTurns, users.length) - 1];
+      if (!entryId) return yield* readThread(threadId);
+      return yield* forkToEntry(ctx, rpc, threadId, entryId);
     });
 
   const stopAll = () =>

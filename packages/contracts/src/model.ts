@@ -177,6 +177,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Partial<Record<ProviderDriverKind, strin
   [ProviderDriverKind.make("antigravity")]: ANTIGRAVITY_DEFAULT_MODEL,
   [ProviderDriverKind.make("piAgent")]: PI_DEFAULT_MODEL,
   [ProviderDriverKind.make("omp")]: PI_DEFAULT_MODEL,
+  [ProviderDriverKind.make("eukhe")]: PI_DEFAULT_MODEL,
 };
 
 /** Per-provider text generation model defaults. */
@@ -227,4 +228,5 @@ export const PROVIDER_DISPLAY_NAMES: Partial<Record<ProviderDriverKind, string>>
   [OPENCODE_DRIVER_KIND]: "OpenCode",
   [ProviderDriverKind.make("piAgent")]: "Pi",
   [ProviderDriverKind.make("omp")]: "Oh My Pi",
+  [ProviderDriverKind.make("eukhe")]: "Eukhe",
 };

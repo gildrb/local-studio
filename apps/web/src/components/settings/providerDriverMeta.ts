@@ -3,6 +3,7 @@ import {
   AntigravityIcon,
   ClaudeAI,
   CursorIcon,
+  EukheIcon,
   GrokIcon,
   type Icon,
   OmpIcon,
@@ -29,6 +30,7 @@ export const PROVIDER_DRIVER_ICONS: Readonly<Record<ProviderDriverIconKey, Icon>
   antigravity: AntigravityIcon,
   "pi-agent": PiAgentIcon,
   omp: OmpIcon,
+  eukhe: EukheIcon,
 };
 
 const PROVIDER_CLIENT_DEFINITIONS: readonly ProviderClientDefinition[] = PROVIDER_DRIVER_METAS.map(

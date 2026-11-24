@@ -25,6 +25,7 @@ export const spawnPiRpc = Effect.fn("spawnPiRpc")(function* (input: {
   readonly args: ReadonlyArray<string>;
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
+  readonly negotiates: boolean;
   readonly onFrame: (frame: PiFrame) => Effect.Effect<void>;
   readonly onExit: (reason: string) => Effect.Effect<void>;
 }) {
@@ -128,6 +129,7 @@ export const spawnPiRpc = Effect.fn("spawnPiRpc")(function* (input: {
         Effect.ensuring(Effect.sync(() => pending.delete(id))),
       );
     });
-  yield* write({ type: "negotiate_protocol", protocolVersion: 2, id: "t3-negotiate" });
+  if (input.negotiates)
+    yield* write({ type: "negotiate_protocol", protocolVersion: 2, id: "t3-negotiate" });
   return { request, write };
 });

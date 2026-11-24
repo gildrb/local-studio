@@ -797,6 +797,13 @@ export const OmpIcon: Icon = (props) => {
   );
 };
 
+export const EukheIcon: Icon = (props) => (
+  <svg {...props} viewBox="0 0 64 64">
+    <rect width="64" height="64" rx="12" fill="#1c1917" />
+    <path fill="#fbbf24" d="M22 18h20v7H29v5h11v6H29v5h13v7H22z" />
+  </svg>
+);
+
 // Official two-color mark from https://forgejo.org/favicon.svg.
 export const ForgejoIcon: Icon = (props) => (
   <svg viewBox="0 0 212 212" aria-hidden="true" {...props}>
