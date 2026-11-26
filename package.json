@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/local-check.mjs",
+    "check:budget": "node scripts/check-budget.mjs",
     "prepare": "effect-tsgo patch && vp config --no-agent",
     "dev": "node scripts/dev-runner.ts dev",
     "dev:share": "node scripts/dev-runner.ts dev --share",
