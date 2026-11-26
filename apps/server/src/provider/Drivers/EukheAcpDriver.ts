@@ -14,7 +14,6 @@ import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
@@ -162,6 +161,24 @@ export const buildInitialEukheProviderSnapshot = (settings: EukheSettings) =>
     ),
   );
 
+const probeFailedDraft = (
+  settings: EukheSettings,
+  checkedAt: string,
+  version: string | null,
+): ServerProviderDraft =>
+  draft(
+    settings,
+    checkedAt,
+    {
+      installed: true,
+      version,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: "Eukhe is installed, but the model probe failed. Custom models still work.",
+    },
+    [],
+  );
+
 const isEukheAuthRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
 
 const probeEukheCatalog = (
@@ -268,19 +285,8 @@ export const checkEukheProviderStatus = Effect.fn("checkEukheProviderStatus")(fu
     });
   }
   const result = Result.isSuccess(probe) ? probe.success : undefined;
-  if (result === undefined) {
-    return draft(
-      settings,
-      checkedAt,
-      {
-        installed: true,
-        version,
-        status: "warning",
-        auth: { status: "unknown" },
-        message: "Eukhe is installed, but the model probe failed. Custom models still work.",
-      },
-      [],
-    );
+  if (result === undefined || result.failed) {
+    return probeFailedDraft(settings, checkedAt, version);
   }
   if (result.login) {
     return draft(
@@ -296,20 +302,11 @@ export const checkEukheProviderStatus = Effect.fn("checkEukheProviderStatus")(fu
       result.catalog.models,
     );
   }
-  if (result.failed) {
-    return draft(
-      settings,
-      checkedAt,
-      {
-        installed: true,
-        version,
-        status: "warning",
-        auth: { status: "unknown" },
-        message: "Eukhe is installed, but the model probe failed. Custom models still work.",
-      },
-      [],
-    );
-  }
+  const signedInAuth: ServerProviderAuth = {
+    status: "authenticated",
+    type: "cached_token",
+    label: "Eukhe",
+  };
   if (result.catalog.models.length === 0) {
     return draft(
       settings,
@@ -318,7 +315,7 @@ export const checkEukheProviderStatus = Effect.fn("checkEukheProviderStatus")(fu
         installed: true,
         version,
         status: "warning",
-        auth: { status: "authenticated", type: "cached_token", label: "Eukhe" },
+        auth: signedInAuth,
         message: "Eukhe is signed in but offered no models. Custom models still work.",
       },
       [],
@@ -331,7 +328,7 @@ export const checkEukheProviderStatus = Effect.fn("checkEukheProviderStatus")(fu
       installed: true,
       version,
       status: "ready",
-      auth: { status: "authenticated", type: "cached_token", label: "Eukhe" },
+      auth: signedInAuth,
     },
     result.catalog.models.map((model) => ({
       ...model,

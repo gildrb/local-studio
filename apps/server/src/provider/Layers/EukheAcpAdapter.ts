@@ -160,8 +160,29 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
     eventId: Effect.map(uuid, (id) => EventId.make(id)),
     createdAt: nowIso,
   });
+  const envelope = (threadId: ThreadId, turnId: TurnId | undefined) =>
+    Effect.map(makeStamp, (stamp) => ({
+      ...stamp,
+      provider: PROVIDER,
+      providerInstanceId: options.instanceId,
+      threadId,
+      ...(turnId ? { turnId } : {}),
+    }));
   const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
     PubSub.publish(events, event).pipe(Effect.asVoid);
+  const emitApprovalResolved = (
+    ctx: EukheSessionContext,
+    requestId: ApprovalRequestId,
+    decision: ProviderApprovalDecision,
+  ) =>
+    Effect.gen(function* () {
+      yield* offerRuntimeEvent({
+        ...(yield* envelope(ctx.threadId, ctx.activeTurnId)),
+        type: "request.resolved",
+        requestId: RuntimeRequestId.make(requestId),
+        payload: { requestType: "dynamic_tool_call", decision },
+      });
+    });
 
   const requestError = (method: string, detail: string, cause?: unknown) =>
     new ProviderAdapterRequestError({ provider: PROVIDER, method, detail, cause });
@@ -188,16 +209,7 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
           if (!pending) return;
           ctx.pendingApprovals.delete(requestId);
           yield* Deferred.succeed(pending, "cancel");
-          yield* offerRuntimeEvent({
-            type: "request.resolved",
-            ...(yield* makeStamp),
-            provider: PROVIDER,
-            providerInstanceId: options.instanceId,
-            threadId: ctx.threadId,
-            ...(ctx.activeTurnId ? { turnId: ctx.activeTurnId } : {}),
-            requestId: RuntimeRequestId.make(requestId),
-            payload: { requestType: "dynamic_tool_call", decision: "cancel" },
-          });
+          yield* emitApprovalResolved(ctx, requestId, "cancel");
         }),
       { discard: true },
     );
@@ -209,11 +221,8 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
       yield* settleApprovalsAsCancelled(ctx);
       sessions.delete(ctx.threadId);
       yield* offerRuntimeEvent({
+        ...(yield* envelope(ctx.threadId, undefined)),
         type: "session.exited",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: ctx.threadId,
         payload: ctx.terminated
           ? { exitKind: "error", recoverable: true }
           : { exitKind: "graceful" },
@@ -242,12 +251,8 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
         };
       }
       yield* offerRuntimeEvent({
+        ...(yield* envelope(ctx.threadId, turnId)),
         type: "turn.completed",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: ctx.threadId,
-        turnId,
         payload: {
           state: aborted ? "interrupted" : failure ? "failed" : "completed",
           ...(failure ? {} : { stopReason: stopReason ?? null }),
@@ -263,14 +268,20 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
       ctx.interrupted = false;
       ctx.session = { ...ready, status: "ready", updatedAt: yield* nowIso };
       yield* offerRuntimeEvent({
+        ...(yield* envelope(ctx.threadId, undefined)),
         type: "session.state.changed",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: ctx.threadId,
         payload: { state: "ready" },
       });
     });
+
+  const setEukheConfig = (ctx: EukheSessionContext, configId: string, value: string) =>
+    ctx.acp
+      .setConfigOption(configId, value)
+      .pipe(
+        Effect.mapError((cause) =>
+          mapAcpToAdapterError(PROVIDER, ctx.threadId, "session/set_config_option", cause),
+        ),
+      );
 
   const applySelection = (ctx: EukheSessionContext, selection: ModelSelection | undefined) =>
     Effect.gen(function* () {
@@ -284,13 +295,7 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
             `Eukhe does not offer model '${slug}'.`,
           );
         }
-        yield* ctx.acp
-          .setConfigOption(EUKHE_MODEL_CONFIG_ID, value)
-          .pipe(
-            Effect.mapError((cause) =>
-              mapAcpToAdapterError(PROVIDER, ctx.threadId, "session/set_config_option", cause),
-            ),
-          );
+        yield* setEukheConfig(ctx, EUKHE_MODEL_CONFIG_ID, value);
         ctx.model = slug;
         ctx.session = { ...ctx.session, model: slug };
       }
@@ -304,13 +309,7 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
             `Eukhe does not offer reasoning effort '${effort}' for '${ctx.model ?? PI_DEFAULT_MODEL}'.`,
           );
         }
-        yield* ctx.acp
-          .setConfigOption(EUKHE_THOUGHT_LEVEL_CONFIG_ID, effort)
-          .pipe(
-            Effect.mapError((cause) =>
-              mapAcpToAdapterError(PROVIDER, ctx.threadId, "session/set_config_option", cause),
-            ),
-          );
+        yield* setEukheConfig(ctx, EUKHE_THOUGHT_LEVEL_CONFIG_ID, effort);
         ctx.effort = effort;
       }
     });
@@ -538,11 +537,8 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
             if (!live) return;
             if (usage.value.cost) live.lastCostAmount = usage.value.cost.amount;
             yield* offerRuntimeEvent({
+              ...(yield* envelope(live.threadId, live.activeTurnId)),
               type: "thread.token-usage.updated",
-              ...(yield* makeStamp),
-              provider: PROVIDER,
-              providerInstanceId: options.instanceId,
-              threadId: live.threadId,
               payload: {
                 usage: {
                   usedTokens: Math.max(0, Math.floor(usage.value.used)),
@@ -559,11 +555,8 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
             const live = sessions.get(input.threadId);
             if (!live) return;
             yield* offerRuntimeEvent({
+              ...(yield* envelope(live.threadId, undefined)),
               type: "thread.metadata.updated",
-              ...(yield* makeStamp),
-              provider: PROVIDER,
-              providerInstanceId: options.instanceId,
-              threadId: live.threadId,
               payload: { name: titleName },
             });
           });
@@ -610,27 +603,18 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
       if (ctx.model) ctx.session = { ...session, model: ctx.model };
       yield* applySelection(ctx, input.modelSelection);
       yield* offerRuntimeEvent({
+        ...(yield* envelope(input.threadId, undefined)),
         type: "session.started",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: input.threadId,
         payload: { resume: session.resumeCursor },
       });
       yield* offerRuntimeEvent({
+        ...(yield* envelope(input.threadId, undefined)),
         type: "thread.started",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: input.threadId,
         payload: { providerThreadId: started.sessionId },
       });
       yield* offerRuntimeEvent({
+        ...(yield* envelope(input.threadId, undefined)),
         type: "session.state.changed",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: input.threadId,
         payload: { state: "ready" },
       });
       return ctx.session;
@@ -696,24 +680,16 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
         ...(ctx.model ? { model: ctx.model } : {}),
       };
       yield* offerRuntimeEvent({
+        ...(yield* envelope(input.threadId, turnId)),
         type: "turn.started",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: input.threadId,
-        turnId,
         payload: {
           ...(ctx.model ? { model: ctx.model } : {}),
           ...(ctx.effort ? { effort: ctx.effort } : {}),
         },
       });
       yield* offerRuntimeEvent({
+        ...(yield* envelope(input.threadId, turnId)),
         type: "session.state.changed",
-        ...(yield* makeStamp),
-        provider: PROVIDER,
-        providerInstanceId: options.instanceId,
-        threadId: input.threadId,
-        turnId,
         payload: { state: "running" },
       });
       if (ctx.interrupted) {
@@ -789,11 +765,8 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
       if (undone > 0) {
         ctx.turns.splice(Math.max(0, ctx.turns.length - undone), undone);
         yield* offerRuntimeEvent({
+          ...(yield* envelope(threadId, undefined)),
           type: "session.started",
-          ...(yield* makeStamp),
-          provider: PROVIDER,
-          providerInstanceId: options.instanceId,
-          threadId,
           payload: {
             resume: {
               schemaVersion: RESUME_SCHEMA_VERSION,
@@ -845,20 +818,7 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
         }
         ctx.pendingApprovals.delete(requestId);
         yield* Deferred.succeed(pending, decision);
-        yield* offerRuntimeEvent(
-          makeAcpRequestResolvedEvent({
-            stamp: yield* makeStamp,
-            provider: PROVIDER,
-            threadId: ctx.threadId,
-            turnId: ctx.activeTurnId,
-            requestId: RuntimeRequestId.make(requestId),
-            permissionRequest: {
-              kind: "unknown",
-              detail: "Eukhe irreversible effect",
-            },
-            decision,
-          }),
-        );
+        yield* emitApprovalResolved(ctx, requestId, decision);
       }),
     respondToUserInput: () =>
       Effect.fail(requestError("respondToUserInput", "Eukhe has no structured user-input gate.")),
