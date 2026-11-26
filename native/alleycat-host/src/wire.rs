@@ -64,36 +64,6 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn ok_with_agents(agents: Vec<AgentInfoWire>) -> Self {
-        Self {
-            v: PROTOCOL_VERSION,
-            ok: true,
-            agents,
-            session: None,
-            error: None,
-        }
-    }
-
-    pub fn ok_with_session(session: SessionInfoWire) -> Self {
-        Self {
-            v: PROTOCOL_VERSION,
-            ok: true,
-            agents: Vec::new(),
-            session: Some(session),
-            error: None,
-        }
-    }
-
-    pub fn ok_empty() -> Self {
-        Self {
-            v: PROTOCOL_VERSION,
-            ok: true,
-            agents: Vec::new(),
-            session: None,
-            error: None,
-        }
-    }
-
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             v: PROTOCOL_VERSION,
