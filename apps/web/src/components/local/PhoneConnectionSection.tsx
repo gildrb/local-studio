@@ -4,6 +4,7 @@ import { AsyncResult } from "effect/unstable/reactivity";
 import { CheckIcon, CopyIcon, RefreshCwIcon } from "lucide-react";
 
 import type { EnvironmentId, PhoneConnectionPairing } from "@t3tools/contracts";
+import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -67,9 +68,9 @@ export function PhoneConnectionSection() {
   }, [environmentId, enabled, pairing, runEnable]);
 
   const applyPairing = useCallback(
-    (next: PhoneConnectionPairing | null, busyKind: PhoneBusy) => {
+    (next: PhoneConnectionPairing | null) => {
       setPairing(next);
-      setBusy(busyKind);
+      setBusy(null);
       setError(null);
       status.refresh();
     },
@@ -87,63 +88,55 @@ export function PhoneConnectionSection() {
     });
   }, []);
 
-  const handleEnable = useCallback(() => {
-    if (environmentId === null) return;
-    setBusy("enable");
-    setError(null);
-    void runEnable({ environmentId, input: {} } satisfies PhoneCommandTarget).then((result) => {
+  const runPhone = useCallback(
+    async <A,>(
+      run: (target: PhoneCommandTarget) => Promise<AtomCommandResult<A, unknown>>,
+      busyKind: Exclude<PhoneBusy, null>,
+      successTitle: string,
+    ): Promise<A | null | undefined> => {
+      if (environmentId === null) return undefined;
+      setBusy(busyKind);
+      setError(null);
+      const result = await run({ environmentId, input: {} });
       if (result._tag === "Failure") {
         if (!isAtomCommandInterrupted(result)) fail(squashAtomCommandFailure(result));
         else setBusy(null);
-        return;
+        return undefined;
       }
       const next = Option.getOrNull(AsyncResult.value(result));
-      toastManager.add({ type: "success", title: "Phone connection enabled" });
-      applyPairing(next, null);
+      toastManager.add({ type: "success", title: successTitle });
+      return next;
+    },
+    [environmentId, fail],
+  );
+
+  const handleEnable = useCallback(() => {
+    void runPhone(runEnable, "enable", "Phone connection enabled").then((next) => {
+      if (next !== undefined) applyPairing(next);
     });
-  }, [applyPairing, environmentId, fail, runEnable]);
+  }, [applyPairing, runPhone]);
 
   const handleRotate = useCallback(async () => {
-    if (environmentId === null) return;
     const confirmed = await requestConfirmDialog(
       "Rotate the phone pairing token? Phones paired with the current code stop working until they scan the new one.",
       { variant: "destructive" },
     );
     if (!confirmed) return;
-    setBusy("rotate");
-    setError(null);
-    void runRotate({ environmentId, input: {} } satisfies PhoneCommandTarget).then((result) => {
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) fail(squashAtomCommandFailure(result));
-        else setBusy(null);
-        return;
-      }
-      const next = Option.getOrNull(AsyncResult.value(result));
-      toastManager.add({ type: "success", title: "Phone pairing token rotated" });
-      applyPairing(next, null);
-    });
-  }, [applyPairing, environmentId, fail, runRotate]);
+    const next = await runPhone(runRotate, "rotate", "Phone pairing token rotated");
+    if (next !== undefined) applyPairing(next);
+  }, [applyPairing, runPhone]);
 
   const handleDisable = useCallback(async () => {
-    if (environmentId === null) return;
     const confirmed = await requestConfirmDialog(
       "Disable the phone connection? Paired phones lose access and the pairing token is removed.",
       { variant: "destructive" },
     );
     if (!confirmed) return;
-    setBusy("disable");
-    setError(null);
-    void runDisable({ environmentId, input: {} } satisfies PhoneCommandTarget).then((result) => {
-      if (result._tag === "Failure") {
-        if (!isAtomCommandInterrupted(result)) fail(squashAtomCommandFailure(result));
-        else setBusy(null);
-        return;
-      }
-      pairingFetchAttempted.current = false;
-      toastManager.add({ type: "success", title: "Phone connection disabled" });
-      applyPairing(null, null);
-    });
-  }, [applyPairing, environmentId, fail, runDisable]);
+    const next = await runPhone(runDisable, "disable", "Phone connection disabled");
+    if (next === undefined) return;
+    pairingFetchAttempted.current = false;
+    applyPairing(null);
+  }, [applyPairing, runPhone]);
 
   const handleCopy = useCallback(() => {
     if (pairing === null) return;
