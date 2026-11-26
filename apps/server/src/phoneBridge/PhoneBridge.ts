@@ -1035,11 +1035,9 @@ const make = Effect.gen(function* () {
   };
 });
 
-export const layer = Layer.effect(PhoneBridge, make);
-
 let sharedPhoneBridge: PhoneBridgeShape | undefined;
 
-export const getSharedPhoneBridge: Effect.Effect<PhoneBridgeShape> = Effect.gen(function* () {
+export const getSharedPhoneBridge = Effect.gen(function* () {
   if (sharedPhoneBridge === undefined) {
     sharedPhoneBridge = yield* make;
   }
