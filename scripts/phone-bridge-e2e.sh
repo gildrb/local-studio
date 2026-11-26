@@ -37,7 +37,7 @@ node "$CHECKOUT/apps/server/src/bin.ts" serve --base-dir "$T3_HOME" --port 18990
   > "$TEST_ROOT/server.log" 2>&1 &
 SERVER_PID=$!
 
-for i in $(seq 1 120); do
+for _ in $(seq 1 120); do
   if grep -q "nodeId" "$TEST_ROOT/server.log" 2>/dev/null; then break; fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     echo "server died early:"; tail -40 "$TEST_ROOT/server.log"; exit 1
@@ -58,6 +58,10 @@ echo "== list_agents"
 echo "== connect + initialize + thread/start + turn/start"
 "$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" \
   run-turn --agent eukhe --text "Reply with exactly: BRIDGE_OK" --expect-fragment "BRIDGE_OK"
+
+echo "== interrupt a turn in flight"
+"$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" \
+  run-turn --agent eukhe --text "Write a very long essay about rivers." --interrupt
 
 echo "== resume with cursor"
 "$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" \
