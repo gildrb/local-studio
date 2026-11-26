@@ -30,6 +30,7 @@ import { SettingsPageContainer, SettingsRow, SettingsSection } from "../settings
 import { Metric } from "../usage/UsagePage";
 import { UsageProviderChart } from "../usage/UsageProviderChart";
 import { RegistrySection, SharePanel } from "./RegistrySection";
+import { PhoneConnectionSection } from "./PhoneConnectionSection";
 import {
   LOCAL_USAGE_CHART_STYLE,
   buildLocalMachineModel,
@@ -450,6 +451,8 @@ export function LocalSettingsPanel() {
           </p>
         )}
       </SettingsSection>
+
+      <PhoneConnectionSection />
 
       <RegistrySection devices={model.registryDevices} call={request} />
 
