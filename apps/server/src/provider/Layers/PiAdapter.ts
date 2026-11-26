@@ -638,16 +638,6 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         return yield* fail("Wait for the active turn to settle before rolling back.");
       }
       const history = asRecord((yield* rpc.request({ type: flavor.entriesCommand }, 60_000)).data);
-      if (flavor.entriesCommand === "get_fork_messages") {
-        const messages = Array.isArray(history.messages) ? history.messages : [];
-        const forkable: string[] = messages.flatMap((raw) => {
-          const entryId = asString(asRecord(raw).entryId);
-          return entryId ? [entryId] : [];
-        });
-        const entryId = forkable.at(-numTurns);
-        if (!entryId) return yield* readThread(threadId);
-        return yield* forkToEntry(ctx, rpc, threadId, entryId);
-      }
       if (!Array.isArray(history.entries)) return yield* fail("Session entries are unavailable.");
       const entries = new Map(
         history.entries.map((raw) => [asString(asRecord(raw).id), asRecord(raw)]),

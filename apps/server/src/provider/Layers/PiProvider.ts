@@ -34,7 +34,7 @@ export interface PiFlavor {
   readonly headlessArgs: ReadonlyArray<string>;
   readonly textGenerationArgs: ReadonlyArray<string>;
   readonly negotiates: boolean;
-  readonly entriesCommand: "get_entries" | "get_fork_messages";
+  readonly entriesCommand: "get_entries";
   readonly ladderFromMap: boolean;
 }
 
@@ -68,22 +68,6 @@ export const OMP_FLAVOR: PiFlavor = {
   negotiates: true,
   entriesCommand: "get_entries",
   ladderFromMap: false,
-};
-
-export const EUKHE_FLAVOR: PiFlavor = {
-  kind: ProviderDriverKind.make("eukhe"),
-  displayName: "Eukhe",
-  binary: "eukhe",
-  npmPackage: null,
-  resumeFlag: "--resume",
-  settleEvent: "agent_end",
-  rollbackCommand: "fork",
-  sessionArgs: [],
-  headlessArgs: ["--no-session", "--offline"],
-  textGenerationArgs: ["--no-session", "--offline"],
-  negotiates: false,
-  entriesCommand: "get_fork_messages",
-  ladderFromMap: true,
 };
 
 export const REASONING_OPTION_ID = "reasoningEffort";
