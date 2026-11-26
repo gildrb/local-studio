@@ -404,7 +404,15 @@ const make = Effect.gen(function* () {
     const command = payload["command"];
     const cwd = payload["cwd"];
     const permissions = payload["permissions"];
-    const questions = payload["questions"];
+    const questions = Array.isArray(payload["questions"]) ? payload["questions"] : [];
+    if (method === "item/tool/requestUserInput" && questions.length === 0) {
+      yield* providerService.respondToUserInput({
+        threadId: event.threadId,
+        requestId,
+        answers: {},
+      });
+      return;
+    }
     const params =
       method === "item/commandExecution/requestApproval"
         ? {
@@ -433,7 +441,7 @@ const make = Effect.gen(function* () {
             ? {
                 ...base,
                 isBlocking: true,
-                questions: Array.isArray(questions) ? questions : [],
+                questions,
               }
             : { ...base, ...optionalReason };
     const reply = yield* sendPhoneRequest(handle, method, params);
@@ -475,6 +483,14 @@ const make = Effect.gen(function* () {
     const requestId = decodeApprovalRequestId(rawRequestId);
     const payload = asParams(event.payload);
     const questions = Array.isArray(payload["questions"]) ? payload["questions"] : [];
+    if (questions.length === 0) {
+      yield* providerService.respondToUserInput({
+        threadId: event.threadId,
+        requestId,
+        answers: {},
+      });
+      return;
+    }
     const params = {
       threadId: event.threadId,
       turnId: event.turnId ?? handle.session.currentTurns.get(event.threadId) ?? "",
@@ -1020,3 +1036,12 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(PhoneBridge, make);
+
+let sharedPhoneBridge: PhoneBridgeShape | undefined;
+
+export const getSharedPhoneBridge: Effect.Effect<PhoneBridgeShape> = Effect.gen(function* () {
+  if (sharedPhoneBridge === undefined) {
+    sharedPhoneBridge = yield* make;
+  }
+  return sharedPhoneBridge;
+});

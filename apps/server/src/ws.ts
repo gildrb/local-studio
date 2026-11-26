@@ -84,7 +84,7 @@ import {
   type WorktreeSetupSnapshot,
   PhoneBridgeOperationError,
 } from "@t3tools/contracts";
-import { PhoneBridge, type PhoneBridgeShape } from "./phoneBridge/PhoneBridge.ts";
+import { getSharedPhoneBridge, type PhoneBridgeShape } from "./phoneBridge/PhoneBridge.ts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -4140,7 +4140,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
     const sql = yield* SqlClient.SqlClient;
-    const phoneBridge = yield* PhoneBridge.PhoneBridge;
+    const phoneBridge = yield* getSharedPhoneBridge;
     return HttpRouter.add(
       "GET",
       "/ws",
