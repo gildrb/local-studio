@@ -277,7 +277,6 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
       const slug = selection?.model;
       if (slug && slug !== PI_DEFAULT_MODEL) {
         const configOptions = yield* ctx.acp.getConfigOptions;
-        console.log("DBG configOptions:", JSON.stringify(configOptions));
         const value = eukheModelValueForSlug(configOptions, slug);
         if (!value) {
           return yield* validationError(
@@ -717,6 +716,14 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
         turnId,
         payload: { state: "running" },
       });
+      if (ctx.interrupted) {
+        yield* settleTurn(ctx, turnId, "cancelled");
+        return {
+          threadId: input.threadId,
+          turnId,
+          resumeCursor: ctx.session.resumeCursor,
+        };
+      }
       const outcome = yield* ctx.acp
         .prompt({
           prompt: [...(text ? [{ type: "text" as const, text }] : []), ...imageParts],
