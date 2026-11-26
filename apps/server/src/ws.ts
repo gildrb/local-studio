@@ -82,7 +82,9 @@ import {
   WORKTREE_SETUP_ACTIVITY_KIND,
   worktreeSetupActivityId,
   type WorktreeSetupSnapshot,
+  PhoneBridgeOperationError,
 } from "@t3tools/contracts";
+import { PhoneBridge, type PhoneBridgeShape } from "./phoneBridge/PhoneBridge.ts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
@@ -504,12 +506,22 @@ const makeWsRpcLayer = (
   clientOrigin: OrchestrationClientOrigin,
   clientAnalyticsProps: Readonly<Record<string, unknown>>,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  phoneBridge: PhoneBridgeShape,
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
       const currentSessionId = currentSession.sessionId;
       const crypto = yield* Crypto.Crypto;
       const sql = yield* SqlClient.SqlClient;
+      const resolvePhoneBridgeFailure = (cause: unknown): PhoneBridgeOperationError => {
+        const reason =
+          typeof cause === "object" && cause !== null && "reason" in cause
+            ? cause.reason
+            : undefined;
+        return new PhoneBridgeOperationError({
+          message: reason === undefined ? String(cause) : String(reason),
+        });
+      };
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
       /** A reference's host-level link key; the project's own host where the ref names none. */
       const resolvePullRequestSyncKey = (reference: PullRequestRef) =>
@@ -2950,6 +2962,25 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverGetPhoneConnection]: () =>
+          phoneBridge.status.pipe(
+            Effect.catch((cause) => Effect.fail(resolvePhoneBridgeFailure(cause))),
+          ),
+        [WS_METHODS.serverEnablePhoneConnection]: () =>
+          phoneBridge.enable.pipe(
+            Effect.map((info) => ({ connectionJson: info.json, nodeId: info.payload.node_id })),
+            Effect.catch((cause) => Effect.fail(resolvePhoneBridgeFailure(cause))),
+          ),
+        [WS_METHODS.serverRotatePhoneConnection]: () =>
+          phoneBridge.rotate.pipe(
+            Effect.map((info) => ({ connectionJson: info.json, nodeId: info.payload.node_id })),
+            Effect.catch((cause) => Effect.fail(resolvePhoneBridgeFailure(cause))),
+          ),
+        [WS_METHODS.serverDisablePhoneConnection]: () =>
+          phoneBridge.disable.pipe(
+            Effect.as({}),
+            Effect.catch((cause) => Effect.fail(resolvePhoneBridgeFailure(cause))),
+          ),
         [WS_METHODS.serverRefreshUsageRates]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRefreshUsageRates, usage.refreshRates, {
             "rpc.aggregate": "server",
@@ -4109,6 +4140,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     });
     const pullRequests = yield* PullRequestService.PullRequestService;
     const sql = yield* SqlClient.SqlClient;
+    const phoneBridge = yield* PhoneBridge.PhoneBridge;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -4147,6 +4179,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               clientOrigin,
               clientAnalyticsProps,
               previewAutomationBroker,
+              phoneBridge,
             ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),

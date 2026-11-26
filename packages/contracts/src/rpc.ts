@@ -265,6 +265,11 @@ import {
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import {
+  PhoneConnectionPairing,
+  PhoneConnectionStatus,
+  PhoneBridgeOperationError,
+} from "./phoneConnection.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
   ProjectCloneActionInput,
@@ -403,6 +408,10 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
+  serverGetPhoneConnection: "server.getPhoneConnection",
+  serverEnablePhoneConnection: "server.enablePhoneConnection",
+  serverRotatePhoneConnection: "server.rotatePhoneConnection",
+  serverDisablePhoneConnection: "server.disablePhoneConnection",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -687,6 +696,30 @@ const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSummary, {
   payload: UsageSummaryInput,
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
+});
+
+const WsServerGetPhoneConnectionRpc = Rpc.make(WS_METHODS.serverGetPhoneConnection, {
+  payload: Schema.Struct({}),
+  success: PhoneConnectionStatus,
+  error: Schema.Union([EnvironmentAuthorizationError, PhoneBridgeOperationError]),
+});
+
+const WsServerEnablePhoneConnectionRpc = Rpc.make(WS_METHODS.serverEnablePhoneConnection, {
+  payload: Schema.Struct({}),
+  success: PhoneConnectionPairing,
+  error: Schema.Union([EnvironmentAuthorizationError, PhoneBridgeOperationError]),
+});
+
+const WsServerRotatePhoneConnectionRpc = Rpc.make(WS_METHODS.serverRotatePhoneConnection, {
+  payload: Schema.Struct({}),
+  success: PhoneConnectionPairing,
+  error: Schema.Union([EnvironmentAuthorizationError, PhoneBridgeOperationError]),
+});
+
+const WsServerDisablePhoneConnectionRpc = Rpc.make(WS_METHODS.serverDisablePhoneConnection, {
+  payload: Schema.Struct({}),
+  success: Schema.Struct({}),
+  error: Schema.Union([EnvironmentAuthorizationError, PhoneBridgeOperationError]),
 });
 
 /**
@@ -1485,6 +1518,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
+  WsServerGetPhoneConnectionRpc,
+  WsServerEnablePhoneConnectionRpc,
+  WsServerRotatePhoneConnectionRpc,
+  WsServerDisablePhoneConnectionRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
