@@ -1,10 +1,6 @@
-use crate::wire::{
-    AgentCapabilitiesWire, AgentInfoWire, AgentPresentationWire, AttachKindWire, Response,
-    SessionInfoWire, WireKind,
-};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -44,14 +40,12 @@ pub enum ControlMessage {
 #[derive(Debug, Clone)]
 pub enum Bridge {
     Pipe(PipeBridge),
-    Mock(MockBridge),
 }
 
 impl Bridge {
     pub async fn op_request(&self, payload: Value) -> Result<Value, String> {
         match self {
             Self::Pipe(bridge) => bridge.op_request(payload).await,
-            Self::Mock(bridge) => Ok(mock_op_response(&payload, bridge.next_id())),
         }
     }
 
@@ -63,18 +57,12 @@ impl Bridge {
     ) -> Result<(u64, Value), String> {
         match self {
             Self::Pipe(bridge) => bridge.stream_attach(agent, token, resume_last_seq).await,
-            Self::Mock(bridge) => Ok((
-                bridge.next_id(),
-                serde_json::to_value(mock_attach_response(resume_last_seq))
-                    .expect("attach response serializes"),
-            )),
         }
     }
 
     pub async fn open_stream(&self, id: u64) -> Result<StreamPipe, String> {
         match self {
             Self::Pipe(bridge) => bridge.open_stream(id).await,
-            Self::Mock(_) => Ok(StreamPipe::mock()),
         }
     }
 }
@@ -267,77 +255,8 @@ fn route_control_message(text: &str, pending: &mut HashMap<u64, oneshot::Sender<
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct MockBridge {
-    next_id: Arc<AtomicU64>,
-}
-
-impl MockBridge {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    fn next_id(&self) -> u64 {
-        self.next_id.fetch_add(1, Ordering::Relaxed)
-    }
-}
-
-pub fn mock_agent() -> AgentInfoWire {
-    AgentInfoWire {
-        name: "main".into(),
-        display_name: "Main".into(),
-        wire: WireKind::Jsonl,
-        available: true,
-        presentation: Some(AgentPresentationWire {
-            title: Some("Main Agent".into()),
-            is_beta: false,
-            sort_order: 0,
-            description: Some("Mock fork agent".into()),
-            aliases: vec!["primary".into()],
-        }),
-        capabilities: Some(AgentCapabilitiesWire {
-            locks_reasoning_effort_after_activity: false,
-            visible_modes: Some(vec!["chat".into(), "agent".into()]),
-            supports_ssh_bridge: true,
-            uses_direct_codex_port: false,
-            supports_thread_permission_overrides: Some(true),
-            reports_effective_thread_permissions: Some(false),
-        }),
-    }
-}
-
-pub fn mock_attach_response(resume_last_seq: Option<u64>) -> Response {
-    Response::ok_with_session(SessionInfoWire {
-        attached: if resume_last_seq.is_some() {
-            AttachKindWire::Resumed
-        } else {
-            AttachKindWire::Fresh
-        },
-        current_seq: 42,
-        floor_seq: 7,
-    })
-}
-
-pub fn mock_op_response(payload: &Value, mock_id: u64) -> Value {
-    let _ = mock_id;
-    let op = payload.get("op").and_then(Value::as_str);
-    let response = match op {
-        Some("list_agents") => Response::ok_with_agents(vec![mock_agent()]),
-        Some("restart_agent") => Response::ok_empty(),
-        Some("connect") => mock_attach_response(
-            payload
-                .get("resume")
-                .and_then(|resume| resume.get("last_seq"))
-                .and_then(Value::as_u64),
-        ),
-        _ => Response::error("unsupported op"),
-    };
-    serde_json::to_value(response).expect("mock response serializes")
-}
-
 pub enum StreamPipe {
     Ws(WsPipe),
-    Mock(MockPipe),
 }
 
 impl StreamPipe {
@@ -345,14 +264,9 @@ impl StreamPipe {
         Self::Ws(WsPipe::new(ws))
     }
 
-    fn mock() -> Self {
-        Self::Mock(MockPipe::new())
-    }
-
     pub fn split(self) -> (PipeWriter, PipeReader) {
         match self {
             Self::Ws(pipe) => pipe.split(),
-            Self::Mock(pipe) => pipe.split(),
         }
     }
 }
@@ -376,109 +290,10 @@ impl WsPipe {
     }
 }
 
-pub struct MockPipe {
-    outgoing: Option<mpsc::UnboundedSender<String>>,
-    incoming: mpsc::UnboundedReceiver<String>,
-}
-
-impl MockPipe {
-    fn new() -> Self {
-        let (outgoing, out_rx) = mpsc::unbounded_channel();
-        let (in_tx, incoming) = mpsc::unbounded_channel();
-        tokio::spawn(mock_turn_responder(out_rx, in_tx));
-        Self {
-            outgoing: Some(outgoing),
-            incoming,
-        }
-    }
-
-    fn split(self) -> (PipeWriter, PipeReader) {
-        (
-            PipeWriter(PipeWriterKind::Mock(self.outgoing)),
-            PipeReader(PipeReaderKind::Mock(self.incoming)),
-        )
-    }
-}
-
-async fn mock_turn_responder(
-    mut outgoing: mpsc::UnboundedReceiver<String>,
-    incoming: mpsc::UnboundedSender<String>,
-) {
-    while let Some(line) = outgoing.recv().await {
-        for response in mock_turn_responses(&line) {
-            if incoming.send(response).is_err() {
-                return;
-            }
-        }
-    }
-}
-
-fn mock_turn_responses(line: &str) -> Vec<String> {
-    let Ok(frame) = serde_json::from_str::<Value>(line) else {
-        return vec![line.to_string()];
-    };
-    let Some(method) = frame.get("method").and_then(Value::as_str) else {
-        return vec![line.to_string()];
-    };
-    let id = frame.get("id").cloned();
-    let reply = |result: Value| -> String {
-        serde_json::to_string(&match &id {
-            Some(id) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-            None => json!({"jsonrpc": "2.0", "result": result}),
-        })
-        .expect("mock reply serializes")
-    };
-    match method {
-        "initialize" => vec![reply(
-            json!({"userAgent": "alleycat-host-mock", "codexHome": "/tmp", "platformFamily": "mock", "platformOs": "mock"}),
-        )],
-        "thread/start" => vec![reply(json!({"thread": {"id": "mock-thread"}}))],
-        "turn/interrupt" => vec![reply(json!({}))],
-        "turn/start" => {
-            let thread_id =
-                frame.pointer("/params/threadId").and_then(Value::as_str).unwrap_or("mock-thread");
-            let turn_id = "mock-turn";
-            let delta = |text: &str| -> String {
-                serde_json::to_string(&json!({
-                    "jsonrpc": "2.0",
-                    "method": "item/agentMessage/delta",
-                    "params": {"threadId": thread_id, "turnId": turn_id, "itemId": "mock-item", "delta": text},
-                }))
-                .expect("mock delta serializes")
-            };
-            let item_completed = serde_json::to_string(&json!({
-                "jsonrpc": "2.0",
-                "method": "item/completed",
-                "params": {
-                    "threadId": thread_id,
-                    "turnId": turn_id,
-                    "item": {"type": "agentMessage", "id": "mock-item", "text": "Mock agent says hi from alleycat-host mock bridge"},
-                },
-            }))
-            .expect("mock item serializes");
-            let completed = serde_json::to_string(&json!({
-                "jsonrpc": "2.0",
-                "method": "turn/completed",
-                "params": {"threadId": thread_id, "turn": {"id": turn_id, "status": "completed"}},
-            }))
-            .expect("mock completion serializes");
-            vec![
-                reply(json!({"turn": {"id": turn_id}})),
-                delta("Mock agent says hi from "),
-                delta("alleycat-host mock bridge"),
-                item_completed,
-                completed,
-            ]
-        }
-        _ => vec![line.to_string()],
-    }
-}
-
 pub struct PipeWriter(PipeWriterKind);
 
 enum PipeWriterKind {
     Ws(futures_util::stream::SplitSink<WsStream, Message>),
-    Mock(Option<mpsc::UnboundedSender<String>>),
 }
 
 impl PipeWriter {
@@ -490,11 +305,6 @@ impl PipeWriter {
                     .await
                     .map_err(|error| error.to_string())
             }
-            PipeWriterKind::Mock(echo) => {
-                let echo = echo.as_ref().ok_or("bridge closed")?;
-                echo.send(String::from_utf8_lossy(line).into_owned())
-                    .map_err(|error| error.to_string())
-            }
         }
     }
 
@@ -502,9 +312,6 @@ impl PipeWriter {
         match &mut self.0 {
             PipeWriterKind::Ws(sink) => {
                 let _ = sink.send(Message::Close(None)).await;
-            }
-            PipeWriterKind::Mock(echo) => {
-                echo.take();
             }
         }
     }
@@ -514,7 +321,6 @@ pub struct PipeReader(PipeReaderKind);
 
 enum PipeReaderKind {
     Ws(futures_util::stream::SplitStream<WsStream>),
-    Mock(mpsc::UnboundedReceiver<String>),
 }
 
 impl PipeReader {
@@ -527,7 +333,6 @@ impl PipeReader {
                     _ => return None,
                 }
             },
-            PipeReaderKind::Mock(incoming) => incoming.recv().await,
         }
     }
 }

@@ -2,7 +2,6 @@ mod bridge;
 mod client;
 mod host;
 mod keys;
-mod selftest;
 mod wire;
 
 use bridge::Bridge;
@@ -15,8 +14,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  alleycat-host serve [--pipe-url <url>] [--pipe-token <token>] [--key-file <path>] [--relay <url>] [--mock-bridge]
-  alleycat-host self-test
+  alleycat-host serve [--pipe-url <url>] [--pipe-token <token>] [--key-file <path>] [--relay <url>]
   alleycat-host client --node-id <hex> [--relay <url>] [--token <token>] <list-agents | restart-agent --agent <name> | connect --agent <name> [--resume-seq <seq>] | run-turn --text <text> [--agent <name>] [--resume] [--expect-fragment <s>] [--interrupt]>";
 
 struct ServeOptions {
@@ -24,7 +22,6 @@ struct ServeOptions {
     pipe_token: Option<String>,
     key_file: Option<PathBuf>,
     relay: Option<String>,
-    mock_bridge: bool,
 }
 
 impl Default for ServeOptions {
@@ -34,14 +31,12 @@ impl Default for ServeOptions {
             pipe_token: None,
             key_file: None,
             relay: None,
-            mock_bridge: false,
         }
     }
 }
 
 enum Command {
     Serve(ServeOptions),
-    SelfTest,
     Client {
         options: ClientOptions,
         action: ClientAction,
@@ -64,7 +59,6 @@ async fn main() -> ExitCode {
             println!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        Command::SelfTest => selftest::run_self_test().await,
         Command::Serve(options) => run_serve(options).await,
         Command::Client { options, action } => client::run(options, action).await,
     };
@@ -79,7 +73,6 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
     let Some(first) = args.first() else { return Err("missing subcommand".into()) };
     match first.as_str() {
         "serve" => parse_serve(&args[1..]),
-        "self-test" => Ok(Command::SelfTest),
         "client" => parse_client(&args[1..]),
         "--help" | "-h" | "help" => Ok(Command::Help),
         other => Err(format!("unknown subcommand {other:?}")),
@@ -101,7 +94,6 @@ fn parse_serve(args: &[String]) -> Result<Command, String> {
             "--pipe-token" => options.pipe_token = Some(take_value(args, &mut index, flag)?.into()),
             "--key-file" => options.key_file = Some(take_value(args, &mut index, flag)?.into()),
             "--relay" => options.relay = Some(take_value(args, &mut index, flag)?.into()),
-            "--mock-bridge" => options.mock_bridge = true,
             other => return Err(format!("unknown serve flag {other:?}")),
         }
         index += 1;
@@ -186,22 +178,11 @@ async fn run_serve(options: ServeOptions) -> Result<(), String> {
     let pipe_url = options.pipe_url.or_else(|| std::env::var("PIPE_URL").ok());
     let pipe_token = options.pipe_token.or_else(|| std::env::var("PIPE_TOKEN").ok());
     let relay = options.relay.or_else(|| std::env::var("RELAY").ok());
-    if !options.mock_bridge && (pipe_url.is_none() || pipe_token.is_none()) {
-        return Err(
-            "serve requires --pipe-url/PIPE_URL and --pipe-token/PIPE_TOKEN, or --mock-bridge"
-                .into(),
-        );
-    }
+    let pipe_url = pipe_url.ok_or("serve requires --pipe-url or PIPE_URL")?;
+    let pipe_token = pipe_token.ok_or("serve requires --pipe-token or PIPE_TOKEN")?;
     let key = keys::load_or_create(&key_file)
         .map_err(|error| format!("key file {key_file:?}: {error}"))?;
-    let bridge = if options.mock_bridge {
-        Bridge::Mock(bridge::MockBridge::new())
-    } else {
-        Bridge::Pipe(bridge::PipeBridge::spawn(
-            pipe_url.expect("checked above"),
-            pipe_token.expect("checked above"),
-        ))
-    };
+    let bridge = Bridge::Pipe(bridge::PipeBridge::spawn(pipe_url, pipe_token));
     let endpoint = Endpoint::builder(presets::N0)
         .secret_key(key)
         .bind()
