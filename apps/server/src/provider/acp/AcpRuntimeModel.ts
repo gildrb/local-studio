@@ -120,6 +120,12 @@ export type AcpParsedSessionEvent =
       readonly rawPayload: unknown;
     }
   | {
+      readonly _tag: "ImageDelta";
+      readonly data: string;
+      readonly mimeType: string;
+      readonly rawPayload: unknown;
+    }
+  | {
       readonly _tag: "ThoughtDelta";
       readonly text: string;
       readonly rawPayload: unknown;
@@ -864,6 +870,14 @@ export function parseSessionUpdateEvent(params: EffectAcpSchema.SessionNotificat
         events.push({
           _tag: "ContentDelta",
           text: upd.content.text,
+          rawPayload: params,
+        });
+      }
+      if (upd.content.type === "image") {
+        events.push({
+          _tag: "ImageDelta",
+          data: upd.content.data,
+          mimeType: upd.content.mimeType,
           rawPayload: params,
         });
       }

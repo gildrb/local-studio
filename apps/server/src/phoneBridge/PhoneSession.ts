@@ -12,6 +12,16 @@ export interface PhoneSessionEventLogEntry {
   readonly line: string;
 }
 
+export interface PhoneTurnRecord {
+  readonly id: string;
+  readonly threadId: ThreadId;
+  readonly startedAtMs: number;
+  status: "inProgress" | "completed" | "interrupted" | "failed";
+  completedAtMs: number | undefined;
+  errorMessage: string | undefined;
+  readonly items: Array<Record<string, unknown>>;
+}
+
 export interface PhoneSession {
   readonly id: number;
   readonly agentName: string;
@@ -25,6 +35,8 @@ export interface PhoneSession {
   readonly currentTurns: Map<ThreadId, string>;
   readonly reasoningIds: Map<ThreadId, string>;
   readonly streamedText: Map<string, string>;
+  readonly turns: Map<string, PhoneTurnRecord>;
+  readonly pendingInputs: Map<ThreadId, ReadonlyArray<Record<string, unknown>>>;
 }
 
 export const createPhoneSession = (input: {
@@ -44,6 +56,8 @@ export const createPhoneSession = (input: {
   currentTurns: new Map(),
   reasoningIds: new Map(),
   streamedText: new Map(),
+  turns: new Map(),
+  pendingInputs: new Map(),
 });
 
 export const recordFrame = (session: PhoneSession, line: string): number => {
@@ -240,12 +254,29 @@ const mapItem = (
     case "review_entered":
     case "review_exited":
     case "collab_agent_tool_call":
-    case "image_view":
       if (!detail && !title) return undefined;
       return {
         codexType: "assistant_message",
         item: { type: "agentMessage", id: nextItemId("agentMessage"), text: detail ?? title ?? "" },
       };
+    case "image_view": {
+      const imagePath = typeof dataRecord.path === "string" ? dataRecord.path : "";
+      if (imagePath.length === 0) {
+        if (!detail && !title) return undefined;
+        return {
+          codexType: "assistant_message",
+          item: {
+            type: "agentMessage",
+            id: nextItemId("agentMessage"),
+            text: detail ?? title ?? "",
+          },
+        };
+      }
+      return {
+        codexType: "image_view",
+        item: { type: "imageView", id: nextItemId("imageView"), path: imagePath },
+      };
+    }
     default:
       return undefined;
   }
@@ -271,6 +302,65 @@ const turnNotification = (
     turn: { id: turnId, items: [], status, ...extra },
   });
 
+const openJournalTurn = (
+  session: PhoneSession,
+  threadId: ThreadId,
+  turnId: string,
+  startedAtMs: number,
+): void => {
+  if (session.turns.has(turnId)) return;
+  const pending = session.pendingInputs.get(threadId);
+  session.pendingInputs.delete(threadId);
+  session.turns.set(turnId, {
+    id: turnId,
+    threadId,
+    startedAtMs,
+    status: "inProgress",
+    completedAtMs: undefined,
+    errorMessage: undefined,
+    items: pending === undefined ? [] : [...pending],
+  });
+};
+
+const journalItem = (
+  session: PhoneSession,
+  threadId: ThreadId,
+  turnId: string,
+  item: Record<string, unknown>,
+): void => {
+  const record = session.turns.get(turnId);
+  if (record === undefined || record.threadId !== threadId) return;
+  const existingIndex = record.items.findIndex((entry) => entry["id"] === item["id"]);
+  if (existingIndex >= 0) {
+    record.items[existingIndex] = item;
+    return;
+  }
+  record.items.push(item);
+};
+
+const settleJournalTurn = (
+  session: PhoneSession,
+  threadId: ThreadId,
+  turnId: string,
+  status: PhoneTurnRecord["status"],
+  completedAtMs: number,
+  errorMessage: string | undefined,
+): void => {
+  const record = session.turns.get(turnId);
+  if (record === undefined || record.threadId !== threadId) return;
+  record.status = status;
+  record.completedAtMs = completedAtMs;
+  record.errorMessage = errorMessage;
+};
+
+export const journalTurnInput = (
+  session: PhoneSession,
+  threadId: ThreadId,
+  items: ReadonlyArray<Record<string, unknown>>,
+): void => {
+  session.pendingInputs.set(threadId, items);
+};
+
 export const mapEventToLines = (
   session: PhoneSession,
   event: ProviderRuntimeEvent,
@@ -284,7 +374,10 @@ export const mapEventToLines = (
       return [encodeRpcNotification("thread/started", { threadId })];
     case "turn.started": {
       const turnId = event.turnId ?? "";
-      if (turnId) session.currentTurns.set(threadId, turnId);
+      if (turnId) {
+        session.currentTurns.set(threadId, turnId);
+        openJournalTurn(session, threadId, turnId, createdAt);
+      }
       session.reasoningIds.delete(threadId);
       return [
         encodeRpcNotification("turn/started", {
@@ -342,6 +435,7 @@ export const mapEventToLines = (
       if (!mapped || !itemId) return [];
       session.openItems.set(itemId, mapped.codexType);
       const item = { ...mapped.item, id: itemId };
+      journalItem(session, threadId, turnId, item);
       if (event.type === "item.updated" && payload["status"] !== "inProgress") {
         return [
           encodeRpcNotification("item/completed", {
@@ -380,11 +474,13 @@ export const mapEventToLines = (
           mapped.item.text = streamed;
         }
       }
+      const item = { ...mapped.item, id: itemId };
+      journalItem(session, threadId, turnId, item);
       return [
         encodeRpcNotification("item/completed", {
           threadId,
           turnId,
-          item: { ...mapped.item, id: itemId },
+          item,
           completedAtMs: createdAt,
         }),
       ];
@@ -394,6 +490,14 @@ export const mapEventToLines = (
       session.reasoningIds.delete(threadId);
       const state = stringOr(payload["state"], "completed");
       const errorMessage = stringOr(payload["errorMessage"], undefined);
+      settleJournalTurn(
+        session,
+        threadId,
+        turnId,
+        state === "completed" ? "completed" : state === "failed" ? "failed" : "interrupted",
+        createdAt,
+        errorMessage,
+      );
       return [
         turnNotification(
           threadId,
@@ -406,10 +510,11 @@ export const mapEventToLines = (
         ),
       ];
     }
-    case "turn.aborted":
-      return [
-        turnNotification(threadId, turnIdFor(session, threadId, event.turnId), "interrupted", {}),
-      ];
+    case "turn.aborted": {
+      const turnId = turnIdFor(session, threadId, event.turnId);
+      settleJournalTurn(session, threadId, turnId, "interrupted", createdAt, undefined);
+      return [turnNotification(threadId, turnId, "interrupted", {})];
+    }
     case "thread.token-usage.updated":
       return [
         encodeRpcNotification("thread/tokenUsage/updated", {

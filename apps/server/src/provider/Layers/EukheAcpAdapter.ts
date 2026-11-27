@@ -7,6 +7,7 @@ import {
   type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  RuntimeItemId,
   RuntimeRequestId,
   type ThreadId,
   TurnId,
@@ -30,8 +31,9 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
-import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { resolveAttachmentPath, toSafeThreadAttachmentSegment } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
+import { inferImageExtension } from "../../imageMime.ts";
 import { mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
 import {
   makeAcpAssistantItemEvent,
@@ -170,6 +172,46 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
     }));
   const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
     PubSub.publish(events, event).pipe(Effect.asVoid);
+
+  const persistImageDelta = (
+    ctx: EukheSessionContext,
+    turnId: TurnId,
+    image: { readonly data: string; readonly mimeType: string },
+  ) =>
+    Effect.gen(function* () {
+      const stamp = yield* makeStamp;
+      const bytes = Buffer.from(image.data, "base64");
+      if (bytes.length === 0) return;
+      const segment = toSafeThreadAttachmentSegment(ctx.threadId) ?? "session";
+      const extension = inferImageExtension({ mimeType: image.mimeType });
+      const fileName = `eukhe-image-${segment}-${stamp.eventId}${extension}`;
+      const imagePath = path.join(serverConfig.attachmentsDir, fileName);
+      yield* fileSystem
+        .makeDirectory(serverConfig.attachmentsDir, { recursive: true })
+        .pipe(Effect.ignore);
+      const written = yield* fileSystem.writeFile(imagePath, bytes).pipe(Effect.result);
+      if (Result.isFailure(written)) {
+        yield* Effect.logWarning("Failed to persist a Eukhe image output item.", {
+          cause: written.failure,
+          threadId: ctx.threadId,
+        });
+        return;
+      }
+      yield* offerRuntimeEvent({
+        type: "item.completed",
+        eventId: stamp.eventId,
+        createdAt: stamp.createdAt,
+        provider: PROVIDER,
+        threadId: ctx.threadId,
+        turnId,
+        itemId: RuntimeItemId.make(stamp.eventId),
+        payload: {
+          itemType: "image_view",
+          status: "completed",
+          data: { path: imagePath },
+        },
+      });
+    });
   const emitApprovalResolved = (
     ctx: EukheSessionContext,
     requestId: ApprovalRequestId,
@@ -393,6 +435,9 @@ export const makeEukheAcpAdapter = Effect.fn("makeEukheAcpAdapter")(function* (
                   rawPayload: event.rawPayload,
                 }),
               );
+              return;
+            case "ImageDelta":
+              yield* persistImageDelta(ctx, turnId, event);
               return;
             case "ToolCallUpdated":
               yield* offerRuntimeEvent(
