@@ -23,6 +23,8 @@ export interface PhoneSession {
   readonly threads: Set<ThreadId>;
   readonly openItems: Map<string, string>;
   readonly currentTurns: Map<ThreadId, string>;
+  readonly reasoningIds: Map<ThreadId, string>;
+  readonly streamedText: Map<string, string>;
 }
 
 export const createPhoneSession = (input: {
@@ -40,6 +42,8 @@ export const createPhoneSession = (input: {
   threads: new Set(),
   openItems: new Map(),
   currentTurns: new Map(),
+  reasoningIds: new Map(),
+  streamedText: new Map(),
 });
 
 export const recordFrame = (session: PhoneSession, line: string): number => {
@@ -86,6 +90,41 @@ const asRecord = (data: unknown): Record<string, unknown> =>
     : {};
 
 const payloadOf = (event: ProviderRuntimeEvent): Record<string, unknown> => asRecord(event.payload);
+
+const numberOr = (value: unknown, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
+
+const tokenBreakdown = (
+  usage: Record<string, unknown>,
+  last: boolean,
+): Record<string, unknown> => ({
+  totalTokens: numberOr(usage[last ? "lastUsedTokens" : "usedTokens"], 0),
+  inputTokens: numberOr(usage[last ? "lastInputTokens" : "inputTokens"], 0),
+  cachedInputTokens: numberOr(usage[last ? "lastCachedInputTokens" : "cachedInputTokens"], 0),
+  cacheWriteInputTokens: 0,
+  outputTokens: numberOr(usage[last ? "lastOutputTokens" : "outputTokens"], 0),
+  reasoningOutputTokens: numberOr(
+    usage[last ? "lastReasoningOutputTokens" : "reasoningOutputTokens"],
+    0,
+  ),
+});
+
+const tokenUsageFrame = (usage: unknown): Record<string, unknown> => {
+  const record = asRecord(usage);
+  return {
+    total: tokenBreakdown(record, false),
+    last: tokenBreakdown(record, true),
+    modelContextWindow: numberOr(record["maxTokens"], 0),
+  };
+};
+
+const ensureReasoningItemId = (session: PhoneSession, threadId: ThreadId): string => {
+  const existing = session.reasoningIds.get(threadId);
+  if (existing !== undefined) return existing;
+  const id = `item-reasoning-${session.id}-${session.seq + 1}`;
+  session.reasoningIds.set(threadId, id);
+  return id;
+};
 
 interface MappedItem {
   readonly codexType: string;
@@ -243,6 +282,7 @@ export const mapEventToLines = (
     case "turn.started": {
       const turnId = event.turnId ?? "";
       if (turnId) session.currentTurns.set(threadId, turnId);
+      session.reasoningIds.delete(threadId);
       return [
         encodeRpcNotification("turn/started", {
           threadId,
@@ -260,9 +300,20 @@ export const mapEventToLines = (
       const streamKind =
         typeof payload["streamKind"] === "string" ? payload["streamKind"] : "assistant_text";
       const delta = typeof payload["delta"] === "string" ? payload["delta"] : "";
+      const reportedItemId = event.itemId ?? "";
       const method =
         DELTA_METHODS.find(([kind]) => kind === streamKind)?.[1] ?? "item/agentMessage/delta";
-      const itemId = event.itemId ?? "";
+      let itemId = reportedItemId;
+      if (itemId === "") {
+        if (streamKind === "reasoning_text" || streamKind === "reasoning_summary_text") {
+          itemId = ensureReasoningItemId(session, threadId);
+        } else {
+          itemId = `item-${streamKind}-${threadId}-${session.seq + 1}`;
+        }
+      }
+      if (streamKind === "assistant_text" && itemId !== "") {
+        session.streamedText.set(itemId, (session.streamedText.get(itemId) ?? "") + delta);
+      }
       const turnPayload: Record<string, unknown> = { threadId, turnId, itemId, delta };
       if (method === "item/reasoning/summaryTextDelta") {
         turnPayload.summaryIndex =
@@ -319,6 +370,13 @@ export const mapEventToLines = (
       );
       if (!mapped || !itemId) return [];
       session.openItems.delete(itemId);
+      const streamed = session.streamedText.get(itemId);
+      if (streamed !== undefined) {
+        session.streamedText.delete(itemId);
+        if (mapped.codexType === "assistant_message") {
+          mapped.item.text = streamed;
+        }
+      }
       return [
         encodeRpcNotification("item/completed", {
           threadId,
@@ -330,6 +388,7 @@ export const mapEventToLines = (
     }
     case "turn.completed": {
       const turnId = turnIdFor(session, threadId, event.turnId);
+      session.reasoningIds.delete(threadId);
       const state = stringOr(payload["state"], "completed");
       const errorMessage = stringOr(payload["errorMessage"], undefined);
       return [
@@ -353,7 +412,7 @@ export const mapEventToLines = (
         encodeRpcNotification("thread/tokenUsage/updated", {
           threadId,
           turnId: turnIdFor(session, threadId, event.turnId),
-          tokenUsage: payload["usage"],
+          tokenUsage: tokenUsageFrame(payload["usage"]),
         }),
       ];
     case "thread.metadata.updated":
