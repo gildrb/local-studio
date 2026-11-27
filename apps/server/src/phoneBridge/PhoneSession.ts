@@ -311,6 +311,10 @@ const openJournalTurn = (
   if (session.turns.has(turnId)) return;
   const pending = session.pendingInputs.get(threadId);
   session.pendingInputs.delete(threadId);
+  const inputItems =
+    pending === undefined
+      ? []
+      : [{ type: "userMessage", id: nextItemId("userMessage"), content: [...pending] }];
   session.turns.set(turnId, {
     id: turnId,
     threadId,
@@ -318,7 +322,7 @@ const openJournalTurn = (
     status: "inProgress",
     completedAtMs: undefined,
     errorMessage: undefined,
-    items: pending === undefined ? [] : [...pending],
+    items: inputItems,
   });
 };
 
