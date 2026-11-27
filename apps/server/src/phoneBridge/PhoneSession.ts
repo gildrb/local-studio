@@ -111,9 +111,12 @@ const tokenBreakdown = (
 
 const tokenUsageFrame = (usage: unknown): Record<string, unknown> => {
   const record = asRecord(usage);
+  const total = tokenBreakdown(record, false);
+  const last = tokenBreakdown(record, true);
+  const lastHasCounts = Object.values(last).some((count) => count !== 0);
   return {
-    total: tokenBreakdown(record, false),
-    last: tokenBreakdown(record, true),
+    total,
+    last: lastHasCounts ? last : total,
     modelContextWindow: numberOr(record["maxTokens"], 0),
   };
 };
