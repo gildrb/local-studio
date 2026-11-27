@@ -25,6 +25,15 @@ pub enum ClientAction {
         resume: bool,
         expect_fragment: Option<String>,
         interrupt: bool,
+        image_data_url: Option<String>,
+        verify_image_input: bool,
+    },
+    ThreadPages { limit: u32 },
+    SearchExec {
+        query: String,
+        expect_hit: String,
+        exec_shell: String,
+        exec_stdout_fragment: String,
     },
 }
 
@@ -42,7 +51,28 @@ pub async fn run(options: ClientOptions, action: ClientAction) -> Result<(), Str
             resume,
             expect_fragment,
             interrupt,
-        } => run_turn(options, agent, text, resume, expect_fragment, interrupt).await,
+            image_data_url,
+            verify_image_input,
+        } => {
+            run_turn(
+                options,
+                agent,
+                text,
+                resume,
+                expect_fragment,
+                interrupt,
+                image_data_url,
+                verify_image_input,
+            )
+            .await
+        }
+        ClientAction::ThreadPages { limit } => run_threads(options, limit).await,
+        ClientAction::SearchExec {
+            query,
+            expect_hit,
+            exec_shell,
+            exec_stdout_fragment,
+        } => run_search_exec(options, query, expect_hit, exec_shell, exec_stdout_fragment).await,
         action => run_simple(options, action).await,
     }
 }
@@ -137,7 +167,9 @@ async fn run_simple(options: ClientOptions, action: ClientAction) -> Result<(), 
                 Err(format!("request failed: {text}"))
             }
         }
-        ClientAction::RunTurn { .. } => unreachable!("handled by run_turn"),
+        ClientAction::RunTurn { .. }
+        | ClientAction::ThreadPages { .. }
+        | ClientAction::SearchExec { .. } => unreachable!("handled above"),
     }
 }
 
@@ -149,6 +181,8 @@ async fn run_turn(
     resume: bool,
     expect_fragment: Option<String>,
     interrupt: bool,
+    image_data_url: Option<String>,
+    verify_image_input: bool,
 ) -> Result<(), String> {
     let token = options.token.clone().unwrap_or_else(|| DEFAULT_CLIENT_TOKEN.into());
     if resume {
@@ -196,11 +230,15 @@ async fn run_turn(
         .ok_or_else(|| format!("thread/start missing result.thread.id: {thread_response}"))?
         .to_string();
     next_id += 1;
+    let mut input = vec![json!({"type": "text", "text": text})];
+    if let Some(image_url) = &image_data_url {
+        input.push(json!({"type": "image", "url": image_url}));
+    }
     let turn_start = json!({
         "jsonrpc": "2.0",
         "id": next_id,
         "method": "turn/start",
-        "params": {"threadId": thread_id, "input": [{"type": "text", "text": text}]},
+        "params": {"threadId": thread_id, "input": input},
     });
     let (turn_response, mut collected) =
         exchange(&mut send, &mut recv, &mut reader, &turn_start).await?;
@@ -250,6 +288,20 @@ async fn run_turn(
             return Err(format!("app-server error frame: {error}"));
         }
     }
+    if verify_image_input {
+        next_id += 1;
+        let turns_request = json!({
+            "jsonrpc": "2.0",
+            "id": next_id,
+            "method": "thread/turns/list",
+            "params": {"threadId": thread_id, "limit": 10},
+        });
+        let (turns_response, _) = exchange(&mut send, &mut recv, &mut reader, &turns_request).await?;
+        if !hydrates_image_input(&turns_response) {
+            return Err("thread/turns/list hydration carries no image input item".into());
+        }
+        println!("== image input frame verified in thread/turns/list");
+    }
     let _ = send.finish();
     if let Some(fragment) = &expect_fragment {
         if !collected.contains(fragment.as_str()) {
@@ -258,6 +310,250 @@ async fn run_turn(
             ));
         }
     }
+    Ok(())
+}
+
+fn hydrates_image_input(response: &Value) -> bool {
+    response
+        .pointer("/result/data")
+        .and_then(Value::as_array)
+        .map(|turns| {
+            turns.iter().any(|turn| {
+                turn.get("items")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items.iter().any(|item| {
+                            item.get("type").and_then(Value::as_str) == Some("userMessage")
+                                && item
+                                    .get("content")
+                                    .and_then(Value::as_array)
+                                    .map(|content| {
+                                        content
+                                            .iter()
+                                            .any(|part| {
+                                                part.get("type").and_then(Value::as_str)
+                                                    == Some("image")
+                                            })
+                                    })
+                                    .unwrap_or(false)
+                        })
+                    })
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+async fn boot_session(
+    send: &mut iroh::endpoint::SendStream,
+    recv: &mut iroh::endpoint::RecvStream,
+    reader: &mut LineReader,
+) -> Result<(), String> {
+    let initialize = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "clientInfo": {
+                "name": "alleycat-host-client",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+        },
+    });
+    let (response, _) = exchange(send, recv, reader, &initialize).await?;
+    if response.get("method").and_then(Value::as_str) == Some("turn/completed") {
+        return Err("unexpected turn/completed before initialize".into());
+    }
+    let reply = json!({"jsonrpc": "2.0", "method": "initialized"});
+    write_jsonl(send, &reply).await
+}
+
+async fn run_threads(options: ClientOptions, limit: u32) -> Result<(), String> {
+    let token = options.token.clone().unwrap_or_else(|| DEFAULT_CLIENT_TOKEN.into());
+    let (_endpoint, connection) = dial(&options).await?;
+    let (mut send, mut recv) = connect_frame(&connection, &token, "eukhe", None).await?;
+    let mut reader = LineReader::new();
+    boot_session(&mut send, &mut recv, &mut reader).await?;
+    let mut next_id = 2u64;
+    let list_request = json!({
+        "jsonrpc": "2.0",
+        "id": next_id,
+        "method": "thread/list",
+        "params": {"limit": limit},
+    });
+    let (list_response, _) = exchange(&mut send, &mut recv, &mut reader, &list_request).await?;
+    let page = list_response
+        .pointer("/result/data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("thread/list returned no data array: {list_response}"))?;
+    if page.is_empty() {
+        return Err("thread/list page is empty; run a turn first".into());
+    }
+    println!(
+        "== thread/list page 1: {} thread(s), nextCursor: {}",
+        page.len(),
+        list_response
+            .pointer("/result/nextCursor")
+            .map(|cursor| cursor.to_string())
+            .unwrap_or_else(|| "null".into())
+    );
+    let thread_id = page[0]
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("thread/list entry missing id: {:#}", page[0]))?
+        .to_string();
+    if let Some(cursor) = list_response.pointer("/result/nextCursor").and_then(Value::as_str) {
+        next_id += 1;
+        let more_request = json!({
+            "jsonrpc": "2.0",
+            "id": next_id,
+            "method": "thread/list",
+            "params": {"limit": limit, "cursor": cursor},
+        });
+        let (more_response, _) = exchange(&mut send, &mut recv, &mut reader, &more_request).await?;
+        let more = more_response
+            .pointer("/result/data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("thread/list cursor page returned no data: {more_response}"))?;
+        if more.is_empty() {
+            return Err("thread/list cursor page is empty".into());
+        }
+        println!("== thread/list cursor page: {} thread(s)", more.len());
+    }
+    next_id += 1;
+    let read_request = json!({
+        "jsonrpc": "2.0",
+        "id": next_id,
+        "method": "thread/read",
+        "params": {"threadId": thread_id},
+    });
+    let (read_response, _) = exchange(&mut send, &mut recv, &mut reader, &read_request).await?;
+    let read_id = read_response
+        .pointer("/result/thread/id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("thread/read returned no thread id: {read_response}"))?;
+    if read_id != thread_id {
+        return Err(format!("thread/read returned {read_id}, expected {thread_id}"));
+    }
+    println!("== thread/read ok for {thread_id}");
+    next_id += 1;
+    let turns_probe_request = json!({
+        "jsonrpc": "2.0",
+        "id": next_id,
+        "method": "thread/turns/list",
+        "params": {"threadId": thread_id, "limit": 5, "itemsView": "notLoaded"},
+    });
+    let (turns_probe, _) =
+        exchange(&mut send, &mut recv, &mut reader, &turns_probe_request).await?;
+    let probe_turns = turns_probe
+        .pointer("/result/data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("thread/turns/list returned no data: {turns_probe}"))?;
+    if probe_turns.is_empty() {
+        return Err("thread/turns/list notLoaded probe returned no turns".into());
+    }
+    for turn in probe_turns {
+        if turn.get("itemsView").and_then(Value::as_str) != Some("notLoaded") {
+            return Err(format!("notLoaded probe returned itemsView: {turn}"));
+        }
+        if turn.get("items").and_then(Value::as_array).map(Vec::is_empty) != Some(true) {
+            return Err(format!("notLoaded probe returned non-empty items: {turn}"));
+        }
+    }
+    println!("== thread/turns/list notLoaded probe ok ({} turn(s))", probe_turns.len());
+    next_id += 1;
+    let turns_request = json!({
+        "jsonrpc": "2.0",
+        "id": next_id,
+        "method": "thread/turns/list",
+        "params": {"threadId": thread_id, "limit": 5},
+    });
+    let (turns_response, _) = exchange(&mut send, &mut recv, &mut reader, &turns_request).await?;
+    let turns = turns_response
+        .pointer("/result/data")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("thread/turns/list returned no data: {turns_response}"))?;
+    if turns.is_empty() {
+        return Err("thread/turns/list returned no turns for a thread with history".into());
+    }
+    println!("== thread/turns/list ok ({} turn(s))", turns.len());
+    let _ = send.finish();
+    Ok(())
+}
+
+async fn run_search_exec(
+    options: ClientOptions,
+    query: String,
+    expect_hit: String,
+    exec_shell: String,
+    exec_stdout_fragment: String,
+) -> Result<(), String> {
+    let token = options.token.clone().unwrap_or_else(|| DEFAULT_CLIENT_TOKEN.into());
+    let cwd = std::env::current_dir()
+        .map_err(|error| format!("cwd: {error}"))?
+        .to_string_lossy()
+        .into_owned();
+    let (_endpoint, connection) = dial(&options).await?;
+    let (mut send, mut recv) = connect_frame(&connection, &token, "eukhe", None).await?;
+    let mut reader = LineReader::new();
+    boot_session(&mut send, &mut recv, &mut reader).await?;
+    let mut next_id = 2u64;
+    let search_request = json!({
+        "jsonrpc": "2.0",
+        "id": next_id,
+        "method": "fuzzyFileSearch",
+        "params": {"query": query, "roots": [cwd]},
+    });
+    let (search_response, _) =
+        exchange(&mut send, &mut recv, &mut reader, &search_request).await?;
+    let files = search_response
+        .pointer("/result/files")
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("fuzzyFileSearch returned no files: {search_response}"))?;
+    let hit = files.iter().any(|file| {
+        file.get("file_name")
+            .and_then(Value::as_str)
+            .map(|name| name.contains(&expect_hit))
+            .unwrap_or(false)
+    });
+    if !hit {
+        return Err(format!(
+            "fuzzyFileSearch found no file_name containing {expect_hit:?} in {} result(s)",
+            files.len()
+        ));
+    }
+    println!("== fuzzyFileSearch hit for {query:?}");
+    next_id += 1;
+    let exec_request = json!({
+        "jsonrpc": "2.0",
+        "id": next_id,
+        "method": "command/exec",
+        "params": {
+            "command": ["/bin/sh", "-c", exec_shell],
+            "cwd": cwd,
+            "timeoutMs": 15_000,
+            "outputBytesCap": 65_536,
+        },
+    });
+    let (exec_response, _) = exchange(&mut send, &mut recv, &mut reader, &exec_request).await?;
+    let exit_code = exec_response
+        .pointer("/result/exitCode")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("command/exec returned no exitCode: {exec_response}"))?;
+    if exit_code != 0 {
+        return Err(format!("command/exec exited {exit_code}: {exec_response}"));
+    }
+    let stdout = exec_response
+        .pointer("/result/stdout")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !stdout.contains(&exec_stdout_fragment) {
+        return Err(format!(
+            "command/exec stdout missing {exec_stdout_fragment:?}: {stdout:?}"
+        ));
+    }
+    println!("== command/exec ok: {stdout:?}");
+    let _ = send.finish();
     Ok(())
 }
 

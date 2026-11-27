@@ -67,4 +67,22 @@ echo "== resume with cursor"
 "$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" \
   run-turn --agent eukhe --text "Reply with exactly: BRIDGE_OK2" --resume --expect-fragment "BRIDGE_OK2"
 
+echo "== thread pages with cursor"
+"$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" threads --limit 2
+
+echo "== fuzzy file search + one-off exec"
+mkdir -p "$TEST_ROOT/search-root/docs"
+echo "bridge sentinel" > "$TEST_ROOT/search-root/docs/bridge-sentinel.txt"
+(
+  cd "$TEST_ROOT/search-root" && "$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" \
+    search-exec --query sentinel --expect-hit bridge-sentinel \
+    --exec-shell 'printf BRIDGE_EXEC_OK' --exec-stdout BRIDGE_EXEC_OK
+)
+
+echo "== image input frame over turns hydration"
+PNG_DATA_URL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+"$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" \
+  run-turn --agent eukhe --text "Reply with exactly: BRIDGE_IMG" \
+  --image-data-url "$PNG_DATA_URL" --verify-image-input --expect-fragment "BRIDGE_IMG"
+
 echo "== e2e passed"

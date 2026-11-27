@@ -15,7 +15,7 @@ use std::process::ExitCode;
 
 const USAGE: &str = "usage:
   alleycat-host serve [--pipe-url <url>] [--pipe-token <token>] [--key-file <path>] [--relay <url>]
-  alleycat-host client --node-id <hex> [--relay <url>] [--token <token>] <list-agents | restart-agent --agent <name> | connect --agent <name> [--resume-seq <seq>] | run-turn --text <text> [--agent <name>] [--resume] [--expect-fragment <s>] [--interrupt]>";
+  alleycat-host client --node-id <hex> [--relay <url>] [--token <token>] <list-agents | restart-agent --agent <name> | connect --agent <name> [--resume-seq <seq>] | run-turn --text <text> [--agent <name>] [--resume] [--expect-fragment <s>] [--interrupt] [--image-data-url <url>] [--verify-image-input] | threads [--limit <n>] | search-exec --query <q> --expect-hit <name> --exec-shell <sh> --exec-stdout <s>>";
 
 struct ServeOptions {
     pipe_url: Option<String>,
@@ -126,6 +126,13 @@ fn parse_client(args: &[String]) -> Result<Command, String> {
     let mut run_turn_resume = false;
     let mut run_turn_fragment = None;
     let mut run_turn_interrupt = false;
+    let mut run_turn_image = None;
+    let mut run_turn_verify_image = false;
+    let mut threads_limit: u32 = 2;
+    let mut search_query = None;
+    let mut search_expect_hit = None;
+    let mut exec_shell = None;
+    let mut exec_stdout = None;
     while index < args.len() {
         let flag = args[index].as_str();
         match flag {
@@ -141,6 +148,16 @@ fn parse_client(args: &[String]) -> Result<Command, String> {
                 run_turn_fragment = Some(take_value(args, &mut index, flag)?.into())
             }
             "--interrupt" => run_turn_interrupt = true,
+            "--image-data-url" => run_turn_image = Some(take_value(args, &mut index, flag)?.into()),
+            "--verify-image-input" => run_turn_verify_image = true,
+            "--limit" => {
+                let value = take_value(args, &mut index, flag)?;
+                threads_limit = value.parse::<u32>().map_err(|error| format!("--limit: {error}"))?;
+            }
+            "--query" => search_query = Some(take_value(args, &mut index, flag)?.into()),
+            "--expect-hit" => search_expect_hit = Some(take_value(args, &mut index, flag)?.into()),
+            "--exec-shell" => exec_shell = Some(take_value(args, &mut index, flag)?.into()),
+            "--exec-stdout" => exec_stdout = Some(take_value(args, &mut index, flag)?.into()),
             other => return Err(format!("unknown client flag {other:?}")),
         }
         index += 1;
@@ -163,8 +180,18 @@ fn parse_client(args: &[String]) -> Result<Command, String> {
                 resume: run_turn_resume,
                 expect_fragment: run_turn_fragment,
                 interrupt: run_turn_interrupt,
+                image_data_url: run_turn_image,
+                verify_image_input: run_turn_verify_image,
             }
         }
+        "threads" => ClientAction::ThreadPages { limit: threads_limit },
+        "search-exec" => ClientAction::SearchExec {
+            query: search_query.ok_or("search-exec requires --query <q>")?,
+            expect_hit: search_expect_hit.ok_or("search-exec requires --expect-hit <name>")?,
+            exec_shell: exec_shell.ok_or("search-exec requires --exec-shell <sh>")?,
+            exec_stdout_fragment: exec_stdout
+                .ok_or("search-exec requires --exec-stdout <s>")?,
+        },
         other => return Err(format!("unknown client action {other:?}")),
     };
     Ok(Command::Client { options: client_options, action })
