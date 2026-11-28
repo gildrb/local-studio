@@ -1368,6 +1368,13 @@ const make = Effect.gen(function* () {
         Stream.splitLines,
         Stream.runForEach((line) =>
           Effect.sync(() => {
+            const relay = /home_relay (\S+)/.exec(line);
+            if (relay !== null) {
+              void Effect.runPromise(
+                Effect.logInfo("phone bridge relay ready", { relay: relay[1]! }),
+              ).catch(() => {});
+              return;
+            }
             const match = /node_id ([0-9a-f]+)/.exec(line);
             if (match === null || runtime.nodeId !== "") return;
             runtime.nodeId = match[1]!;

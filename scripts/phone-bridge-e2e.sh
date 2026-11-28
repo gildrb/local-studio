@@ -51,6 +51,22 @@ if [ -z "$NODE_ID" ]; then
 fi
 echo "== sidecar node id: $NODE_ID"
 
+echo "== waiting for the sidecar's home relay (off-LAN path)"
+RELAY_READY=""
+for _ in $(seq 1 60); do
+  RELAY_READY="$(grep -o "relay: '[^']*'" "$TEST_ROOT/server.log" 2>/dev/null | head -1 | cut -d"'" -f2 || true)"
+  if [ -n "$RELAY_READY" ]; then break; fi
+  if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+    echo "server died before the sidecar reported a relay:"; tail -40 "$TEST_ROOT/server.log"; exit 1
+  fi
+  sleep 1
+done
+if [ -z "$RELAY_READY" ]; then
+  echo "sidecar never reported a home relay; off-LAN dialing would not exist:"
+  tail -40 "$TEST_ROOT/server.log"; exit 1
+fi
+echo "== sidecar home relay: $RELAY_READY"
+
 CLIENT="$CHECKOUT/native/alleycat-host/target/release/alleycat-host"
 echo "== list_agents"
 "$CLIENT" client --node-id "$NODE_ID" --token "$TOKEN" list-agents

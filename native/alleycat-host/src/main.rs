@@ -8,30 +8,25 @@ use bridge::Bridge;
 use client::{ClientAction, ClientOptions};
 use host::AlleycatHandler;
 use iroh::Endpoint;
+use iroh::Watcher as _;
 use iroh::endpoint::presets;
 use iroh::protocol::Router;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 const USAGE: &str = "usage:
-  alleycat-host serve [--pipe-url <url>] [--pipe-token <token>] [--key-file <path>] [--relay <url>]
+  alleycat-host serve [--pipe-url <url>] [--pipe-token <token>] [--key-file <path>]
   alleycat-host client --node-id <hex> [--relay <url>] [--token <token>] <list-agents | restart-agent --agent <name> | connect --agent <name> [--resume-seq <seq>] | run-turn --text <text> [--agent <name>] [--resume] [--expect-fragment <s>] [--interrupt] [--image-data-url <url>] [--verify-image-input] | threads [--limit <n>] | search-exec --query <q> --expect-hit <name> --exec-shell <sh> --exec-stdout <s>>";
 
 struct ServeOptions {
     pipe_url: Option<String>,
     pipe_token: Option<String>,
     key_file: Option<PathBuf>,
-    relay: Option<String>,
 }
 
 impl Default for ServeOptions {
     fn default() -> Self {
-        Self {
-            pipe_url: None,
-            pipe_token: None,
-            key_file: None,
-            relay: None,
-        }
+        Self { pipe_url: None, pipe_token: None, key_file: None }
     }
 }
 
@@ -93,7 +88,6 @@ fn parse_serve(args: &[String]) -> Result<Command, String> {
             "--pipe-url" => options.pipe_url = Some(take_value(args, &mut index, flag)?.into()),
             "--pipe-token" => options.pipe_token = Some(take_value(args, &mut index, flag)?.into()),
             "--key-file" => options.key_file = Some(take_value(args, &mut index, flag)?.into()),
-            "--relay" => options.relay = Some(take_value(args, &mut index, flag)?.into()),
             other => return Err(format!("unknown serve flag {other:?}")),
         }
         index += 1;
@@ -204,7 +198,6 @@ async fn run_serve(options: ServeOptions) -> Result<(), String> {
         .ok_or("serve requires --key-file or KEY_FILE")?;
     let pipe_url = options.pipe_url.or_else(|| std::env::var("PIPE_URL").ok());
     let pipe_token = options.pipe_token.or_else(|| std::env::var("PIPE_TOKEN").ok());
-    let relay = options.relay.or_else(|| std::env::var("RELAY").ok());
     let pipe_url = pipe_url.ok_or("serve requires --pipe-url or PIPE_URL")?;
     let pipe_token = pipe_token.ok_or("serve requires --pipe-token or PIPE_TOKEN")?;
     let key = keys::load_or_create(&key_file)
@@ -216,9 +209,20 @@ async fn run_serve(options: ServeOptions) -> Result<(), String> {
         .await
         .map_err(|error| format!("endpoint bind: {error}"))?;
     println!("alleycat-host node_id {}", wire::hex_encode(endpoint.id().as_bytes()));
-    if let Some(relay) = relay {
-        eprintln!("relay stored for later (unused in v1): {relay}");
-    }
+    let reporter = endpoint.clone();
+    tokio::spawn(async move {
+        let mut watcher = reporter.home_relay_status();
+        loop {
+            let statuses = watcher.get();
+            if let Some(status) = statuses.iter().find(|status| status.is_connected()) {
+                println!("alleycat-host home_relay {}", status.url());
+                return;
+            }
+            if watcher.updated().await.is_err() {
+                return;
+            }
+        }
+    });
     let router = Router::builder(endpoint.clone())
         .accept(wire::ALPN, AlleycatHandler::new(bridge))
         .spawn();
